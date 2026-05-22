@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PolicyPool</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Uniswap v4 Hook on X Layer</p>
+        <h1>Two pools. Same swap. One says yes, one says no.</h1>
+        <p class="lede">
+          PolicyPool lets each v4 pool enforce its own max-swap and daily-volume policy before swap execution.
+        </p>
+      </section>
+
+      <section class="grid">
+        <article class="pool pool-loose">
+          <p class="label">Loose pool</p>
+          <h2>Accepts 5,000 mUSDC</h2>
+          <dl>
+            <div><dt>max swap</dt><dd>10,000 mUSDC</dd></div>
+            <div><dt>daily cap</dt><dd>50,000 mUSDC</dd></div>
+            <div><dt>proof</dt><dd>pending tx</dd></div>
+          </dl>
+        </article>
+
+        <article class="pool pool-strict">
+          <p class="label">Strict pool</p>
+          <h2>Refuses 5,000 mUSDC</h2>
+          <dl>
+            <div><dt>max swap</dt><dd>1,000 mUSDC</dd></div>
+            <div><dt>daily cap</dt><dd>2,000 mUSDC</dd></div>
+            <div><dt>reason</dt><dd>MAX_SWAP_EXCEEDED</dd></div>
+          </dl>
+        </article>
+      </section>
+
+      <section class="feed">
+        <p class="label">Demo feed</p>
+        <div class="event accepted">SwapAccepted · loose pool · pending X Layer tx</div>
+        <div class="event blocked">PolicyBlocked · strict pool · pending X Layer tx</div>
+      </section>
+    </main>
+  </body>
+</html>
