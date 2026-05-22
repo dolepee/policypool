@@ -47,8 +47,8 @@ contract DeployDemo is Script {
         MockUSDC usdc = new MockUSDC();
         MockETH mockEth = new MockETH();
 
-        usdc.mint(deployer, 100_000_000 * USDC);
-        mockEth.mint(deployer, 100_000 ether);
+        usdc.mint(deployer, 1_000_000_000_000_000_000 * USDC);
+        mockEth.mint(deployer, 1_000_000_000 ether);
         usdc.approve(address(router), type(uint256).max);
         mockEth.approve(address(router), type(uint256).max);
 
