@@ -69,6 +69,7 @@ The submission needs these proof links:
 ```bash
 forge build
 forge test -vv
+cp .env.example .env
 ```
 
 Hook deploy:
@@ -77,7 +78,7 @@ Hook deploy:
 POOL_MANAGER=0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32 \
 PRIVATE_KEY=... \
 forge script script/DeployHook.s.sol:DeployHook \
-  --rpc-url https://rpc.xlayer.tech \
+  --rpc-url $XLAYER_RPC_URL \
   --broadcast
 ```
 
@@ -87,7 +88,7 @@ Full demo deploy:
 POOL_MANAGER=0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32 \
 PRIVATE_KEY=... \
 forge script script/DeployDemo.s.sol:DeployDemo \
-  --rpc-url https://rpc.xlayer.tech \
+  --rpc-url $XLAYER_RPC_URL \
   --broadcast
 ```
 
