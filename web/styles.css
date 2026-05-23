@@ -129,15 +129,16 @@ pre,
 }
 
 main {
-  padding: 46px 0 84px;
+  padding: 28px 0 84px;
 }
 
 .hero {
-  min-height: calc(100vh - 126px);
+  min-height: auto;
   display: grid;
   grid-template-columns: minmax(0, 0.85fr) minmax(520px, 1fr);
   gap: clamp(30px, 5vw, 86px);
   align-items: center;
+  padding: clamp(54px, 6vh, 74px) 0 clamp(60px, 8vh, 92px);
 }
 
 .eyebrow {
