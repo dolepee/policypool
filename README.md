@@ -4,6 +4,8 @@ PolicyPool is a Uniswap v4 Hook for pool covenants: each pool publishes the swap
 
 Built for the OKX X Layer Hook the Future hackathon.
 
+Live app: https://policypool.vercel.app
+
 ## Pool Covenants
 
 PolicyPool makes the pool's execution limits explicit and enforceable. A pool creator can publish a small covenant that defines the maximum exact-input swap size and the rolling daily volume the pool will accept.

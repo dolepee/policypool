@@ -3,7 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PolicyPool</title>
+    <meta
+      name="description"
+      content="PolicyPool is a Uniswap v4 Hook on X Layer where each pool enforces its own swap size and daily volume covenant before execution."
+    />
+    <title>PolicyPool · Uniswap v4 Hook on X Layer</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -14,6 +18,16 @@
         <p class="lede">
           PolicyPool lets each v4 pool publish a covenant: the max-swap and daily-volume limits its liquidity will accept before execution.
         </p>
+        <div class="actions">
+          <a href="https://github.com/dolepee/policypool">View repo</a>
+          <a href="https://sourcify.dev/#/lookup/0x7D676FA819D8CDF0A2BB73B944a3533870868080">Verified Hook</a>
+        </div>
+      </section>
+
+      <section class="proof-strip" aria-label="Live deployment proof">
+        <span>X Layer mainnet · chain 196</span>
+        <span>Hook 0x7D67...8080</span>
+        <span>contracts verified on Sourcify</span>
       </section>
 
       <section class="grid">
@@ -43,6 +57,17 @@
         <p class="label">Demo feed</p>
         <div class="event accepted">SwapAccepted · loose pool · 0x1ee4...3396</div>
         <div class="event blocked">SwapBlockedCaught · strict pool covenant · 0xbc20...435a</div>
+      </section>
+
+      <section class="mechanism">
+        <p class="label">Hook mechanism</p>
+        <pre><code>if amountIn &gt; maxSwapAmount:
+  revert PolicyBlocked("MAX_SWAP_EXCEEDED")
+
+if spentToday + amountIn &gt; dailyCap:
+  revert PolicyBlocked("DAILY_CAP_EXCEEDED")
+
+emit SwapAccepted(poolId, trader, amountIn)</code></pre>
       </section>
     </main>
   </body>

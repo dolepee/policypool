@@ -1,0 +1,7 @@
+{
+  "name": "policypool-web",
+  "private": true,
+  "scripts": {
+    "build": "mkdir -p dist && cp index.html styles.css dist/"
+  }
+}
