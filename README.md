@@ -148,7 +148,7 @@ web/
 
 ## Hook Callback Plan
 
-`PolicyPoolHook` implements `IHooks` directly. This v4-periphery checkout does not include `BaseHook`, so the contract exposes every required callback and only mutates state in `beforeSwap`.
+`PolicyPoolHook` implements `IHooks` directly instead of depending on a periphery base hook. The contract exposes every required callback and only mutates state in `beforeSwap`.
 
 Callback used:
 

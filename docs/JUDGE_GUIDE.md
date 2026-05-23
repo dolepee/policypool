@@ -93,9 +93,10 @@ All project contracts above are verified on Sourcify with exact matches.
 ## Fresh Clone Verification
 
 ```bash
-git clone --recurse-submodules https://github.com/dolepee/policypool.git
+git clone https://github.com/dolepee/policypool.git
 cd policypool
-git submodule update --init --recursive
+git submodule update --init --depth=1 lib/forge-std lib/v4-core
+git -C lib/v4-core submodule update --init --depth=1 lib/solmate lib/openzeppelin-contracts
 forge build
 forge test -vv
 node scripts/verify-all.mjs
