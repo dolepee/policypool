@@ -115,6 +115,8 @@ main {
 .proof-route span,
 .proof-verdict span,
 .proof-verdict small,
+.cap-step span,
+.cap-step small,
 .facts span,
 .deploy-grid span {
   margin: 0;
@@ -405,9 +407,67 @@ h2 {
 }
 
 .facts,
+.daily-cap,
 .mechanism,
 .deployment {
   margin-top: 24px;
+}
+
+.daily-cap {
+  display: grid;
+  grid-template-columns: minmax(0, 0.78fr) minmax(520px, 1fr);
+  gap: 18px;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 30px;
+  padding: clamp(20px, 3vw, 30px);
+  background: rgba(251, 248, 238, 0.7);
+  box-shadow: 0 18px 64px rgba(16, 21, 16, 0.06);
+}
+
+.daily-cap h2 {
+  font-size: clamp(34px, 4.2vw, 58px);
+}
+
+.cap-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.cap-step {
+  display: grid;
+  gap: 8px;
+  min-height: 150px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 18px;
+  background: var(--paper-soft);
+}
+
+.cap-step strong {
+  align-self: end;
+  font-size: clamp(28px, 3vw, 42px);
+  line-height: 0.94;
+  letter-spacing: -0.055em;
+}
+
+.cap-step.pass {
+  border-color: rgba(17, 57, 27, 0.2);
+  background: #ecffe5;
+}
+
+.cap-step.pass strong {
+  color: var(--green-ink);
+}
+
+.cap-step.stop {
+  border-color: rgba(64, 23, 28, 0.18);
+  background: #ffe7e6;
+}
+
+.cap-step.stop strong {
+  color: var(--red-ink);
 }
 
 .facts {
@@ -497,6 +557,8 @@ code {
 @media (max-width: 980px) {
   .hero,
   .flow,
+  .daily-cap,
+  .cap-steps,
   .facts,
   .mechanism,
   .deploy-grid {

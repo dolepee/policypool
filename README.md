@@ -1,6 +1,6 @@
 # PolicyPool
 
-PolicyPool is a Uniswap v4 Hook for pool covenants: each pool publishes the swap size and daily volume limits its liquidity will accept before execution. Same trader, same intent, two pools: one accepts, one refuses, both verifiable on X Layer.
+PolicyPool is a Uniswap v4 Hook for pool covenants: each pool publishes the swap size and daily volume limits its liquidity will accept before execution. Same trader, same intent, two pools: one accepts, one refuses, both verifiable on X Layer. The same strict pool also proves daily-cap enforcement: two small swaps pass, the next one is refused.
 
 Built for the OKX X Layer Hook the Future hackathon.
 
@@ -27,7 +27,9 @@ PolicyPool keeps the first submission deliberately narrow:
 - One callback: `beforeSwap`
 - One pair for the demo: `MockUSDC / MockETH`
 - Two v4 pools using the same Hook but different fee tiers, so they have different `PoolId`s
-- One binary proof: a `5,000 mUSDC` exact-input swap passes the loose pool and fails the strict pool
+- Two live proofs:
+  - a `5,000 mUSDC` exact-input swap passes the loose pool and fails the strict pool
+  - two `1,000 mUSDC` strict-pool swaps pass, then the third fails the daily cap
 
 Cut from v1: slippage caps, asset allowlists, per-LP policy aggregation, governance, oracle checks, Pyth, and frontend swap execution.
 
@@ -64,6 +66,9 @@ src/
 script/
   DeployHook.s.sol         # mines BEFORE_SWAP hook address and deploys hook
   DeployDemo.s.sol         # deploys hook, router, mocks, pools, policies, demo swaps
+  RunDailyCapProof.s.sol   # runs the live strict-pool daily-cap proof
+scripts/
+  verify-proof.mjs         # dependency-free verifier for live X Layer proof txs
 test/
   PolicyPoolHook.t.sol     # policy unit tests
   PolicyPoolDemoRouter.t.sol # demo router tests
@@ -135,6 +140,9 @@ Proof txs:
 | Strict pool initialized | [`0x64793e514c6dd69102f3c4fb459391004bcf47c29fc527328f55afaff2014d46`](https://www.oklink.com/x-layer/tx/0x64793e514c6dd69102f3c4fb459391004bcf47c29fc527328f55afaff2014d46) |
 | Loose pool accepted `5,000 mUSDC` swap | [`0x1ee4c6e668306c1ed7dddb0a47cb8c722607f892d03f69746d2822df13423396`](https://www.oklink.com/x-layer/tx/0x1ee4c6e668306c1ed7dddb0a47cb8c722607f892d03f69746d2822df13423396) |
 | Strict pool refused same swap and emitted `SwapBlockedCaught` | [`0xbc206a69a3728847dd28e4958e8e7f7d931f6d34d3e84a505103fd6ff0ec435a`](https://www.oklink.com/x-layer/tx/0xbc206a69a3728847dd28e4958e8e7f7d931f6d34d3e84a505103fd6ff0ec435a) |
+| Strict pool accepted first `1,000 mUSDC` daily-cap fill | [`0x2a260e92507918a290117e17445aea183b9fa2f1959bbd5719750b487b56f178`](https://www.oklink.com/x-layer/tx/0x2a260e92507918a290117e17445aea183b9fa2f1959bbd5719750b487b56f178) |
+| Strict pool accepted second `1,000 mUSDC` daily-cap fill | [`0xc6085e4feaa9e6559a04a21d10eb55503224a86a924c19622e51a31b0a45292b`](https://www.oklink.com/x-layer/tx/0xc6085e4feaa9e6559a04a21d10eb55503224a86a924c19622e51a31b0a45292b) |
+| Strict pool refused third `1,000 mUSDC` fill with `DAILY_CAP_EXCEEDED` | [`0x71130fce6387f081b5f2ded837879c38cdd18640fd62a8a11533d48737be771c`](https://www.oklink.com/x-layer/tx/0x71130fce6387f081b5f2ded837879c38cdd18640fd62a8a11533d48737be771c) |
 
 All project contracts above are verified on Sourcify with exact matches.
 
@@ -159,6 +167,7 @@ Deployment steps:
 ```bash
 forge build
 forge test -vv
+node scripts/verify-proof.mjs
 ```
 
 Environment:
@@ -205,6 +214,7 @@ Current tests cover:
 - strict pool rejected swap through v4 test router
 - demo router accepted swap
 - demo router caught strict-pool refusal and emitted `SwapBlockedCaught`
+- live X Layer proof verifier for accepted, max-swap refused, and daily-cap refused outcomes
 
 ## Demo Video Structure
 
@@ -215,7 +225,8 @@ Recommended demo structure:
 3. Show success tx and `SwapAccepted`.
 4. Show the same swap sent to the strict pool.
 5. Show `SwapBlockedCaught` after the Hook rejects with `PolicyBlocked("MAX_SWAP_EXCEEDED", 5000e6, 1000e6)`.
-6. Close on X Layer explorer links and the 20-line `beforeSwap` covenant check.
+6. Show the daily-cap proof: two `1,000 mUSDC` strict-pool swaps accepted, third refused with `DAILY_CAP_EXCEEDED`.
+7. Close on `node scripts/verify-proof.mjs`, X Layer explorer links, and the 20-line `beforeSwap` covenant check.
 
 Target length: 90 to 120 seconds.
 
@@ -231,3 +242,5 @@ Target length: 90 to 120 seconds.
 - Static frontend shell: implemented
 - X Layer deployment: complete
 - Proof txs: captured
+- Daily-cap proof txs: captured
+- Live proof verifier: passing

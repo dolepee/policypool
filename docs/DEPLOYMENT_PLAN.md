@@ -64,6 +64,9 @@ Captured on X Layer mainnet, chain `196`:
 - strict pool initialized: `0x64793e514c6dd69102f3c4fb459391004bcf47c29fc527328f55afaff2014d46`
 - loose pool accepted `5,000 mUSDC`: `0x1ee4c6e668306c1ed7dddb0a47cb8c722607f892d03f69746d2822df13423396`
 - strict pool recorded refusal: `0xbc206a69a3728847dd28e4958e8e7f7d931f6d34d3e84a505103fd6ff0ec435a`
+- strict pool accepted first `1,000 mUSDC` daily-cap fill: `0x2a260e92507918a290117e17445aea183b9fa2f1959bbd5719750b487b56f178`
+- strict pool accepted second `1,000 mUSDC` daily-cap fill: `0xc6085e4feaa9e6559a04a21d10eb55503224a86a924c19622e51a31b0a45292b`
+- strict pool recorded `DAILY_CAP_EXCEEDED`: `0x71130fce6387f081b5f2ded837879c38cdd18640fd62a8a11533d48737be771c`
 - all project contracts verified on Sourcify with exact matches
 
 ## Submission Claim
@@ -72,7 +75,7 @@ The deployment should support this claim:
 
 > Pool-level covenants enforced inside Uniswap v4 swap execution.
 
-The proof is the accepted/refused swap pair on X Layer: the same exact-input swap is accepted by the loose pool and refused by the strict pool.
+The proof is the accepted/refused swap pair on X Layer plus a daily-cap sequence: the same exact-input swap is accepted by the loose pool and refused by the strict pool, then the strict pool accepts two smaller fills and refuses the third once its daily cap is reached.
 
 ## Commands
 

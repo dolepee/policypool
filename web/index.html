@@ -33,7 +33,7 @@
           <h1>Liquidity with a veto.</h1>
           <p class="lede">
             PolicyPool lets each v4 pool publish the max-swap and daily-volume limits its liquidity will accept. The Hook
-            enforces those limits inside beforeSwap, before the trade touches the pool.
+            enforces both limits inside beforeSwap, before the trade touches the pool.
           </p>
           <div class="actions">
             <a class="primary" href="#proof">Inspect live proof</a>
@@ -104,10 +104,34 @@
         </div>
       </section>
 
+      <section class="daily-cap" aria-label="Daily cap proof">
+        <div>
+          <p class="eyebrow">Second proof · daily-volume covenant</p>
+          <h2>Strict pool accepts twice, then closes the gate.</h2>
+        </div>
+        <div class="cap-steps">
+          <a class="cap-step pass" href="https://www.oklink.com/x-layer/tx/0x2a260e92507918a290117e17445aea183b9fa2f1959bbd5719750b487b56f178">
+            <span>Fill 1</span>
+            <strong>Accepted</strong>
+            <small>1,000 mUSDC</small>
+          </a>
+          <a class="cap-step pass" href="https://www.oklink.com/x-layer/tx/0xc6085e4feaa9e6559a04a21d10eb55503224a86a924c19622e51a31b0a45292b">
+            <span>Fill 2</span>
+            <strong>Accepted</strong>
+            <small>1,000 mUSDC</small>
+          </a>
+          <a class="cap-step stop" href="https://www.oklink.com/x-layer/tx/0x71130fce6387f081b5f2ded837879c38cdd18640fd62a8a11533d48737be771c">
+            <span>Fill 3</span>
+            <strong>Refused</strong>
+            <small>DAILY_CAP_EXCEEDED</small>
+          </a>
+        </div>
+      </section>
+
       <section class="facts" aria-label="Deployment facts">
         <article><span>Hook</span><strong>0x7D67...8080</strong></article>
         <article><span>Callback</span><strong>beforeSwap only</strong></article>
-        <article><span>Verification</span><strong>Sourcify exact match</strong></article>
+        <article><span>Verifier</span><strong>node scripts/verify-proof.mjs</strong></article>
       </section>
 
       <section class="mechanism" id="hook">
