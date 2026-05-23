@@ -16,13 +16,13 @@ Security notes: [docs/SECURITY_NOTES.md](docs/SECURITY_NOTES.md)
 2. Click `Inspect live proof`.
 3. Verify the max-swap proof: the same `5,000 mUSDC` order is accepted by the loose pool and refused by the strict pool.
 4. Verify the daily-cap proof: the strict pool accepts two `1,000 mUSDC` fills, then refuses the third with `DAILY_CAP_EXCEEDED`.
-5. Run the proof verifier:
+5. Run the one-command verifier:
 
 ```bash
-node scripts/verify-proof.mjs
+node scripts/verify-all.mjs
 ```
 
-Expected result:
+The final proof section should include:
 
 ```text
 ✓ loose pool accepts 5,000 mUSDC (5000 mUSDC)
@@ -220,6 +220,14 @@ Deployment steps:
 
 ## Verify The Live Proof
 
+Run the complete local and live verification path:
+
+```bash
+node scripts/verify-all.mjs
+```
+
+That command runs formatting, contract build, contract tests, web build, deployment-state verification, and proof-receipt verification.
+
 Verify deployed contracts, Hook address bits, Hook permissions, PoolManager binding, and pool policy values:
 
 ```bash
@@ -263,6 +271,7 @@ It currently verifies:
 ```bash
 forge build
 forge test -vv
+node scripts/verify-all.mjs
 node scripts/verify-deployment.mjs
 node scripts/verify-proof.mjs
 ```

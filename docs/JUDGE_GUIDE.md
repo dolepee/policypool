@@ -14,13 +14,21 @@ The live proof answers yes.
 2. Read the first fold: `Pools that can say no.`
 3. Inspect `Proof 01`: loose pool accepts `5,000 mUSDC`; strict pool refuses the same amount.
 4. Inspect `Proof 02`: strict pool accepts two `1,000 mUSDC` fills; the third fill is refused by `DAILY_CAP_EXCEEDED`.
-5. Verify deployment state:
+5. Run the one-command verifier:
+
+```bash
+node scripts/verify-all.mjs
+```
+
+It runs formatting, contract build, contract tests, web build, deployment-state verification, and proof-receipt verification.
+
+6. Or inspect the live checks separately. Verify deployment state:
 
 ```bash
 node scripts/verify-deployment.mjs
 ```
 
-6. Verify proof receipts:
+7. Verify proof receipts:
 
 ```bash
 node scripts/verify-proof.mjs
@@ -78,6 +86,7 @@ cd policypool
 git submodule update --init --recursive
 forge build
 forge test -vv
+node scripts/verify-all.mjs
 node scripts/verify-deployment.mjs
 node scripts/verify-proof.mjs
 npm run build --prefix web
