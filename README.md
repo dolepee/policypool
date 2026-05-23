@@ -6,6 +6,8 @@ Built for the OKX X Layer Hook the Future hackathon.
 
 Live app: https://policypool.vercel.app
 
+Judge guide: [docs/JUDGE_GUIDE.md](docs/JUDGE_GUIDE.md)
+
 ## 60-Second Judge Path
 
 1. Open the live app and read the first screen: `Pools that can say no.`
@@ -123,6 +125,7 @@ test/
   PolicyPoolDemoRouter.t.sol # demo router tests
   PolicyPoolIntegration.t.sol # local v4 PoolManager integration tests
 docs/
+  JUDGE_GUIDE.md
   POLICY_SCHEMA.md
   DEPLOYMENT_PLAN.md
 web/
