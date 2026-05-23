@@ -11,6 +11,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 
 contract PolicyPoolHookTest is Test {
     using PoolIdLibrary for PoolKey;
@@ -47,6 +48,25 @@ contract PolicyPoolHookTest is Test {
         assertEq(dailyCap, 5_000 * USDC);
         assertEq(spentToday, 0);
         assertEq(lastResetTimestamp, uint64(block.timestamp));
+    }
+
+    function testHookPermissionsOnlyUseBeforeSwap() public view {
+        Hooks.Permissions memory permissions = hook.getHookPermissions();
+
+        assertTrue(permissions.beforeSwap);
+        assertFalse(permissions.beforeInitialize);
+        assertFalse(permissions.afterInitialize);
+        assertFalse(permissions.beforeAddLiquidity);
+        assertFalse(permissions.afterAddLiquidity);
+        assertFalse(permissions.beforeRemoveLiquidity);
+        assertFalse(permissions.afterRemoveLiquidity);
+        assertFalse(permissions.afterSwap);
+        assertFalse(permissions.beforeDonate);
+        assertFalse(permissions.afterDonate);
+        assertFalse(permissions.beforeSwapReturnDelta);
+        assertFalse(permissions.afterSwapReturnDelta);
+        assertFalse(permissions.afterAddLiquidityReturnDelta);
+        assertFalse(permissions.afterRemoveLiquidityReturnDelta);
     }
 
     function testRejectsInvalidPolicy() public {
@@ -122,6 +142,32 @@ contract PolicyPoolHookTest is Test {
         hook.beforeSwap(TRADER, key, _swapParams(5_000 * USDC), "");
     }
 
+    function testBeforeSwapAcceptsAtExactMaxSwapAmount() public {
+        hook.setPolicy(poolId, 1_000 * USDC, 5_000 * USDC);
+
+        vm.expectEmit(true, true, false, true);
+        emit SwapAccepted(poolId, TRADER, 1_000 * USDC);
+
+        vm.prank(POOL_MANAGER);
+        hook.beforeSwap(TRADER, key, _swapParams(1_000 * USDC), "");
+
+        (,, uint256 spentToday,) = hook.policies(poolId);
+        assertEq(spentToday, 1_000 * USDC);
+    }
+
+    function testBeforeSwapAcceptsAtExactDailyCap() public {
+        hook.setPolicy(poolId, 1_000 * USDC, 1_200 * USDC);
+
+        vm.prank(POOL_MANAGER);
+        hook.beforeSwap(TRADER, key, _swapParams(700 * USDC), "");
+
+        vm.prank(POOL_MANAGER);
+        hook.beforeSwap(TRADER, key, _swapParams(500 * USDC), "");
+
+        (,, uint256 spentToday,) = hook.policies(poolId);
+        assertEq(spentToday, 1_200 * USDC);
+    }
+
     function testBeforeSwapRejectsDailyCapOverflow() public {
         hook.setPolicy(poolId, 1_000 * USDC, 1_200 * USDC);
 
@@ -148,6 +194,22 @@ contract PolicyPoolHookTest is Test {
 
         (,, uint256 spentToday, uint64 lastResetTimestamp) = hook.policies(poolId);
         assertEq(spentToday, 1_000 * USDC);
+        assertEq(lastResetTimestamp, uint64(block.timestamp));
+    }
+
+    function testPolicyOwnerUpdateResetsWindow() public {
+        hook.setPolicy(poolId, 1_000 * USDC, 1_200 * USDC);
+
+        vm.prank(POOL_MANAGER);
+        hook.beforeSwap(TRADER, key, _swapParams(700 * USDC), "");
+
+        vm.warp(block.timestamp + 2 hours);
+        hook.setPolicy(poolId, 900 * USDC, 1_500 * USDC);
+
+        (uint256 maxSwapAmount, uint256 dailyCap, uint256 spentToday, uint64 lastResetTimestamp) = hook.policies(poolId);
+        assertEq(maxSwapAmount, 900 * USDC);
+        assertEq(dailyCap, 1_500 * USDC);
+        assertEq(spentToday, 0);
         assertEq(lastResetTimestamp, uint64(block.timestamp));
     }
 

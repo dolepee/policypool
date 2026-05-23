@@ -8,6 +8,8 @@ Live app: https://policypool.vercel.app
 
 Judge guide: [docs/JUDGE_GUIDE.md](docs/JUDGE_GUIDE.md)
 
+Security notes: [docs/SECURITY_NOTES.md](docs/SECURITY_NOTES.md)
+
 ## 60-Second Judge Path
 
 1. Open the live app and read the first screen: `Pools that can say no.`
@@ -127,6 +129,7 @@ test/
 docs/
   JUDGE_GUIDE.md
   POLICY_SCHEMA.md
+  SECURITY_NOTES.md
   DEPLOYMENT_PLAN.md
 web/
   index.html               # static judge/demo page shell
@@ -278,6 +281,9 @@ Current tests cover:
 - max-swap rejection
 - daily-cap rejection
 - daily-cap reset after 24 hours
+- exact max-swap and exact daily-cap boundary acceptance
+- owner-managed policy update behavior
+- Hook permission flags
 - local v4 PoolManager triggering `beforeSwap`
 - loose pool accepted swap through v4 test router
 - strict pool rejected swap through v4 test router
