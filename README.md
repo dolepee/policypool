@@ -10,6 +10,8 @@ CI: [![CI](https://github.com/dolepee/policypool/actions/workflows/test.yml/badg
 
 Judge guide: [docs/JUDGE_GUIDE.md](docs/JUDGE_GUIDE.md)
 
+Adoption path: [docs/ADOPTION_PATH.md](docs/ADOPTION_PATH.md)
+
 Security notes: [docs/SECURITY_NOTES.md](docs/SECURITY_NOTES.md)
 
 ## 60-Second Judge Path
@@ -101,6 +103,8 @@ PolicyPool is not trying to replace permissionless pools. It creates a second po
 - protocols can prove that liquidity constraints are enforced by the Hook, not by a private backend.
 
 The v1 covenant is intentionally small: `maxSwapAmount` and `dailyCap`. More complex policy belongs in later versions only after the core Hook is proven.
+
+For the market-potential path, see [docs/ADOPTION_PATH.md](docs/ADOPTION_PATH.md).
 
 ## Why X Layer
 

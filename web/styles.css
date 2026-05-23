@@ -400,6 +400,7 @@ h2 {
 .proof-board,
 .verifier-panel,
 .mechanism,
+.market-path,
 .deployment {
   margin-top: 26px;
   border: 1px solid var(--line);
@@ -659,6 +660,53 @@ pre {
   line-height: 1.58;
 }
 
+.use-case-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.use-case-grid article {
+  min-height: 236px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 1px solid rgba(16, 22, 15, 0.12);
+  border-radius: 28px;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 88% 4%, rgba(102, 255, 112, 0.16), transparent 11rem),
+    var(--paper-soft);
+}
+
+.use-case-grid span {
+  width: fit-content;
+  border: 1px solid rgba(20, 57, 27, 0.16);
+  border-radius: 999px;
+  padding: 8px 11px;
+  color: var(--green-ink);
+  background: rgba(232, 255, 220, 0.72);
+  font-family: "IBM Plex Mono", "Berkeley Mono", "Cascadia Mono", monospace;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+}
+
+.use-case-grid strong {
+  display: block;
+  margin-top: auto;
+  font-size: clamp(28px, 3vw, 44px);
+  line-height: 0.92;
+  letter-spacing: -0.07em;
+}
+
+.use-case-grid p {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1.35;
+}
+
 .deploy-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -683,6 +731,7 @@ pre {
   .proof-grid,
   .verifier-panel,
   .mechanism,
+  .use-case-grid,
   .deploy-grid {
     grid-template-columns: 1fr;
   }
@@ -731,6 +780,7 @@ pre {
   .proof-board,
   .verifier-panel,
   .mechanism,
+  .market-path,
   .deployment {
     border-radius: 26px;
   }

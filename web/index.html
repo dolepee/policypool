@@ -227,6 +227,34 @@ spentToday += amountIn
 emit SwapAccepted(poolId, trader, amountIn)</code></pre>
         </section>
 
+        <section class="market-path" aria-label="Market path">
+          <div class="section-head compact">
+            <p class="eyebrow">Market path</p>
+            <h2>Bounded flow for LPs who cannot watch every block.</h2>
+            <p>
+              PolicyPool is a second pool class, not a replacement for permissionless pools. It gives launch teams,
+              treasuries, and market makers a public flow envelope the pool enforces itself.
+            </p>
+          </div>
+          <div class="use-case-grid">
+            <article>
+              <span>01</span>
+              <strong>New asset launches</strong>
+              <p>Cap early whale flow while liquidity is shallow, without hiding the rule in a private backend.</p>
+            </article>
+            <article>
+              <span>02</span>
+              <strong>Treasury liquidity</strong>
+              <p>Publish max-swap and daily-volume limits so the operating envelope is visible before execution.</p>
+            </article>
+            <article>
+              <span>03</span>
+              <strong>Market makers</strong>
+              <p>Run strict and loose pools side by side for the same pair, each with its own enforceable covenant.</p>
+            </article>
+          </div>
+        </section>
+
         <section class="deployment" aria-label="Deployment links">
           <div class="section-head compact">
             <p class="eyebrow">Deployment</p>

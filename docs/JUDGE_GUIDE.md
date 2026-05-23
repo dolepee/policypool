@@ -52,7 +52,7 @@ PolicyPool proof verified on X Layer.
 | Criterion | What to inspect |
 | --- | --- |
 | Hook innovation | `PolicyPoolHook.beforeSwap` changes the permission boundary of execution. It does not adjust fees; it lets a pool refuse flow before liquidity is consumed. |
-| Market potential | Pool covenants are useful for bounded-flow liquidity: new asset launches, treasuries, market makers, and protocols that want public liquidity constraints instead of private monitoring. |
+| Market potential | Pool covenants are useful for bounded-flow liquidity: new asset launches, treasuries, market makers, and protocols that want public liquidity constraints instead of private monitoring. See [ADOPTION_PATH.md](ADOPTION_PATH.md). |
 | Completion | Hook, router, mock tokens, two v4 pools, policies, accepted/refused swaps, verified contracts, live app, verifier, tests, and CI are all present. |
 | X Layer integration | The proof is on X Layer mainnet chain `196` using the official Uniswap v4 `PoolManager` at `0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32`. |
 | Onchain verifiability | `verify-all.mjs` runs local checks and live checks. `verify-deployment.mjs` checks bytecode, Hook permission bits, PoolManager binding, and policy values. `verify-proof.mjs` reads X Layer receipts, decodes accepted events, unwraps v4 `WrappedError`, decodes inner `PolicyBlocked`, and asserts attempted amount versus covenant limit. |
