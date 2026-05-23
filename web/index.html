@@ -153,6 +153,50 @@
           </div>
         </section>
 
+        <section class="verifier-panel" aria-label="Decoded proof verifier">
+          <div class="section-head compact">
+            <p class="eyebrow">Decoded verifier</p>
+            <h2>The proof script reads the covenant numbers.</h2>
+            <p>
+              `node scripts/verify-proof.mjs` reads X Layer receipts, decodes v4 `WrappedError`, unwraps the inner
+              `PolicyBlocked` error, and asserts attempted amount versus covenant limit.
+            </p>
+          </div>
+
+          <div class="verifier-terminal">
+            <div class="verifier-top">
+              <span>node scripts/verify-proof.mjs</span>
+              <strong>reproducible</strong>
+            </div>
+            <div class="verify-line ok">
+              <span>✓</span>
+              <p>loose pool accepts <strong>5,000 mUSDC</strong></p>
+            </div>
+            <div class="verify-line block">
+              <span>✓</span>
+              <p>
+                strict pool refuses by <strong>MAX_SWAP_EXCEEDED</strong>
+                <small>attempted 5,000 mUSDC · limit 1,000 mUSDC</small>
+              </p>
+            </div>
+            <div class="verify-line ok">
+              <span>✓</span>
+              <p>strict pool accepts first daily-cap fill <strong>1,000 mUSDC</strong></p>
+            </div>
+            <div class="verify-line ok">
+              <span>✓</span>
+              <p>strict pool accepts second daily-cap fill <strong>1,000 mUSDC</strong></p>
+            </div>
+            <div class="verify-line block">
+              <span>✓</span>
+              <p>
+                third fill refuses by <strong>DAILY_CAP_EXCEEDED</strong>
+                <small>attempted 3,000 mUSDC · limit 2,000 mUSDC</small>
+              </p>
+            </div>
+          </div>
+        </section>
+
         <section class="mechanism" id="hook" aria-label="Hook mechanism">
           <div>
             <p class="eyebrow">Hook mechanism</p>
