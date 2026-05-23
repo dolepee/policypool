@@ -427,6 +427,26 @@ h2 {
   margin-bottom: 18px;
 }
 
+.ci-proof-link {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  justify-content: center;
+  margin-top: 18px;
+  border: 1px solid rgba(20, 57, 27, 0.16);
+  border-radius: 999px;
+  padding: 13px 17px;
+  color: var(--green-ink);
+  background: rgba(232, 255, 220, 0.78);
+  font-weight: 900;
+  box-shadow: 0 12px 34px rgba(16, 22, 15, 0.06);
+}
+
+.ci-proof-link:hover {
+  border-color: rgba(20, 57, 27, 0.3);
+  background: rgba(232, 255, 220, 0.96);
+}
+
 .proof-grid {
   display: grid;
   grid-template-columns: 0.9fr 1.1fr;

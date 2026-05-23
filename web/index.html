@@ -156,17 +156,28 @@
         <section class="verifier-panel" aria-label="Decoded proof verifier">
           <div class="section-head compact">
             <p class="eyebrow">Decoded verifier</p>
-            <h2>The proof script reads the covenant numbers.</h2>
+            <h2>CI now verifies the live receipts.</h2>
             <p>
-              `node scripts/verify-proof.mjs` reads X Layer receipts, decodes v4 `WrappedError`, unwraps the inner
-              `PolicyBlocked` error, and asserts attempted amount versus covenant limit.
+              `node scripts/verify-all.mjs` compiles the contracts, runs tests, builds the site, verifies the deployed
+              Hook, then decodes the same X Layer receipts shown above.
             </p>
+            <a class="ci-proof-link" href="https://github.com/dolepee/policypool/actions/runs/26342948708" target="_blank" rel="noreferrer">
+              Open green CI run
+            </a>
           </div>
 
           <div class="verifier-terminal">
             <div class="verifier-top">
-              <span>node scripts/verify-proof.mjs</span>
-              <strong>reproducible</strong>
+              <span>node scripts/verify-all.mjs</span>
+              <strong>CI green</strong>
+            </div>
+            <div class="verify-line ok">
+              <span>✓</span>
+              <p>format, contract build, contract tests, and web build pass</p>
+            </div>
+            <div class="verify-line ok">
+              <span>✓</span>
+              <p>deployed Hook bytecode, PoolManager binding, and Hook permission bits verified</p>
             </div>
             <div class="verify-line ok">
               <span>✓</span>
@@ -232,7 +243,11 @@ emit SwapAccepted(poolId, trader, amountIn)</code></pre>
             </a>
             <a href="https://github.com/dolepee/policypool#verify-the-live-proof" target="_blank" rel="noreferrer">
               <span>Verifier</span>
-              <strong>node scripts/verify-proof.mjs</strong>
+              <strong>node scripts/verify-all.mjs</strong>
+            </a>
+            <a href="https://github.com/dolepee/policypool/actions/runs/26342948708" target="_blank" rel="noreferrer">
+              <span>Live-proof CI</span>
+              <strong>green on GitHub</strong>
             </a>
           </div>
         </section>
