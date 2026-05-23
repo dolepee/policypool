@@ -1,22 +1,20 @@
 # PolicyPool
 
+[![PolicyPool preview: pools that can say no](web/og.png)](https://policypool.vercel.app)
+
 PolicyPool is a Uniswap v4 Hook for pool covenants: each pool publishes the swap size and daily volume limits its liquidity will accept before execution. Same trader, same intent, two pools: one accepts, one refuses, both verifiable on X Layer. The same strict pool also proves daily-cap enforcement: two small swaps pass, the next one is refused.
 
 Built for the OKX X Layer Hook the Future hackathon.
 
-Live app: https://policypool.vercel.app
-
 CI: [![CI](https://github.com/dolepee/policypool/actions/workflows/test.yml/badge.svg)](https://github.com/dolepee/policypool/actions/workflows/test.yml)
 
-Judge guide: [docs/JUDGE_GUIDE.md](docs/JUDGE_GUIDE.md)
-
-Reviewer questions: [docs/JUDGE_GUIDE.md#reviewer-questions](docs/JUDGE_GUIDE.md#reviewer-questions)
-
-Hook invariants: [docs/HOOK_INVARIANTS.md](docs/HOOK_INVARIANTS.md)
-
-Adoption path: [docs/ADOPTION_PATH.md](docs/ADOPTION_PATH.md)
-
-Security notes: [docs/SECURITY_NOTES.md](docs/SECURITY_NOTES.md)
+Fast links:
+[Live app](https://policypool.vercel.app) ·
+[Judge guide](docs/JUDGE_GUIDE.md) ·
+[Reviewer questions](docs/JUDGE_GUIDE.md#reviewer-questions) ·
+[Hook invariants](docs/HOOK_INVARIANTS.md) ·
+[Adoption path](docs/ADOPTION_PATH.md) ·
+[Security notes](docs/SECURITY_NOTES.md)
 
 ## 60-Second Judge Path
 
