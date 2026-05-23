@@ -40,3 +40,6 @@ jobs:
 
       - name: Run Forge tests
         run: forge test -vvv
+
+      - name: Build web landing page
+        run: npm run build --prefix web

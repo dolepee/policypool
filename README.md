@@ -211,6 +211,23 @@ Deployment steps:
 8. Add small demo liquidity to both pools.
 9. Run the same `5,000 mUSDC` exact-input swap against both.
 
+## Verify The Live Proof
+
+The verifier does more than check that transactions exist. It fetches the X Layer receipts, decodes the accepted
+`SwapAccepted` events, unwraps the v4 `WrappedError`, decodes the inner `PolicyBlocked` error, and asserts the exact
+attempted amount and covenant limit for both refusal paths.
+
+```bash
+node scripts/verify-proof.mjs
+```
+
+It currently verifies:
+
+- the loose pool accepted a `5,000 mUSDC` exact-input swap;
+- the strict pool refused the same `5,000 mUSDC` swap with `MAX_SWAP_EXCEEDED`;
+- the strict pool accepted two `1,000 mUSDC` daily-cap fills;
+- the strict pool refused the third fill with `DAILY_CAP_EXCEEDED`.
+
 ## Commands
 
 ```bash
