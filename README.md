@@ -51,6 +51,32 @@ If the swap breaks the covenant:
 
 Reverted logs do not persist onchain, so `PolicyPoolDemoRouter.swapOrRecord` can catch a failed strict-pool swap and emit `SwapBlockedCaught`. The Hook still enforces the refusal inside `beforeSwap`; the router event only makes the demo/indexer proof cleaner.
 
+## Why This Is Not A Dynamic Fee Hook
+
+Most obvious v4 Hook ideas change the price of execution: dynamic fees, rebates, points, or routing incentives. PolicyPool changes the permission boundary of execution. The pool can refuse flow before liquidity is consumed.
+
+That distinction is the primitive:
+
+- A dynamic-fee Hook says: "you may swap, but the price changes."
+- PolicyPool says: "this pool will not consume its liquidity for that swap."
+- The refusal happens inside `beforeSwap`, not in an offchain router or UI.
+- The proof is binary and onchain: accepted swaps emit `SwapAccepted`; refused swaps are caught by the demo router with the original `PolicyBlocked` reason.
+
+## Why LPs Would Use It
+
+PolicyPool is not trying to replace permissionless pools. It creates a second pool class for liquidity providers who want bounded flow:
+
+- small teams seeding a new X Layer asset can cap early whale flow;
+- treasuries can publish max-swap and daily-volume limits instead of monitoring liquidity manually;
+- market makers can run strict and loose pools side by side and expose both policies publicly;
+- protocols can prove that liquidity constraints are enforced by the Hook, not by a private backend.
+
+The v1 covenant is intentionally small: `maxSwapAmount` and `dailyCap`. More complex policy belongs in later versions only after the core Hook is proven.
+
+## Why X Layer
+
+PolicyPool is deployed on X Layer mainnet because the product needs cheap, repeatable swap proofs and an active onchain trading environment. The demo does not stop at deployment: it initializes v4 pools, runs accepted swaps, records max-swap refusal, records daily-cap refusal, and verifies all of it from X Layer receipts.
+
 ## File Structure
 
 ```text
