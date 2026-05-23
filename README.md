@@ -10,6 +10,8 @@ CI: [![CI](https://github.com/dolepee/policypool/actions/workflows/test.yml/badg
 
 Judge guide: [docs/JUDGE_GUIDE.md](docs/JUDGE_GUIDE.md)
 
+Reviewer questions: [docs/JUDGE_GUIDE.md#reviewer-questions](docs/JUDGE_GUIDE.md#reviewer-questions)
+
 Adoption path: [docs/ADOPTION_PATH.md](docs/ADOPTION_PATH.md)
 
 Security notes: [docs/SECURITY_NOTES.md](docs/SECURITY_NOTES.md)

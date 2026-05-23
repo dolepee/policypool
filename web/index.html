@@ -227,6 +227,31 @@ spentToday += amountIn
 emit SwapAccepted(poolId, trader, amountIn)</code></pre>
         </section>
 
+        <section class="reviewer-checks" aria-label="Reviewer checks">
+          <div class="section-head compact">
+            <p class="eyebrow">Reviewer checks</p>
+            <h2>The refusal is enforced by the Hook, not by the UI.</h2>
+          </div>
+          <div class="check-grid">
+            <article>
+              <strong>Hook-level block</strong>
+              <p><code>beforeSwap</code> reverts before the pool consumes liquidity. The router only records the caught failure.</p>
+            </article>
+            <article>
+              <strong>No router bypass</strong>
+              <p>Any v4 swap against these pools has to pass the same Hook callback through PoolManager.</p>
+            </article>
+            <article>
+              <strong>Mock assets by design</strong>
+              <p>The proof isolates Hook behavior from token liquidity noise while still using live X Layer transactions.</p>
+            </article>
+            <article>
+              <strong>Not dynamic fees</strong>
+              <p>The Hook does not reprice the trade. It changes the pool's execution boundary: accept or refuse.</p>
+            </article>
+          </div>
+        </section>
+
         <section class="market-path" aria-label="Market path">
           <div class="section-head compact">
             <p class="eyebrow">Market path</p>

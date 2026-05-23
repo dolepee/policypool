@@ -400,6 +400,7 @@ h2 {
 .proof-board,
 .verifier-panel,
 .mechanism,
+.reviewer-checks,
 .market-path,
 .deployment {
   margin-top: 26px;
@@ -660,6 +661,46 @@ pre {
   line-height: 1.58;
 }
 
+.check-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.check-grid article {
+  min-height: 190px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 1px solid rgba(16, 22, 15, 0.12);
+  border-radius: 24px;
+  padding: 20px;
+  color: #f6ffe9;
+  background:
+    radial-gradient(circle at 85% 12%, rgba(102, 255, 112, 0.16), transparent 10rem),
+    linear-gradient(145deg, rgba(16, 22, 15, 0.96), rgba(16, 22, 15, 0.82));
+}
+
+.check-grid strong {
+  display: block;
+  font-size: clamp(24px, 2vw, 32px);
+  line-height: 0.96;
+  letter-spacing: -0.06em;
+}
+
+.check-grid p {
+  margin: 20px 0 0;
+  color: rgba(246, 255, 233, 0.68);
+  font-size: 16px;
+  line-height: 1.38;
+}
+
+.check-grid code {
+  color: var(--green);
+  font-family: "IBM Plex Mono", "Berkeley Mono", "Cascadia Mono", monospace;
+  font-weight: 900;
+}
+
 .use-case-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -731,6 +772,7 @@ pre {
   .proof-grid,
   .verifier-panel,
   .mechanism,
+  .check-grid,
   .use-case-grid,
   .deploy-grid {
     grid-template-columns: 1fr;
@@ -780,6 +822,7 @@ pre {
   .proof-board,
   .verifier-panel,
   .mechanism,
+  .reviewer-checks,
   .market-path,
   .deployment {
     border-radius: 26px;

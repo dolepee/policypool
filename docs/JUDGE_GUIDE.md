@@ -104,6 +104,28 @@ npm run build --prefix web
 - No production DEX claim.
 - No claim that reverted Hook logs persist. Refused swaps revert in `beforeSwap`; the demo router catches the revert and emits `SwapBlockedCaught` so the refusal is easy to index.
 
+## Reviewer Questions
+
+### Is this only a router-level block?
+
+No. The Hook rejects inside `beforeSwap` before the v4 pool consumes liquidity. The demo router only catches the revert and emits `SwapBlockedCaught` because logs emitted during a reverted Hook call do not persist onchain.
+
+### Can another router bypass the policy?
+
+Not for these pools. Any swap routed through the v4 `PoolManager` for a pool using this Hook must pass the Hook's `beforeSwap` callback. A different router can choose whether to send flow, but it cannot make this pool ignore its covenant.
+
+### Why use mock assets?
+
+The hackathon asks for a v4 Pool and Hook on X Layer with Hook behavior triggered by real transactions. Mock assets isolate the Hook mechanism from liquidity sourcing and token-market noise. The proof is about whether the pool covenant is enforced before execution.
+
+### Is this a dynamic fee Hook?
+
+No. Dynamic fee Hooks still let the swap execute at a different price. PolicyPool changes the execution boundary: a pool can refuse flow entirely before liquidity is consumed.
+
+### What would need hardening after the hackathon?
+
+Factory-owned policy setup, optional immutable or timelocked covenants, real asset pools, and a production deployment process. Those are adoption hardening steps, not requirements for proving the Hook primitive.
+
 ## Why The Demo Uses Mock Assets
 
 The hackathon requirement is a deployed Uniswap v4 Pool and Hook on X Layer with Hook behavior triggered by real transactions. PolicyPool uses mock assets so the proof focuses on Hook semantics, not asset liquidity. The pool covenant logic is independent of the token pair.
