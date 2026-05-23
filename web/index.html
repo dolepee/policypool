@@ -9,141 +9,147 @@
     />
     <meta property="og:title" content="PolicyPool · Pool covenants for Uniswap v4" />
     <meta property="og:description" content="Same swap, two pools: one accepts, one refuses. Verifiable on X Layer." />
-    <meta name="theme-color" content="#f4f1e5" />
+    <meta name="theme-color" content="#f4f0df" />
     <title>PolicyPool · Uniswap v4 Hook on X Layer</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <header class="nav">
-      <a class="brand" href="#">
-        <span class="brand-mark">PP</span>
-        <span>PolicyPool</span>
-      </a>
-      <nav>
-        <a href="#proof">Proof</a>
-        <a href="#hook">Hook</a>
-        <a href="https://github.com/dolepee/policypool">GitHub</a>
-      </nav>
-    </header>
+    <div class="page-shell">
+      <header class="nav">
+        <a class="brand" href="#">
+          <span class="brand-mark">PP</span>
+          <span>PolicyPool</span>
+        </a>
+        <nav aria-label="Primary">
+          <a href="#proof">Proof</a>
+          <a href="#hook">Hook</a>
+          <a href="https://github.com/dolepee/policypool" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+      </header>
 
-    <main>
-      <section class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">Uniswap v4 Hook · X Layer mainnet</p>
-          <h1>Liquidity with a veto.</h1>
-          <p class="lede">
-            PolicyPool lets each v4 pool publish the max-swap and daily-volume limits its liquidity will accept. The Hook
-            enforces both limits inside beforeSwap, before the trade touches the pool.
-          </p>
-          <div class="actions">
-            <a class="primary" href="#proof">Inspect live proof</a>
-            <a href="https://sourcify.dev/#/lookup/0x7D676FA819D8CDF0A2BB73B944a3533870868080">Verified Hook</a>
+      <main>
+        <section class="hero" aria-label="PolicyPool overview">
+          <div class="hero-copy">
+            <p class="eyebrow">Uniswap v4 Hook · X Layer mainnet</p>
+            <h1>Pools that can say no.</h1>
+            <p class="lede">
+              PolicyPool gives each v4 pool its own swap-size and daily-volume covenant. The Hook checks the covenant in
+              <code>beforeSwap</code>, before liquidity is consumed.
+            </p>
+            <div class="actions">
+              <a class="primary" href="#proof">Inspect live proof</a>
+              <a href="https://sourcify.dev/#/lookup/0x7D676FA819D8CDF0A2BB73B944a3533870868080" target="_blank" rel="noreferrer">Verified Hook</a>
+            </div>
+            <div class="hero-metrics" aria-label="PolicyPool proof summary">
+              <span>1 Hook</span>
+              <span>2 v4 pools</span>
+              <span>5 live proof txs</span>
+            </div>
           </div>
-        </div>
 
-        <div class="hero-proof" aria-label="PolicyPool accepted and refused proof">
-          <div class="proof-topline">
-            <span>Same exact-input swap</span>
-            <strong>5,000 mUSDC</strong>
-          </div>
-          <div class="proof-route">
-            <span>beforeSwap policy check</span>
-            <strong>Pool covenant decides before execution.</strong>
-          </div>
-          <div class="proof-verdicts">
-            <a class="proof-verdict accept" href="https://www.oklink.com/x-layer/tx/0x1ee4c6e668306c1ed7dddb0a47cb8c722607f892d03f69746d2822df13423396">
-              <span>Loose pool</span>
-              <strong>Accepted</strong>
-              <small>max swap 10,000</small>
-            </a>
-            <a class="proof-verdict reject" href="https://www.oklink.com/x-layer/tx/0xbc206a69a3728847dd28e4958e8e7f7d931f6d34d3e84a505103fd6ff0ec435a">
-              <span>Strict pool</span>
-              <strong>Refused</strong>
-              <small>MAX_SWAP_EXCEEDED</small>
-            </a>
-          </div>
-        </div>
-      </section>
+          <div class="terminal-card" aria-label="Same swap routed through pool covenants">
+            <div class="terminal-bar">
+              <span>live covenant gate</span>
+              <strong>X Layer 196</strong>
+            </div>
 
-      <section class="desk" id="proof" aria-label="Live PolicyPool proof">
-        <div class="desk-header">
+            <div class="order-ticket">
+              <span>Same exact-input order</span>
+              <strong>5,000 mUSDC</strong>
+              <small>trader 0xAe98...081b</small>
+            </div>
+
+            <div class="gate">
+              <div class="gate-line"></div>
+              <div class="gate-label">beforeSwap</div>
+            </div>
+
+            <div class="verdict-stack">
+              <a
+                class="verdict pass"
+                href="https://www.oklink.com/x-layer/tx/0x1ee4c6e668306c1ed7dddb0a47cb8c722607f892d03f69746d2822df13423396"
+                target="_blank"
+                rel="noreferrer"
+              >
+                <span>Loose pool</span>
+                <strong>Accepted</strong>
+                <small>max swap 10,000</small>
+              </a>
+              <a
+                class="verdict stop"
+                href="https://www.oklink.com/x-layer/tx/0xbc206a69a3728847dd28e4958e8e7f7d931f6d34d3e84a505103fd6ff0ec435a"
+                target="_blank"
+                rel="noreferrer"
+              >
+                <span>Strict pool</span>
+                <strong>Refused</strong>
+                <small>MAX_SWAP_EXCEEDED</small>
+              </a>
+            </div>
+          </div>
+        </section>
+
+        <section class="proof-board" id="proof" aria-label="Live proof">
+          <div class="section-head">
+            <p class="eyebrow">Live proof</p>
+            <h2>Two covenants, both proven onchain.</h2>
+            <p>
+              The demo is intentionally binary. Same hook, same pool family, real X Layer transactions: max-swap refusal
+              and daily-cap refusal.
+            </p>
+          </div>
+
+          <div class="proof-grid">
+            <article class="proof-card primary-proof">
+              <div class="proof-card-head">
+                <span>Proof 01</span>
+                <strong>Max-swap covenant</strong>
+              </div>
+              <p>One 5,000 mUSDC order goes through the loose pool and is refused by the strict pool.</p>
+              <div class="proof-links">
+                <a href="https://www.oklink.com/x-layer/tx/0x1ee4c6e668306c1ed7dddb0a47cb8c722607f892d03f69746d2822df13423396" target="_blank" rel="noreferrer">
+                  Accepted · 0x1ee4...3396
+                </a>
+                <a href="https://www.oklink.com/x-layer/tx/0xbc206a69a3728847dd28e4958e8e7f7d931f6d34d3e84a505103fd6ff0ec435a" target="_blank" rel="noreferrer">
+                  Refused · 0xbc20...435a
+                </a>
+              </div>
+            </article>
+
+            <article class="proof-card cap-proof">
+              <div class="proof-card-head">
+                <span>Proof 02</span>
+                <strong>Daily-cap covenant</strong>
+              </div>
+              <p>The strict pool accepts two 1,000 mUSDC fills, then refuses the next fill with `DAILY_CAP_EXCEEDED`.</p>
+              <div class="cap-ladder">
+                <a class="cap-step pass" href="https://www.oklink.com/x-layer/tx/0x2a260e92507918a290117e17445aea183b9fa2f1959bbd5719750b487b56f178" target="_blank" rel="noreferrer">
+                  <span>Fill 1</span>
+                  <strong>Accepted</strong>
+                </a>
+                <a class="cap-step pass" href="https://www.oklink.com/x-layer/tx/0xc6085e4feaa9e6559a04a21d10eb55503224a86a924c19622e51a31b0a45292b" target="_blank" rel="noreferrer">
+                  <span>Fill 2</span>
+                  <strong>Accepted</strong>
+                </a>
+                <a class="cap-step stop" href="https://www.oklink.com/x-layer/tx/0x71130fce6387f081b5f2ded837879c38cdd18640fd62a8a11533d48737be771c" target="_blank" rel="noreferrer">
+                  <span>Fill 3</span>
+                  <strong>Refused</strong>
+                </a>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="mechanism" id="hook" aria-label="Hook mechanism">
           <div>
-            <p class="eyebrow">Live proof · same exact-input swap</p>
-            <h2>One order, two pool policies.</h2>
+            <p class="eyebrow">Hook mechanism</p>
+            <h2>Small policy surface. Real swap enforcement.</h2>
+            <p>
+              No oracle, no offchain matcher, no governance layer. The v1 Hook only checks max input and rolling daily
+              volume, then either lets the v4 swap continue or refuses it before execution.
+            </p>
           </div>
-          <div class="chain-pill">X Layer 196</div>
-        </div>
-
-        <div class="flow">
-          <article class="intent-card">
-            <span>Swap intent</span>
-            <strong>5,000 mUSDC</strong>
-            <small>trader 0xAe98...081b</small>
-          </article>
-
-          <div class="check-card">
-            <span>beforeSwap</span>
-            <strong>Policy check</strong>
-            <small>max swap · daily cap</small>
-          </div>
-
-          <div class="outcome-column">
-            <article class="outcome accept">
-              <span>Loose pool</span>
-              <strong>Accepted</strong>
-              <small>max swap 10,000</small>
-              <a href="https://www.oklink.com/x-layer/tx/0x1ee4c6e668306c1ed7dddb0a47cb8c722607f892d03f69746d2822df13423396">0x1ee4...3396</a>
-            </article>
-            <article class="outcome reject">
-              <span>Strict pool</span>
-              <strong>Refused</strong>
-              <small>MAX_SWAP_EXCEEDED</small>
-              <a href="https://www.oklink.com/x-layer/tx/0xbc206a69a3728847dd28e4958e8e7f7d931f6d34d3e84a505103fd6ff0ec435a">0xbc20...435a</a>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section class="daily-cap" aria-label="Daily cap proof">
-        <div>
-          <p class="eyebrow">Second proof · daily-volume covenant</p>
-          <h2>Strict pool accepts twice, then closes the gate.</h2>
-        </div>
-        <div class="cap-steps">
-          <a class="cap-step pass" href="https://www.oklink.com/x-layer/tx/0x2a260e92507918a290117e17445aea183b9fa2f1959bbd5719750b487b56f178">
-            <span>Fill 1</span>
-            <strong>Accepted</strong>
-            <small>1,000 mUSDC</small>
-          </a>
-          <a class="cap-step pass" href="https://www.oklink.com/x-layer/tx/0xc6085e4feaa9e6559a04a21d10eb55503224a86a924c19622e51a31b0a45292b">
-            <span>Fill 2</span>
-            <strong>Accepted</strong>
-            <small>1,000 mUSDC</small>
-          </a>
-          <a class="cap-step stop" href="https://www.oklink.com/x-layer/tx/0x71130fce6387f081b5f2ded837879c38cdd18640fd62a8a11533d48737be771c">
-            <span>Fill 3</span>
-            <strong>Refused</strong>
-            <small>DAILY_CAP_EXCEEDED</small>
-          </a>
-        </div>
-      </section>
-
-      <section class="facts" aria-label="Deployment facts">
-        <article><span>Hook</span><strong>0x7D67...8080</strong></article>
-        <article><span>Callback</span><strong>beforeSwap only</strong></article>
-        <article><span>Verifier</span><strong>node scripts/verify-proof.mjs</strong></article>
-      </section>
-
-      <section class="mechanism" id="hook">
-        <div>
-          <p class="eyebrow">Hook mechanism</p>
-          <h2>A covenant check in the swap path.</h2>
-          <p>
-            The first version is deliberately narrow: one Hook, one callback, two pool-level limits. No oracle, no offchain
-            matcher, no governance layer.
-          </p>
-        </div>
-        <pre><code>if amountIn &gt; maxSwapAmount:
+          <pre><code>if amountIn &gt; maxSwapAmount:
   revert PolicyBlocked("MAX_SWAP_EXCEEDED")
 
 if spentToday + amountIn &gt; dailyCap:
@@ -151,25 +157,29 @@ if spentToday + amountIn &gt; dailyCap:
 
 spentToday += amountIn
 emit SwapAccepted(poolId, trader, amountIn)</code></pre>
-      </section>
+        </section>
 
-      <section class="deployment">
-        <p class="eyebrow">Deployment</p>
-        <div class="deploy-grid">
-          <a href="https://sourcify.dev/#/lookup/0x7D676FA819D8CDF0A2BB73B944a3533870868080">
-            <span>PolicyPoolHook</span>
-            <strong>0x7D67...8080</strong>
-          </a>
-          <a href="https://sourcify.dev/#/lookup/0xCD46b2C1e6dD9d0fd3Edd9B26F0137E02F3Fc29e">
-            <span>Demo router</span>
-            <strong>0xCD46...c29e</strong>
-          </a>
-          <a href="https://github.com/dolepee/policypool">
-            <span>Repository</span>
-            <strong>github.com/dolepee/policypool</strong>
-          </a>
-        </div>
-      </section>
-    </main>
+        <section class="deployment" aria-label="Deployment links">
+          <div class="section-head compact">
+            <p class="eyebrow">Deployment</p>
+            <h2>Verified contracts and reproducible proof.</h2>
+          </div>
+          <div class="deploy-grid">
+            <a href="https://sourcify.dev/#/lookup/0x7D676FA819D8CDF0A2BB73B944a3533870868080" target="_blank" rel="noreferrer">
+              <span>PolicyPoolHook</span>
+              <strong>0x7D67...8080</strong>
+            </a>
+            <a href="https://sourcify.dev/#/lookup/0xCD46b2C1e6dD9d0fd3Edd9B26F0137E02F3Fc29e" target="_blank" rel="noreferrer">
+              <span>Demo router</span>
+              <strong>0xCD46...c29e</strong>
+            </a>
+            <a href="https://github.com/dolepee/policypool#verify-the-live-proof" target="_blank" rel="noreferrer">
+              <span>Verifier</span>
+              <strong>node scripts/verify-proof.mjs</strong>
+            </a>
+          </div>
+        </section>
+      </main>
+    </div>
   </body>
 </html>
