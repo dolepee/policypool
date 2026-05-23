@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+import dns from "node:dns";
+
+dns.setDefaultResultOrder("ipv4first");
+
 const RPC_URL = process.env.XLAYER_RPC_URL || "https://rpc.xlayer.tech";
 
 const CHAIN_ID = 196n;

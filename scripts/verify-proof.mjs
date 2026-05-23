@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+import dns from "node:dns";
+
+dns.setDefaultResultOrder("ipv4first");
+
 const RPC_URL = process.env.XLAYER_RPC_URL || "https://rpc.xlayer.tech";
 
 const HOOK = "0x7d676fa819d8cdf0a2bb73b944a3533870868080";
