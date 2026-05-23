@@ -26,7 +26,7 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
   color: var(--text);
-  font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+  font-family: "Aptos Display", "Segoe UI Variable Display", "Trebuchet MS", sans-serif;
   background:
     linear-gradient(rgba(255, 249, 223, 0.035) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 249, 223, 0.035) 1px, transparent 1px),
@@ -82,9 +82,9 @@ a {
   position: sticky;
   top: 0;
   z-index: 20;
-  width: min(1240px, calc(100vw - 32px));
-  margin: 16px auto 0;
-  padding: 12px;
+  width: min(1360px, calc(100vw - 32px));
+  margin: 14px auto 0;
+  padding: 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -116,7 +116,7 @@ a {
   border-radius: 14px;
   color: var(--ink);
   background: linear-gradient(135deg, var(--green), var(--yellow));
-  font-family: "JetBrains Mono", monospace;
+  font-family: "Cascadia Mono", "Consolas", monospace;
   font-size: 14px;
 }
 
@@ -134,9 +134,9 @@ a {
 }
 
 main {
-  width: min(1240px, calc(100vw - 32px));
+  width: min(1360px, calc(100vw - 32px));
   margin: 0 auto;
-  padding: 42px 0 74px;
+  padding: 30px 0 74px;
 }
 
 .hero {
@@ -160,8 +160,8 @@ pre {
 .status {
   margin: 0;
   color: var(--yellow);
-  font-family: "JetBrains Mono", monospace;
-  font-size: 13px;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -176,11 +176,11 @@ p {
 }
 
 h1 {
-  margin-bottom: 22px;
-  max-width: 790px;
-  font-size: clamp(64px, 9vw, 130px);
-  line-height: 0.84;
-  letter-spacing: -0.085em;
+  margin-bottom: 18px;
+  max-width: 660px;
+  font-size: clamp(54px, 6vw, 94px);
+  line-height: 0.91;
+  letter-spacing: -0.07em;
 }
 
 h2 {
@@ -198,9 +198,9 @@ h3 {
 }
 
 .lede {
-  max-width: 720px;
+  max-width: 620px;
   color: var(--muted);
-  font-size: clamp(20px, 2.5vw, 29px);
+  font-size: clamp(19px, 1.55vw, 24px);
   line-height: 1.34;
 }
 
@@ -212,7 +212,7 @@ h3 {
 }
 
 .actions {
-  margin: 30px 0 20px;
+  margin: 24px 0 18px;
 }
 
 .actions a,
@@ -244,7 +244,7 @@ h3 {
   padding: 9px 12px;
   color: var(--muted);
   background: rgba(255, 255, 238, 0.055);
-  font-family: "JetBrains Mono", monospace;
+  font-family: "Cascadia Mono", "Consolas", monospace;
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.05em;
@@ -253,10 +253,10 @@ h3 {
 
 .proof-console {
   position: relative;
-  min-height: 660px;
+  min-height: 520px;
   border: 1px solid rgba(255, 249, 223, 0.16);
-  border-radius: 42px;
-  padding: 28px;
+  border-radius: 34px;
+  padding: 24px;
   background:
     linear-gradient(180deg, rgba(255, 255, 238, 0.1), rgba(255, 255, 238, 0.035)),
     rgba(2, 8, 6, 0.74);
@@ -282,22 +282,22 @@ h3 {
   justify-content: space-between;
   gap: 16px;
   color: var(--muted);
-  font-family: "JetBrains Mono", monospace;
+  font-family: "Cascadia Mono", "Consolas", monospace;
   font-weight: 800;
 }
 
 .console-top {
-  margin-bottom: 78px;
-  font-size: 13px;
+  margin-bottom: 38px;
+  font-size: 12px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .route-line {
   align-items: center;
-  padding: 28px;
+  padding: 20px 22px;
   border: 1px solid var(--line);
-  border-radius: 28px;
+  border-radius: 24px;
   background: rgba(255, 255, 238, 0.07);
 }
 
@@ -307,7 +307,7 @@ h3 {
 
 .splitter {
   justify-content: center;
-  margin: 38px 0;
+  margin: 26px 0;
   color: var(--yellow);
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -322,8 +322,8 @@ h3 {
 
 .outcome {
   border: 1px solid var(--line);
-  border-radius: 30px;
-  padding: 28px;
+  border-radius: 26px;
+  padding: 22px;
   background: rgba(255, 249, 223, 0.07);
 }
 
@@ -331,8 +331,8 @@ h3 {
 .outcome small {
   display: block;
   color: var(--muted);
-  font-family: "JetBrains Mono", monospace;
-  font-size: 13px;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -340,8 +340,8 @@ h3 {
 
 .outcome strong {
   display: block;
-  margin: 12px 0 10px;
-  font-size: clamp(46px, 5vw, 70px);
+  margin: 10px 0 8px;
+  font-size: clamp(42px, 4.2vw, 60px);
   line-height: 0.9;
   letter-spacing: -0.07em;
 }
@@ -455,12 +455,12 @@ pre {
   padding: 28px;
   color: var(--muted);
   background: rgba(0, 0, 0, 0.36);
-  font-size: clamp(15px, 1.8vw, 20px);
+  font-size: clamp(15px, 1.45vw, 19px);
   line-height: 1.52;
 }
 
 code {
-  font-family: "JetBrains Mono", monospace;
+  font-family: "Cascadia Mono", "Consolas", monospace;
 }
 
 .deploy-grid {
@@ -479,7 +479,7 @@ code {
 
 .deploy-grid span {
   color: var(--muted);
-  font-family: "JetBrains Mono", monospace;
+  font-family: "Cascadia Mono", "Consolas", monospace;
   font-size: 12px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -492,13 +492,13 @@ code {
 
 @media (min-width: 981px) {
   .hero {
-    min-height: calc(100vh - 120px);
-    grid-template-columns: minmax(0, 1.06fr) minmax(430px, 0.94fr);
+    min-height: calc(100vh - 116px);
+    grid-template-columns: minmax(0, 0.88fr) minmax(500px, 1.12fr);
     padding-top: 0;
   }
 
   .proof-console {
-    transform: rotate(1.5deg);
+    transform: rotate(0.8deg);
   }
 
   .pool-grid {
