@@ -5,69 +5,150 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="PolicyPool is a Uniswap v4 Hook on X Layer where each pool enforces its own swap size and daily volume covenant before execution."
+      content="PolicyPool is a Uniswap v4 Hook on X Layer where pools enforce their own swap size and daily volume covenants before execution."
     />
+    <meta property="og:title" content="PolicyPool · Pool covenants for Uniswap v4" />
+    <meta
+      property="og:description"
+      content="Same trader, same swap, two pools: one accepts, one refuses. Verifiable on X Layer."
+    />
+    <meta name="theme-color" content="#06130f" />
     <title>PolicyPool · Uniswap v4 Hook on X Layer</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="shell">
+    <div class="noise"></div>
+    <div class="orb orb-a"></div>
+    <div class="orb orb-b"></div>
+
+    <header class="nav">
+      <a class="brand" href="#">
+        <span class="brand-mark">PP</span>
+        <span>PolicyPool</span>
+      </a>
+      <nav>
+        <a href="#proof">Proof</a>
+        <a href="#hook">Hook</a>
+        <a href="https://github.com/dolepee/policypool">GitHub</a>
+      </nav>
+    </header>
+
+    <main>
       <section class="hero">
-        <p class="eyebrow">Uniswap v4 Hook on X Layer</p>
-        <h1>Two pools. Same swap. One says yes, one says no.</h1>
-        <p class="lede">
-          PolicyPool lets each v4 pool publish a covenant: the max-swap and daily-volume limits its liquidity will accept before execution.
-        </p>
-        <div class="actions">
-          <a href="https://github.com/dolepee/policypool">View repo</a>
-          <a href="https://sourcify.dev/#/lookup/0x7D676FA819D8CDF0A2BB73B944a3533870868080">Verified Hook</a>
+        <div class="hero-copy">
+          <p class="eyebrow">Live on X Layer mainnet · Uniswap v4 Hook</p>
+          <h1>Pool rules, enforced before the swap.</h1>
+          <p class="lede">
+            PolicyPool lets a v4 pool publish the max-swap and daily-volume covenant its liquidity will accept. Same trader,
+            same exact-input swap, different pool covenant: one executes, one refuses.
+          </p>
+          <div class="actions">
+            <a class="primary" href="#proof">View live proof</a>
+            <a href="https://sourcify.dev/#/lookup/0x7D676FA819D8CDF0A2BB73B944a3533870868080">Verified Hook</a>
+          </div>
+          <div class="proof-strip" aria-label="Deployment facts">
+            <span>X Layer 196</span>
+            <span>Hook 0x7D67...8080</span>
+            <span>contracts verified</span>
+          </div>
+        </div>
+
+        <aside class="proof-console" aria-label="PolicyPool proof console">
+          <div class="console-top">
+            <span>same exact-input order</span>
+            <span>5,000 mUSDC</span>
+          </div>
+          <div class="route">
+            <div class="route-line">
+              <span>Trader</span>
+              <b>0xAe98...081b</b>
+            </div>
+            <div class="splitter">routes into two v4 pools</div>
+            <div class="outcomes">
+              <article class="outcome pass">
+                <span>Loose Pool</span>
+                <strong>ACCEPTED</strong>
+                <small>max swap 10,000 mUSDC</small>
+              </article>
+              <article class="outcome fail">
+                <span>Strict Pool</span>
+                <strong>REFUSED</strong>
+                <small>MAX_SWAP_EXCEEDED</small>
+              </article>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <section class="binary" id="proof">
+        <div class="section-head">
+          <p class="eyebrow">Binary moment</p>
+          <h2>Same swap. Two pool covenants. Two verifiable outcomes.</h2>
+        </div>
+
+        <div class="pool-grid">
+          <article class="pool-card loose">
+            <div class="status">SwapAccepted</div>
+            <h3>Loose pool accepted</h3>
+            <p>The same `5,000 mUSDC` swap is below this pool's covenant, so `beforeSwap` returns and the v4 swap continues.</p>
+            <dl>
+              <div><dt>max swap</dt><dd>10,000 mUSDC</dd></div>
+              <div><dt>daily cap</dt><dd>50,000 mUSDC</dd></div>
+              <div><dt>pool id</dt><dd>0x1f03...bbbf7</dd></div>
+            </dl>
+            <a href="https://www.oklink.com/x-layer/tx/0x1ee4c6e668306c1ed7dddb0a47cb8c722607f892d03f69746d2822df13423396">Open accepted tx</a>
+          </article>
+
+          <article class="pool-card strict">
+            <div class="status">PolicyBlocked</div>
+            <h3>Strict pool refused</h3>
+            <p>The same `5,000 mUSDC` swap exceeds this pool's max-swap covenant. The Hook refuses it before execution.</p>
+            <dl>
+              <div><dt>max swap</dt><dd>1,000 mUSDC</dd></div>
+              <div><dt>daily cap</dt><dd>2,000 mUSDC</dd></div>
+              <div><dt>reason</dt><dd>MAX_SWAP_EXCEEDED</dd></div>
+            </dl>
+            <a href="https://www.oklink.com/x-layer/tx/0xbc206a69a3728847dd28e4958e8e7f7d931f6d34d3e84a505103fd6ff0ec435a">Open refusal tx</a>
+          </article>
         </div>
       </section>
 
-      <section class="proof-strip" aria-label="Live deployment proof">
-        <span>X Layer mainnet · chain 196</span>
-        <span>Hook 0x7D67...8080</span>
-        <span>contracts verified on Sourcify</span>
-      </section>
-
-      <section class="grid">
-        <article class="pool pool-loose">
-          <p class="label">Loose pool</p>
-          <h2>Accepts 5,000 mUSDC</h2>
-          <dl>
-            <div><dt>max swap</dt><dd>10,000 mUSDC</dd></div>
-            <div><dt>daily cap</dt><dd>50,000 mUSDC</dd></div>
-            <div><dt>proof</dt><dd><a href="https://www.oklink.com/x-layer/tx/0x1ee4c6e668306c1ed7dddb0a47cb8c722607f892d03f69746d2822df13423396">accepted tx</a></dd></div>
-          </dl>
-        </article>
-
-        <article class="pool pool-strict">
-          <p class="label">Strict pool</p>
-          <h2>Refuses 5,000 mUSDC</h2>
-          <dl>
-            <div><dt>max swap</dt><dd>1,000 mUSDC</dd></div>
-            <div><dt>daily cap</dt><dd>2,000 mUSDC</dd></div>
-            <div><dt>reason</dt><dd>MAX_SWAP_EXCEEDED</dd></div>
-            <div><dt>proof</dt><dd><a href="https://www.oklink.com/x-layer/tx/0xbc206a69a3728847dd28e4958e8e7f7d931f6d34d3e84a505103fd6ff0ec435a">blocked tx</a></dd></div>
-          </dl>
-        </article>
-      </section>
-
-      <section class="feed">
-        <p class="label">Demo feed</p>
-        <div class="event accepted">SwapAccepted · loose pool · 0x1ee4...3396</div>
-        <div class="event blocked">SwapBlockedCaught · strict pool covenant · 0xbc20...435a</div>
-      </section>
-
-      <section class="mechanism">
-        <p class="label">Hook mechanism</p>
+      <section class="mechanism" id="hook">
+        <div>
+          <p class="eyebrow">Hook mechanism</p>
+          <h2>One callback. One covenant check. No offchain matcher.</h2>
+          <p>
+            PolicyPool uses `beforeSwap` only. The pool policy is loaded by `PoolId`, checked before execution, and updated
+            in the same swap path. The demo router only catches the refused strict-pool swap so indexers can see the blocked
+            outcome cleanly.
+          </p>
+        </div>
         <pre><code>if amountIn &gt; maxSwapAmount:
   revert PolicyBlocked("MAX_SWAP_EXCEEDED")
 
 if spentToday + amountIn &gt; dailyCap:
   revert PolicyBlocked("DAILY_CAP_EXCEEDED")
 
+spentToday += amountIn
 emit SwapAccepted(poolId, trader, amountIn)</code></pre>
+      </section>
+
+      <section class="deployment">
+        <p class="eyebrow">Deployment</p>
+        <div class="deploy-grid">
+          <a href="https://sourcify.dev/#/lookup/0x7D676FA819D8CDF0A2BB73B944a3533870868080">
+            <span>PolicyPoolHook</span>
+            <b>0x7D67...8080</b>
+          </a>
+          <a href="https://sourcify.dev/#/lookup/0xCD46b2C1e6dD9d0fd3Edd9B26F0137E02F3Fc29e">
+            <span>Demo router</span>
+            <b>0xCD46...c29e</b>
+          </a>
+          <a href="https://github.com/dolepee/policypool">
+            <span>Open source</span>
+            <b>github.com/dolepee/policypool</b>
+          </a>
+        </div>
       </section>
     </main>
   </body>
