@@ -22,6 +22,8 @@ node scripts/verify-all.mjs
 
 It runs formatting, contract build, contract tests, web build, deployment-state verification, and proof-receipt verification.
 
+The same command runs in GitHub Actions, so the public CI badge is also a live-proof signal, not only a local unit-test signal.
+
 6. Or inspect the live checks separately. Verify deployment state:
 
 ```bash

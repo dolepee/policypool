@@ -6,6 +6,8 @@ Built for the OKX X Layer Hook the Future hackathon.
 
 Live app: https://policypool.vercel.app
 
+CI: [![CI](https://github.com/dolepee/policypool/actions/workflows/test.yml/badge.svg)](https://github.com/dolepee/policypool/actions/workflows/test.yml)
+
 Judge guide: [docs/JUDGE_GUIDE.md](docs/JUDGE_GUIDE.md)
 
 Security notes: [docs/SECURITY_NOTES.md](docs/SECURITY_NOTES.md)
@@ -227,6 +229,8 @@ node scripts/verify-all.mjs
 ```
 
 That command runs formatting, contract build, contract tests, web build, deployment-state verification, and proof-receipt verification.
+
+The same command runs in GitHub Actions, so the public CI check verifies both local code quality and the live X Layer proof path.
 
 Verify deployed contracts, Hook address bits, Hook permissions, PoolManager binding, and pool policy values:
 
