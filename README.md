@@ -21,11 +21,11 @@ node scripts/verify-proof.mjs
 Expected result:
 
 ```text
-✓ loose pool accepts 5,000 mUSDC
-✓ strict pool refuses 5,000 mUSDC by max-swap covenant
-✓ strict pool accepts first 1,000 mUSDC daily-cap fill
-✓ strict pool accepts second 1,000 mUSDC daily-cap fill
-✓ strict pool refuses third 1,000 mUSDC by daily-cap covenant
+✓ loose pool accepts 5,000 mUSDC (5000 mUSDC)
+✓ strict pool refuses 5,000 mUSDC by max-swap covenant (MAX_SWAP_EXCEEDED, attempted 5000 mUSDC, limit 1000 mUSDC)
+✓ strict pool accepts first 1,000 mUSDC daily-cap fill (1000 mUSDC)
+✓ strict pool accepts second 1,000 mUSDC daily-cap fill (1000 mUSDC)
+✓ strict pool refuses third 1,000 mUSDC by daily-cap covenant (DAILY_CAP_EXCEEDED, attempted 3000 mUSDC, limit 2000 mUSDC)
 PolicyPool proof verified on X Layer.
 ```
 
