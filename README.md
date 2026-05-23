@@ -123,6 +123,7 @@ script/
   DeployDemo.s.sol         # deploys hook, router, mocks, pools, policies, demo swaps
   RunDailyCapProof.s.sol   # runs the live strict-pool daily-cap proof
 scripts/
+  verify-all.mjs           # one-command local + live proof verifier, also used in CI
   verify-proof.mjs         # dependency-free verifier for live X Layer proof txs
   verify-deployment.mjs    # dependency-free verifier for live deployment state
 test/
@@ -339,7 +340,7 @@ Recommended demo structure:
 4. Show the same swap sent to the strict pool.
 5. Show `SwapBlockedCaught` after the Hook rejects with `PolicyBlocked("MAX_SWAP_EXCEEDED", 5000e6, 1000e6)`.
 6. Show the daily-cap proof: two `1,000 mUSDC` strict-pool swaps accepted, third refused with `DAILY_CAP_EXCEEDED`.
-7. Close on `node scripts/verify-proof.mjs`, X Layer explorer links, and the 20-line `beforeSwap` covenant check.
+7. Close on `node scripts/verify-all.mjs`, X Layer explorer links, the green CI run, and the 20-line `beforeSwap` covenant check.
 
 Target length: 90 to 120 seconds.
 

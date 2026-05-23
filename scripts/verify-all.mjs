@@ -7,8 +7,8 @@ const steps = [
   ["forge", ["build", "--sizes"], "contract build"],
   ["forge", ["test", "-q"], "contract tests"],
   ["npm", ["run", "build", "--prefix", "web"], "web build"],
-  ["node", ["scripts/verify-deployment.mjs"], "live deployment verifier"],
-  ["node", ["scripts/verify-proof.mjs"], "live proof verifier"],
+  ["node", ["--dns-result-order=ipv4first", "scripts/verify-deployment.mjs"], "live deployment verifier"],
+  ["node", ["--dns-result-order=ipv4first", "scripts/verify-proof.mjs"], "live proof verifier"],
 ];
 
 function run(command, args, label) {
