@@ -12,6 +12,8 @@ Judge guide: [docs/JUDGE_GUIDE.md](docs/JUDGE_GUIDE.md)
 
 Reviewer questions: [docs/JUDGE_GUIDE.md#reviewer-questions](docs/JUDGE_GUIDE.md#reviewer-questions)
 
+Hook invariants: [docs/HOOK_INVARIANTS.md](docs/HOOK_INVARIANTS.md)
+
 Adoption path: [docs/ADOPTION_PATH.md](docs/ADOPTION_PATH.md)
 
 Security notes: [docs/SECURITY_NOTES.md](docs/SECURITY_NOTES.md)

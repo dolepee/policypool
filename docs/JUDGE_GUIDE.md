@@ -66,6 +66,8 @@ PolicyPool proof verified on X Layer.
 | Onchain verifiability | `verify-all.mjs` runs local checks and live checks. `verify-deployment.mjs` checks bytecode, Hook permission bits, PoolManager binding, and policy values. `verify-proof.mjs` reads X Layer receipts, decodes accepted events, unwraps v4 `WrappedError`, decodes inner `PolicyBlocked`, and asserts attempted amount versus covenant limit. |
 | Code quality | The MVP uses one Hook callback, a narrow policy schema, custom errors, unit tests, local v4 integration tests, and CI that runs the same one-command verifier judges can run locally. |
 
+For an invariant-by-invariant review path, see [HOOK_INVARIANTS.md](HOOK_INVARIANTS.md).
+
 ## Live Addresses
 
 | Artifact | Address |

@@ -35,6 +35,8 @@ PolicyPool is a focused Hook submission, not a production risk engine. These not
 
 PolicyPool v1 assumes the pool policy owner is trusted to publish and maintain the covenant honestly. The live proof demonstrates Hook enforcement once the covenant is set; it does not claim decentralized governance over policy changes.
 
+For the invariant-by-invariant test and live-proof map, see [HOOK_INVARIANTS.md](HOOK_INVARIANTS.md).
+
 ## Future Hardening
 
 - Factory-owned pool creation so policy ownership is bound at initialization.
