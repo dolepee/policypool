@@ -24,13 +24,21 @@ It runs formatting, contract build, contract tests, web build, deployment-state 
 
 The same command runs in GitHub Actions, so the public CI badge is also a live-proof signal, not only a local unit-test signal.
 
-6. Or inspect the live checks separately. Verify deployment state:
+6. For a shorter live-only check, run:
+
+```bash
+node scripts/verify-live.mjs
+```
+
+That command verifies deployed Hook state and the live proof receipts without printing the local Forge build-size table.
+
+7. Or inspect the live checks separately. Verify deployment state:
 
 ```bash
 node scripts/verify-deployment.mjs
 ```
 
-7. Verify proof receipts:
+8. Verify proof receipts:
 
 ```bash
 node scripts/verify-proof.mjs
@@ -89,6 +97,7 @@ git submodule update --init --recursive
 forge build
 forge test -vv
 node scripts/verify-all.mjs
+node scripts/verify-live.mjs
 node scripts/verify-deployment.mjs
 node scripts/verify-proof.mjs
 npm run build --prefix web

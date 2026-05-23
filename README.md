@@ -130,6 +130,7 @@ script/
   RunDailyCapProof.s.sol   # runs the live strict-pool daily-cap proof
 scripts/
   verify-all.mjs           # one-command local + live proof verifier, also used in CI
+  verify-live.mjs          # recording-friendly live deployment + proof verifier
   verify-proof.mjs         # dependency-free verifier for live X Layer proof txs
   verify-deployment.mjs    # dependency-free verifier for live deployment state
 test/
@@ -239,6 +240,12 @@ That command runs formatting, contract build, contract tests, web build, deploym
 
 The same command runs in GitHub Actions, so the public CI check verifies both local code quality and the live X Layer proof path.
 
+For a shorter recording-friendly proof command that skips local build output and checks only the deployed state plus live receipts:
+
+```bash
+node scripts/verify-live.mjs
+```
+
 Verify deployed contracts, Hook address bits, Hook permissions, PoolManager binding, and pool policy values:
 
 ```bash
@@ -283,6 +290,7 @@ It currently verifies:
 forge build
 forge test -vv
 node scripts/verify-all.mjs
+node scripts/verify-live.mjs
 node scripts/verify-deployment.mjs
 node scripts/verify-proof.mjs
 ```
@@ -346,7 +354,7 @@ Recommended demo structure:
 4. Show the same swap sent to the strict pool.
 5. Show `SwapBlockedCaught` after the Hook rejects with `PolicyBlocked("MAX_SWAP_EXCEEDED", 5000e6, 1000e6)`.
 6. Show the daily-cap proof: two `1,000 mUSDC` strict-pool swaps accepted, third refused with `DAILY_CAP_EXCEEDED`.
-7. Close on `node scripts/verify-all.mjs`, X Layer explorer links, the green CI run, and the 20-line `beforeSwap` covenant check.
+7. Close on `node scripts/verify-live.mjs`, X Layer explorer links, the green CI run for `verify-all`, and the 20-line `beforeSwap` covenant check.
 
 Target length: 90 to 120 seconds.
 
