@@ -122,6 +122,7 @@ script/
   RunDailyCapProof.s.sol   # runs the live strict-pool daily-cap proof
 scripts/
   verify-proof.mjs         # dependency-free verifier for live X Layer proof txs
+  verify-deployment.mjs    # dependency-free verifier for live deployment state
 test/
   PolicyPoolHook.t.sol     # policy unit tests
   PolicyPoolDemoRouter.t.sol # demo router tests
@@ -219,6 +220,29 @@ Deployment steps:
 
 ## Verify The Live Proof
 
+Verify deployed contracts, Hook address bits, Hook permissions, PoolManager binding, and pool policy values:
+
+```bash
+node scripts/verify-deployment.mjs
+```
+
+Expected result:
+
+```text
+✓ connected to X Layer mainnet (196)
+✓ Uniswap v4 PoolManager bytecode exists at 0x360e68faccca8ca495c1b759fd9eee466db9fb32
+✓ PolicyPoolHook bytecode exists at 0x7d676fa819d8cdf0a2bb73b944a3533870868080
+✓ PolicyPoolDemoRouter bytecode exists at 0xcd46b2c1e6dd9d0fd3edd9b26f0137e02f3fc29e
+✓ MockUSDC bytecode exists at 0xbb856b7ce87315eabf1005861b1b321826a6d33c
+✓ MockETH bytecode exists at 0xea76c34e0d6d43326c9ab98088536d129242d181
+✓ Hook address bits enable BEFORE_SWAP only
+✓ PolicyPoolHook is bound to official X Layer PoolManager
+✓ getHookPermissions returns only beforeSwap=true
+✓ loose pool policy is set (10000 / 50000 mUSDC)
+✓ strict pool policy is set (1000 / 2000 mUSDC)
+PolicyPool deployment verified on X Layer.
+```
+
 The verifier does more than check that transactions exist. It fetches the X Layer receipts, decodes the accepted
 `SwapAccepted` events, unwraps the v4 `WrappedError`, decodes the inner `PolicyBlocked` error, and asserts the exact
 attempted amount and covenant limit for both refusal paths.
@@ -239,6 +263,7 @@ It currently verifies:
 ```bash
 forge build
 forge test -vv
+node scripts/verify-deployment.mjs
 node scripts/verify-proof.mjs
 ```
 

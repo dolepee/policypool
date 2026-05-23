@@ -14,7 +14,13 @@ The live proof answers yes.
 2. Read the first fold: `Pools that can say no.`
 3. Inspect `Proof 01`: loose pool accepts `5,000 mUSDC`; strict pool refuses the same amount.
 4. Inspect `Proof 02`: strict pool accepts two `1,000 mUSDC` fills; the third fill is refused by `DAILY_CAP_EXCEEDED`.
-5. Run:
+5. Verify deployment state:
+
+```bash
+node scripts/verify-deployment.mjs
+```
+
+6. Verify proof receipts:
 
 ```bash
 node scripts/verify-proof.mjs
@@ -39,7 +45,7 @@ PolicyPool proof verified on X Layer.
 | Market potential | Pool covenants are useful for bounded-flow liquidity: new asset launches, treasuries, market makers, and protocols that want public liquidity constraints instead of private monitoring. |
 | Completion | Hook, router, mock tokens, two v4 pools, policies, accepted/refused swaps, verified contracts, live app, verifier, tests, and CI are all present. |
 | X Layer integration | The proof is on X Layer mainnet chain `196` using the official Uniswap v4 `PoolManager` at `0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32`. |
-| Onchain verifiability | The verifier reads X Layer receipts, decodes accepted events, unwraps v4 `WrappedError`, decodes inner `PolicyBlocked`, and asserts attempted amount versus covenant limit. |
+| Onchain verifiability | `verify-deployment.mjs` checks bytecode, Hook permission bits, PoolManager binding, and policy values. `verify-proof.mjs` reads X Layer receipts, decodes accepted events, unwraps v4 `WrappedError`, decodes inner `PolicyBlocked`, and asserts attempted amount versus covenant limit. |
 | Code quality | The MVP uses one Hook callback, a narrow policy schema, custom errors, unit tests, local v4 integration tests, and CI that runs Foundry build/tests plus the web build. |
 
 ## Live Addresses
@@ -72,6 +78,7 @@ cd policypool
 git submodule update --init --recursive
 forge build
 forge test -vv
+node scripts/verify-deployment.mjs
 node scripts/verify-proof.mjs
 npm run build --prefix web
 ```
