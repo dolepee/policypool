@@ -2,6 +2,6 @@
   "name": "policypool-web",
   "private": true,
   "scripts": {
-    "build": "mkdir -p dist && cp index.html styles.css og.svg dist/"
+    "build": "mkdir -p dist && cp index.html styles.css og.svg og.png dist/"
   }
 }
