@@ -1,8 +1,8 @@
-# Policy Schema
+# Policy Covenant Schema
 
-PolicyPool v1 uses a deliberately small pool-level policy. It is designed to be easy to verify in code, tests, and the demo.
+PolicyPool v1 uses a deliberately small pool-level covenant. It is designed to be easy to verify in code, tests, and the demo.
 
-## Policy Fields
+## Covenant Fields
 
 ```solidity
 struct Policy {
@@ -34,5 +34,9 @@ PolicyPool uses `bytes32` reason constants so failed txs decode cleanly:
 - V1 supports exact-input swaps only.
 - V1 does not enforce slippage caps.
 - V1 does not enforce asset allowlists.
-- V1 policy is per pool, not per LP.
+- V1 covenant is per pool, not per LP.
 - Refused swaps revert; reverted hook logs do not persist. The refused proof is the failed tx and decoded custom error.
+
+## Scope
+
+The covenant belongs to the pool. It tells traders what exact-input flow this pool's liquidity will accept before the swap executes.

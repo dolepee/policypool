@@ -1,6 +1,6 @@
 # Deployment Plan
 
-PolicyPool must deploy one valid Uniswap v4 Hook and at least one v4 pool on X Layer. The target demo uses two pools to create the binary moment.
+PolicyPool must deploy one valid Uniswap v4 Hook and at least one v4 pool on X Layer. The target demo uses two pools to prove the covenant moment: same pair, same trader, same swap, one accepts and one refuses.
 
 ## Network
 
@@ -54,15 +54,25 @@ Strict pool:
 
 Different fee and tick spacing produce different `PoolId`s for the same pair and Hook.
 
-## Proof Targets
+## Captured Proof
 
-The submission needs these proof links:
+Captured on X Layer mainnet, chain `196`:
 
-- verified `PolicyPoolHook` contract
-- verified `PolicyHookDeployer` contract
-- two PoolManager `Initialize` txs
-- one accepted swap tx against the loose pool
-- one `swapOrRecord` tx against the strict pool that emits `SwapBlockedCaught` after `PolicyBlocked`
+- `PolicyPoolHook`: `0x7D676FA819D8CDF0A2BB73B944a3533870868080`
+- `PolicyPoolDemoRouter`: `0xCD46b2C1e6dD9d0fd3Edd9B26F0137E02F3Fc29e`
+- loose pool initialized: `0x969e4254336180c5bac71cb9851feacaed2f0fd7c2dabe63b748159909a245a7`
+- strict pool initialized: `0x64793e514c6dd69102f3c4fb459391004bcf47c29fc527328f55afaff2014d46`
+- loose pool accepted `5,000 mUSDC`: `0x1ee4c6e668306c1ed7dddb0a47cb8c722607f892d03f69746d2822df13423396`
+- strict pool recorded refusal: `0xbc206a69a3728847dd28e4958e8e7f7d931f6d34d3e84a505103fd6ff0ec435a`
+- all project contracts verified on Sourcify with exact matches
+
+## Submission Claim
+
+The deployment should support this claim:
+
+> Pool-level covenants enforced inside Uniswap v4 swap execution.
+
+The proof is the accepted/refused swap pair on X Layer: the same exact-input swap is accepted by the loose pool and refused by the strict pool.
 
 ## Commands
 
