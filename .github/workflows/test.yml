@@ -20,7 +20,11 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-          submodules: recursive
+
+      - name: Install required submodules
+        run: |
+          git submodule update --init --depth=1 lib/forge-std lib/v4-core
+          git -C lib/v4-core submodule update --init --depth=1 lib/solmate lib/openzeppelin-contracts
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
