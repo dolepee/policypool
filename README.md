@@ -6,6 +6,29 @@ Built for the OKX X Layer Hook the Future hackathon.
 
 Live app: https://policypool.vercel.app
 
+## 60-Second Judge Path
+
+1. Open the live app and read the first screen: `Pools that can say no.`
+2. Click `Inspect live proof`.
+3. Verify the max-swap proof: the same `5,000 mUSDC` order is accepted by the loose pool and refused by the strict pool.
+4. Verify the daily-cap proof: the strict pool accepts two `1,000 mUSDC` fills, then refuses the third with `DAILY_CAP_EXCEEDED`.
+5. Run the proof verifier:
+
+```bash
+node scripts/verify-proof.mjs
+```
+
+Expected result:
+
+```text
+✓ loose pool accepts 5,000 mUSDC
+✓ strict pool refuses 5,000 mUSDC by max-swap covenant
+✓ strict pool accepts first 1,000 mUSDC daily-cap fill
+✓ strict pool accepts second 1,000 mUSDC daily-cap fill
+✓ strict pool refuses third 1,000 mUSDC by daily-cap covenant
+PolicyPool proof verified on X Layer.
+```
+
 ## Pool Covenants
 
 PolicyPool makes the pool's execution limits explicit and enforceable. A pool creator can publish a small covenant that defines the maximum exact-input swap size and the rolling daily volume the pool will accept.
