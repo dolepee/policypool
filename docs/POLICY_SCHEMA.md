@@ -22,7 +22,7 @@ struct Policy {
 
 ## Reasons
 
-PolicyPool uses `bytes32` reason constants so failed txs decode cleanly:
+PolicyPool uses `bytes32` reason constants so the Hook revert and router-caught proof event decode cleanly:
 
 - `POLICY_NOT_SET`
 - `EXACT_OUTPUT_NOT_SUPPORTED`
@@ -35,7 +35,7 @@ PolicyPool uses `bytes32` reason constants so failed txs decode cleanly:
 - V1 does not enforce slippage caps.
 - V1 does not enforce asset allowlists.
 - V1 covenant is per pool, not per LP.
-- Refused swaps revert; reverted hook logs do not persist. The refused proof is the failed tx and decoded custom error.
+- Refused swaps revert inside the Hook; reverted Hook logs do not persist. The live demo proof uses `PolicyPoolDemoRouter.swapOrRecord` to catch the `PolicyBlocked` revert and emit `SwapBlockedCaught` with the original revert bytes, which the verifier decodes.
 
 ## Scope
 

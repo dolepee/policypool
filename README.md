@@ -138,6 +138,8 @@ test/
   PolicyPoolDemoRouter.t.sol # demo router tests
   PolicyPoolIntegration.t.sol # local v4 PoolManager integration tests
 docs/
+  ADOPTION_PATH.md
+  HOOK_INVARIANTS.md
   JUDGE_GUIDE.md
   POLICY_SCHEMA.md
   SECURITY_NOTES.md
