@@ -1,0 +1,14 @@
+<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">PolicyPool logo</title>
+  <desc id="desc">A green rounded square with the PolicyPool PP monogram.</desc>
+  <rect width="96" height="96" rx="30" fill="url(#paint0_linear)"/>
+  <rect x="8" y="8" width="80" height="80" rx="24" stroke="#07110B" stroke-opacity="0.1"/>
+  <path d="M25 64V31H43.2C50.8 31 55.8 35.5 55.8 42.2C55.8 49.2 50.8 53.8 43.2 53.8H35.5V64H25ZM35.5 45.8H41.8C44.2 45.8 45.5 44.5 45.5 42.3C45.5 40.1 44.2 38.9 41.8 38.9H35.5V45.8Z" fill="#07110B"/>
+  <path d="M54.3 64V31H72.5C80.1 31 85.1 35.5 85.1 42.2C85.1 49.2 80.1 53.8 72.5 53.8H64.8V64H54.3ZM64.8 45.8H71.1C73.5 45.8 74.8 44.5 74.8 42.3C74.8 40.1 73.5 38.9 71.1 38.9H64.8V45.8Z" fill="#07110B"/>
+  <defs>
+    <linearGradient id="paint0_linear" x1="10" y1="7" x2="87" y2="92" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#64FF6F"/>
+      <stop offset="1" stop-color="#AAFF58"/>
+    </linearGradient>
+  </defs>
+</svg>
