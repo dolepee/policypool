@@ -17,10 +17,12 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
-        with:
-          token: ""
-          persist-credentials: false
+      - name: Checkout repository
+        run: |
+          git init .
+          git remote add origin https://github.com/dolepee/policypool.git
+          git fetch --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
 
       - name: Install required submodules
         run: |
