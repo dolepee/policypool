@@ -31,10 +31,10 @@ jobs:
 
       - name: Install Foundry
         run: |
+          export FOUNDRY_DIR="$HOME/.foundry"
           curl -L https://foundry.paradigm.xyz | bash
-          source "$HOME/.bashrc"
-          foundryup
-          echo "$HOME/.foundry/bin" >> "$GITHUB_PATH"
+          "$FOUNDRY_DIR/bin/foundryup"
+          echo "$FOUNDRY_DIR/bin" >> "$GITHUB_PATH"
 
       - name: Show Forge version
         run: forge --version
