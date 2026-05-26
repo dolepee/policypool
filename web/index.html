@@ -5,443 +5,258 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="PolicyPool is a Uniswap v4 Hook on X Layer where pools enforce swap covenants, and trusted policy overrides pay LPs through donate + swap."
+      content="PolicyPool is a Uniswap v4 Hook on X Layer where over-cap swaps either refuse, or pay LPs through donate + swap inside one transaction."
     />
-    <meta property="og:title" content="PolicyPool · When policy bends, LPs get paid" />
+    <meta property="og:title" content="PolicyPool · Policy bends. LPs get paid." />
     <meta
       property="og:description"
-      content="A Uniswap v4 Hook where pool covenants refuse oversized swaps, or accept them only after a trusted router donates to LPs."
+      content="A Uniswap v4 Hook on X Layer where over-cap swaps either refuse, or pay LPs through donate + swap inside one transaction."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://policypool.vercel.app" />
     <meta property="og:image" content="https://policypool.vercel.app/og.png" />
     <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
+    <meta property="og:image:height" content="675" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="PolicyPool · LP-paid policy overrides" />
+    <meta name="twitter:title" content="PolicyPool · Policy bends. LPs get paid." />
     <meta
       name="twitter:description"
-      content="A Uniswap v4 Hook on X Layer where policy overrides pay LPs via donate + swap in one transaction."
+      content="A Uniswap v4 Hook on X Layer where over-cap swaps either refuse, or pay LPs through donate + swap inside one transaction."
     />
     <meta name="twitter:image" content="https://policypool.vercel.app/og.png" />
-    <meta name="theme-color" content="#f4f0df" />
-    <script>
-      (() => {
-        try {
-          const requested = new URLSearchParams(window.location.search).get("theme");
-          const stored = window.localStorage.getItem("policypool-theme");
-          const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-          const theme =
-            requested === "dark" || requested === "light" ? requested : stored || (systemDark ? "dark" : "light");
-          document.documentElement.dataset.theme = theme;
-          document
-            .querySelector('meta[name="theme-color"]')
-            ?.setAttribute("content", theme === "dark" ? "#080b08" : "#f4f0df");
-        } catch {
-          document.documentElement.dataset.theme = "light";
-        }
-      })();
-    </script>
+    <meta name="theme-color" content="#F4EDD9" />
     <title>PolicyPool · Uniswap v4 Hook on X Layer</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="shortcut icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="page-shell">
-      <header class="nav">
-        <a class="brand" href="#">
-          <img class="brand-mark" src="./logo.svg" width="48" height="48" alt="" aria-hidden="true" />
-          <span>PolicyPool</span>
-        </a>
-        <nav aria-label="Primary">
-          <a href="#proof">Proof</a>
-          <a href="#hook">Hook</a>
+    <div class="paper">
+      <header class="masthead">
+        <div class="eyebrow">
+          <span class="dot" aria-hidden="true"></span>
+          <span>POLICYPOOL V2 · LIVE ON X LAYER MAINNET</span>
+        </div>
+        <nav class="masthead-nav" aria-label="Primary">
+          <a href="#ledger">Proof ledger</a>
+          <a href="#mechanism">Mechanism</a>
+          <a href="#contracts">Contracts</a>
           <a href="https://github.com/dolepee/policypool" target="_blank" rel="noreferrer">GitHub</a>
-          <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to dark mode">Dark</button>
         </nav>
       </header>
 
-      <aside class="proof-ribbon" aria-label="Live proof status">
-        <a
-          href="https://www.oklink.com/x-layer/tx/0xbc206a69a3728847dd28e4958e8e7f7d931f6d34d3e84a505103fd6ff0ec435a"
-          target="_blank"
-          rel="noreferrer"
-        >
-          <span>max-swap proof</span>
-          <strong>MAX_SWAP_EXCEEDED</strong>
-        </a>
-        <a
-          href="https://www.oklink.com/x-layer/tx/0x71130fce6387f081b5f2ded837879c38cdd18640fd62a8a11533d48737be771c"
-          target="_blank"
-          rel="noreferrer"
-        >
-          <span>daily-cap proof</span>
-          <strong>DAILY_CAP_EXCEEDED</strong>
-        </a>
-        <a
-          href="https://www.oklink.com/x-layer/tx/0x18096b74138d43a6683f1c914e7aa83633c8ed0ba6a533cf6e7e939f5f7ea9a8"
-          target="_blank"
-          rel="noreferrer"
-        >
-          <span>surge proof</span>
-          <strong>DONATE + SWAP</strong>
-        </a>
-        <a
-          href="https://github.com/dolepee/policypool/actions/runs/26449181584"
-          target="_blank"
-          rel="noreferrer"
-        >
-          <span>reproducible verifier</span>
-          <strong>CI runs live receipts</strong>
-        </a>
-      </aside>
+      <hr class="rule" />
 
-      <main>
-        <section class="hero" aria-label="PolicyPool overview">
-          <div class="hero-copy">
-            <p class="eyebrow">Uniswap v4 Hook · X Layer mainnet</p>
-            <h1>When policy bends, LPs get paid.</h1>
-            <p class="lede">
-              A Uniswap v4 Hook that refuses over-cap swaps unless a trusted router donates to LPs in the same
-              <code>PoolManager</code> unlock.
-            </p>
-            <div class="actions">
-              <a class="primary" href="#proof">Inspect live proof</a>
-              <a href="#deployment">Verified contracts</a>
-            </div>
-            <div class="hero-metrics" aria-label="PolicyPool proof summary">
-              <span>2 verified hooks</span>
-              <span>3 v4 pools</span>
-              <span>7 live proof txs</span>
-            </div>
-          </div>
+      <section class="hero" aria-label="Headline">
+        <div class="headline">
+          <span class="strike">Policy bends.</span>
+          <span class="payoff">LPs get paid.</span>
+        </div>
+        <p class="lede">
+          A Uniswap v4 Hook where over-cap swaps either <strong>refuse</strong>, or pay LPs through
+          <strong>donate + swap</strong> inside one X Layer transaction. Same trader. Same tx. Same swap unlock.
+        </p>
+        <div class="dateline">
+          <span>X Layer mainnet · chain 196</span>
+          <span>7 proof transactions · all onchain</span>
+          <span>Verified on Sourcify · reproduced by CI</span>
+        </div>
+      </section>
 
-          <div class="terminal-card" aria-label="Same swap routed through pool covenants">
-            <div class="terminal-bar">
-              <span>live covenant gate</span>
-              <strong>X Layer 196</strong>
-            </div>
+      <hr class="rule" />
 
-            <div class="order-ticket">
-              <span>Same exact-input order</span>
-              <strong>5,000 mUSDC</strong>
-              <small>trader 0xAe98...081b</small>
-            </div>
+      <section class="ledger" id="ledger" aria-label="Live proof ledger">
+        <div class="section-head">
+          <h2>The proof ledger.</h2>
+          <p>Seven X Layer transactions. Three pools, two enforcement modes, one trusted router. Every row links to the receipt.</p>
+        </div>
 
-            <div class="gate">
-              <div class="gate-line"></div>
-              <div class="gate-label">beforeSwap</div>
-            </div>
-
+        <ol class="rows">
+          <li>
             <a
-              class="surge-control"
-              href="https://www.oklink.com/x-layer/tx/0x18096b74138d43a6683f1c914e7aa83633c8ed0ba6a533cf6e7e939f5f7ea9a8"
-              target="_blank"
-              rel="noreferrer"
+              href="https://www.oklink.com/x-layer/tx/0x1ee4c6e668306c1ed7dddb0a47cb8c722607f892d03f69746d2822df13423396"
+              target="_blank" rel="noreferrer"
             >
-              <span class="surge-toggle">Accept surge fee</span>
-              <strong>40 mUSDC</strong>
-              <small>trusted router donates to LPs before swap</small>
+              <span class="idx">P01</span>
+              <span class="gate">MAX-SWAP</span>
+              <span class="verdict ok">ACCEPTED</span>
+              <span class="detail">Loose pool · 5,000 mUSDC clears</span>
+              <span class="hash">0x1ee4…3396</span>
             </a>
-
-            <div class="verdict-stack">
-              <a
-                class="verdict pass"
-                href="https://www.oklink.com/x-layer/tx/0x1ee4c6e668306c1ed7dddb0a47cb8c722607f892d03f69746d2822df13423396"
-                target="_blank"
-                rel="noreferrer"
-              >
-                <span>Loose pool</span>
-                <strong>Accepted</strong>
-                <small>max swap 10,000</small>
-              </a>
-              <a
-                class="verdict stop"
-                href="https://www.oklink.com/x-layer/tx/0xbc206a69a3728847dd28e4958e8e7f7d931f6d34d3e84a505103fd6ff0ec435a"
-                target="_blank"
-                rel="noreferrer"
-              >
-                <span>Strict pool</span>
-                <strong>Refused</strong>
-                <small>MAX_SWAP_EXCEEDED</small>
-              </a>
-            </div>
-          </div>
-        </section>
-
-        <section class="proof-board" id="proof" aria-label="Live proof">
-          <div class="section-head">
-            <p class="eyebrow">Live proof</p>
-            <h2>Three outcomes, all proven onchain.</h2>
-            <p>
-              The demo is intentionally direct. Same pool-covenant primitive, real X Layer transactions: max-swap refusal,
-              daily-cap refusal, and surge acceptance where the trusted router donates to LPs before the swap.
-            </p>
-          </div>
-
-          <div class="proof-grid">
-            <article class="proof-card primary-proof">
-              <div class="proof-card-head">
-                <span>Proof 01</span>
-                <strong>Max-swap covenant</strong>
-              </div>
-              <p>One 5,000 mUSDC order goes through the loose pool and is refused by the strict pool.</p>
-              <div class="proof-links">
-                <a href="https://www.oklink.com/x-layer/tx/0x1ee4c6e668306c1ed7dddb0a47cb8c722607f892d03f69746d2822df13423396" target="_blank" rel="noreferrer">
-                  Accepted · 0x1ee4...3396
-                </a>
-                <a href="https://www.oklink.com/x-layer/tx/0xbc206a69a3728847dd28e4958e8e7f7d931f6d34d3e84a505103fd6ff0ec435a" target="_blank" rel="noreferrer">
-                  Refused · 0xbc20...435a
-                </a>
-              </div>
-            </article>
-
-            <article class="proof-card cap-proof">
-              <div class="proof-card-head">
-                <span>Proof 02</span>
-                <strong>Daily-cap covenant</strong>
-              </div>
-              <p>
-                The strict pool accepts two 1,000 mUSDC fills, then refuses the next fill with
-                <code>DAILY_CAP_EXCEEDED</code>.
-              </p>
-              <div class="cap-ladder">
-                <a class="cap-step pass" href="https://www.oklink.com/x-layer/tx/0x2a260e92507918a290117e17445aea183b9fa2f1959bbd5719750b487b56f178" target="_blank" rel="noreferrer">
-                  <span>Fill 1</span>
-                  <strong>Accepted</strong>
-                </a>
-                <a class="cap-step pass" href="https://www.oklink.com/x-layer/tx/0xc6085e4feaa9e6559a04a21d10eb55503224a86a924c19622e51a31b0a45292b" target="_blank" rel="noreferrer">
-                  <span>Fill 2</span>
-                  <strong>Accepted</strong>
-                </a>
-                <a class="cap-step stop" href="https://www.oklink.com/x-layer/tx/0x71130fce6387f081b5f2ded837879c38cdd18640fd62a8a11533d48737be771c" target="_blank" rel="noreferrer">
-                  <span>Fill 3</span>
-                  <strong>Refused</strong>
-                </a>
-              </div>
-            </article>
-
-            <article class="proof-card surge-proof">
-              <div class="proof-card-head">
-                <span>Proof 03</span>
-                <strong>Surge pays LPs</strong>
-              </div>
-              <p>
-                The surge router donates 40 mUSDC to in-range LPs, then executes the 5,000 mUSDC swap in the same unlock.
-                The old router cannot spoof this path.
-              </p>
-              <div class="proof-links">
-                <a href="https://www.oklink.com/x-layer/tx/0x18096b74138d43a6683f1c914e7aa83633c8ed0ba6a533cf6e7e939f5f7ea9a8" target="_blank" rel="noreferrer">
-                  Surge accepted · 0x1809...a9a8
-                </a>
-                <a href="https://www.oklink.com/x-layer/tx/0x4877a6cf2214148d8ba0b3ca7d036da1cde7e35a33eeaaf79718f3e54ee4843a" target="_blank" rel="noreferrer">
-                  Spoof blocked · 0x4877...843a
-                </a>
-              </div>
-            </article>
-          </div>
-        </section>
-
-        <section class="verifier-panel" aria-label="Decoded proof verifier">
-          <div class="section-head compact">
-            <p class="eyebrow">Decoded verifier</p>
-            <h2>CI now verifies the live receipts.</h2>
-            <p>
-              `node scripts/verify-all.mjs` compiles the contracts, runs tests, builds the site, verifies the deployed
-              Hook, then decodes the same X Layer receipts shown above.
-            </p>
-            <a class="ci-proof-link" href="https://github.com/dolepee/policypool/actions/runs/26449181584" target="_blank" rel="noreferrer">
-              Open latest green CI
+          </li>
+          <li>
+            <a
+              href="https://www.oklink.com/x-layer/tx/0xbc206a69a3728847dd28e4958e8e7f7d931f6d34d3e84a505103fd6ff0ec435a"
+              target="_blank" rel="noreferrer"
+            >
+              <span class="idx">P02</span>
+              <span class="gate">MAX-SWAP</span>
+              <span class="verdict no">REFUSED</span>
+              <span class="detail">Strict pool · reverts <code>MAX_SWAP_EXCEEDED</code></span>
+              <span class="hash">0xbc20…435a</span>
             </a>
-          </div>
+          </li>
+          <li>
+            <a
+              href="https://www.oklink.com/x-layer/tx/0x2a260e92507918a290117e17445aea183b9fa2f1959bbd5719750b487b56f178"
+              target="_blank" rel="noreferrer"
+            >
+              <span class="idx">P03</span>
+              <span class="gate">DAILY-CAP</span>
+              <span class="verdict ok">ACCEPTED</span>
+              <span class="detail">Fill 1 of 3 · 1,000 mUSDC</span>
+              <span class="hash">0x2a26…f178</span>
+            </a>
+          </li>
+          <li>
+            <a
+              href="https://www.oklink.com/x-layer/tx/0xc6085e4feaa9e6559a04a21d10eb55503224a86a924c19622e51a31b0a45292b"
+              target="_blank" rel="noreferrer"
+            >
+              <span class="idx">P04</span>
+              <span class="gate">DAILY-CAP</span>
+              <span class="verdict ok">ACCEPTED</span>
+              <span class="detail">Fill 2 of 3 · 1,000 mUSDC</span>
+              <span class="hash">0xc608…292b</span>
+            </a>
+          </li>
+          <li>
+            <a
+              href="https://www.oklink.com/x-layer/tx/0x71130fce6387f081b5f2ded837879c38cdd18640fd62a8a11533d48737be771c"
+              target="_blank" rel="noreferrer"
+            >
+              <span class="idx">P05</span>
+              <span class="gate">DAILY-CAP</span>
+              <span class="verdict no">REFUSED</span>
+              <span class="detail">Fill 3 · reverts <code>DAILY_CAP_EXCEEDED</code></span>
+              <span class="hash">0x7113…771c</span>
+            </a>
+          </li>
+          <li class="marquee">
+            <a
+              href="https://www.oklink.com/x-layer/tx/0x18096b74138d43a6683f1c914e7aa83633c8ed0ba6a533cf6e7e939f5f7ea9a8"
+              target="_blank" rel="noreferrer"
+            >
+              <span class="idx">P06</span>
+              <span class="gate">SURGE</span>
+              <span class="verdict pay">DONATE + SWAP</span>
+              <span class="detail">40 mUSDC donated to LPs · 5,000 mUSDC swap, same unlock</span>
+              <span class="hash">0x1809…a9a8</span>
+            </a>
+          </li>
+          <li>
+            <a
+              href="https://www.oklink.com/x-layer/tx/0x4877a6cf2214148d8ba0b3ca7d036da1cde7e35a33eeaaf79718f3e54ee4843a"
+              target="_blank" rel="noreferrer"
+            >
+              <span class="idx">P07</span>
+              <span class="gate">SPOOF GUARD</span>
+              <span class="verdict no">BLOCKED</span>
+              <span class="detail">Old router cannot fake <code>hookData</code></span>
+              <span class="hash">0x4877…843a</span>
+            </a>
+          </li>
+        </ol>
+      </section>
 
-          <div class="verifier-terminal">
-            <div class="verifier-top">
-              <span>node scripts/verify-all.mjs</span>
-              <strong>CI green</strong>
-            </div>
-            <div class="verify-line ok">
-              <span>✓</span>
-              <p>format, contract build, contract tests, and web build pass</p>
-            </div>
-            <div class="verify-line ok">
-              <span>✓</span>
-              <p>deployed Hook bytecode, PoolManager binding, and Hook permission bits verified</p>
-            </div>
-            <div class="verify-line ok">
-              <span>✓</span>
-              <p>loose pool accepts <strong>5,000 mUSDC</strong></p>
-            </div>
-            <div class="verify-line block">
-              <span>✓</span>
-              <p>
-                strict pool refuses by <strong>MAX_SWAP_EXCEEDED</strong>
-                <small>attempted 5,000 mUSDC · limit 1,000 mUSDC</small>
-              </p>
-            </div>
-            <div class="verify-line ok">
-              <span>✓</span>
-              <p>
-                surge pool accepts after a <strong>40 mUSDC</strong> LP donation
-                <small>same tx includes `Donate`, `SwapAccepted`, and `SurgeAccepted`</small>
-              </p>
-            </div>
-            <div class="verify-line ok">
-              <span>✓</span>
-              <p>strict pool accepts first daily-cap fill <strong>1,000 mUSDC</strong></p>
-            </div>
-            <div class="verify-line ok">
-              <span>✓</span>
-              <p>strict pool accepts second daily-cap fill <strong>1,000 mUSDC</strong></p>
-            </div>
-            <div class="verify-line block">
-              <span>✓</span>
-              <p>
-                third fill refuses by <strong>DAILY_CAP_EXCEEDED</strong>
-                <small>attempted 3,000 mUSDC · limit 2,000 mUSDC</small>
-              </p>
-            </div>
-          </div>
-        </section>
+      <hr class="rule" />
 
-        <section class="mechanism" id="hook" aria-label="Hook mechanism">
+      <section class="mechanism" id="mechanism" aria-label="Mechanism">
+        <div class="section-head">
+          <h2>The mechanism, in plain Solidity.</h2>
+          <p>No oracle. No offchain matcher. No governance. The Hook checks two numbers; the Surge router pays LPs before the swap clears.</p>
+        </div>
+
+        <pre><code><span class="mono-h">v1 · policy gate</span>
+beforeSwap(amountIn):
+    if amountIn &gt; maxSwap            <span class="mono-r">// revert MAX_SWAP_EXCEEDED</span>
+    if spentToday + amountIn &gt; cap   <span class="mono-r">// revert DAILY_CAP_EXCEEDED</span>
+    spentToday += amountIn
+    emit SwapAccepted(poolId, trader, amountIn)
+
+<span class="mono-h">v2 · surge override</span>
+surgeRouter.swapWithDonate(amountIn, surgeFee):
+    require(msg.sender == trustedRouter)
+    PoolManager.donate(poolKey, surgeFee)    <span class="mono-g">// LPs paid first</span>
+    PoolManager.swap(poolKey, amountIn)      <span class="mono-g">// same unlock callback</span>
+    emit SurgeAccepted(poolId, trader, amountIn, surgeFee)</code></pre>
+      </section>
+
+      <hr class="rule" />
+
+      <section class="notes" aria-label="Reviewer notes">
+        <div class="section-head">
+          <h2>Notes for the reviewer.</h2>
+        </div>
+        <div class="note-rows">
+          <p>
+            <strong>The refusal is enforced by the Hook, not the UI.</strong>
+            <code>beforeSwap</code> reverts inside Uniswap v4 <code>PoolManager</code> before any liquidity is consumed.
+            The router only records the caught failure.
+          </p>
+          <p>
+            <strong>The donation is enforced by the trusted router.</strong>
+            The Surge hook reads <code>hookData</code> from <code>beforeSwap</code> but only honors it when the unlock
+            caller is the registered router. The deployed old router proves the spoof path reverts.
+          </p>
+          <p>
+            <strong>Mock assets, real swaps.</strong>
+            Pools use mUSDC / mETH on X Layer to isolate Hook behavior from token noise. The Hook callback, the
+            <code>Donate</code> event, and the swap settlement are all on chain 196.
+          </p>
+        </div>
+      </section>
+
+      <hr class="rule" />
+
+      <section class="contracts" id="contracts" aria-label="Deployed contracts">
+        <div class="section-head">
+          <h2>Verified contracts.</h2>
+          <p>All Sourcify exact-match. Click any address for the verified source.</p>
+        </div>
+
+        <dl class="contract-list">
           <div>
-            <p class="eyebrow">Hook mechanism</p>
-            <h2>Small policy surface. Real swap enforcement.</h2>
-            <p>
-              No oracle, no offchain matcher, no governance layer. The v1 Hook only checks max input and rolling daily
-              volume, then either lets the v4 swap continue or refuses it before execution.
-            </p>
+            <dt>PolicyPoolSurgeHook · v2</dt>
+            <dd><a href="https://sourcify.dev/#/lookup/0xf44d9C1f9efF1231E53C60EDB9A73761aa99c080" target="_blank" rel="noreferrer">0xf44d9C1f9efF1231E53C60EDB9A73761aa99c080</a></dd>
           </div>
-          <pre><code>if amountIn &gt; maxSwapAmount:
-  revert PolicyBlocked("MAX_SWAP_EXCEEDED")
-
-if spentToday + amountIn &gt; dailyCap:
-  revert PolicyBlocked("DAILY_CAP_EXCEEDED")
-
-spentToday += amountIn
-emit SwapAccepted(poolId, trader, amountIn)</code></pre>
-        </section>
-
-        <section class="reviewer-checks" aria-label="Reviewer checks">
-          <div class="section-head compact">
-            <p class="eyebrow">Reviewer checks</p>
-            <h2>The refusal is enforced by the Hook, not by the UI.</h2>
-          </div>
-          <div class="check-grid">
-            <article>
-              <strong>Hook-level block</strong>
-              <p><code>beforeSwap</code> reverts before the pool consumes liquidity. The router only records the caught failure.</p>
-            </article>
-            <article>
-              <strong>No router bypass</strong>
-              <p>Any v4 swap against these pools has to pass the same Hook callback through PoolManager.</p>
-            </article>
-            <article>
-              <strong>Mock assets by design</strong>
-              <p>The proof isolates Hook behavior from token liquidity noise while still using live X Layer transactions.</p>
-            </article>
-            <article>
-              <strong>Not dynamic fees</strong>
-              <p>The Hook does not reprice the trade. It changes the pool's execution boundary: accept or refuse.</p>
-            </article>
-          </div>
-        </section>
-
-        <section class="market-path" aria-label="Market path">
-          <div class="section-head compact">
-            <p class="eyebrow">Market path</p>
-            <h2>Bounded flow for LPs who cannot watch every block.</h2>
-            <p>
-              PolicyPool is a second pool class, not a replacement for permissionless pools. It gives launch teams,
-              treasuries, and market makers a public flow envelope the pool enforces itself.
-            </p>
-          </div>
-          <div class="use-case-grid">
-            <article>
-              <span>01</span>
-              <strong>New asset launches</strong>
-              <p>Cap early whale flow while liquidity is shallow, without hiding the rule in a private backend.</p>
-            </article>
-            <article>
-              <span>02</span>
-              <strong>Treasury liquidity</strong>
-              <p>Publish max-swap and daily-volume limits so the operating envelope is visible before execution.</p>
-            </article>
-            <article>
-              <span>03</span>
-              <strong>Market makers</strong>
-              <p>Run strict and loose pools side by side for the same pair, each with its own enforceable covenant.</p>
-            </article>
-          </div>
-        </section>
-
-        <section class="deployment" id="deployment" aria-label="Deployment links">
-          <div class="section-head compact">
-            <p class="eyebrow">Deployment</p>
-            <h2>Verified contracts and reproducible proof.</h2>
-          </div>
-          <div class="deploy-grid">
-            <a href="https://sourcify.dev/#/lookup/0x7D676FA819D8CDF0A2BB73B944a3533870868080" target="_blank" rel="noreferrer">
-              <span>PolicyPoolHook</span>
-              <strong>0x7D67...8080</strong>
-            </a>
-            <a href="https://sourcify.dev/#/lookup/0xCD46b2C1e6dD9d0fd3Edd9B26F0137E02F3Fc29e" target="_blank" rel="noreferrer">
-              <span>Demo router</span>
-              <strong>0xCD46...c29e</strong>
-            </a>
-            <a href="https://github.com/dolepee/policypool#verify-the-live-proof" target="_blank" rel="noreferrer">
-              <span>Verifier</span>
-              <strong>node scripts/verify-live.mjs</strong>
-            </a>
-            <a href="https://github.com/dolepee/policypool/actions/runs/26449181584" target="_blank" rel="noreferrer">
-              <span>Live-proof CI</span>
-              <strong>green on GitHub</strong>
-            </a>
-          </div>
-        </section>
-
-        <footer class="site-footer" aria-label="Project links">
           <div>
-            <strong>PolicyPool</strong>
-            <span>Uniswap v4 Hook on X Layer mainnet</span>
+            <dt>PolicyPoolSurgeRouter · v2</dt>
+            <dd><a href="https://sourcify.dev/#/lookup/0xd05AAD5b86f6FFCc10872803bEdb5fa911e0E1fD" target="_blank" rel="noreferrer">0xd05AAD5b86f6FFCc10872803bEdb5fa911e0E1fD</a></dd>
           </div>
-          <a href="https://github.com/dolepee/policypool" target="_blank" rel="noreferrer">
-            Star the Hook on GitHub
+          <div>
+            <dt>PolicyPoolHook · v1</dt>
+            <dd><a href="https://sourcify.dev/#/lookup/0x7D676FA819D8CDF0A2BB73B944a3533870868080" target="_blank" rel="noreferrer">0x7D676FA819D8CDF0A2BB73B944a3533870868080</a></dd>
+          </div>
+          <div>
+            <dt>PolicyPoolDemoRouter · v1</dt>
+            <dd><a href="https://sourcify.dev/#/lookup/0xCD46b2C1e6dD9d0fd3Edd9B26F0137E02F3Fc29e" target="_blank" rel="noreferrer">0xCD46b2C1e6dD9d0fd3Edd9B26F0137E02F3Fc29e</a></dd>
+          </div>
+          <div>
+            <dt>Uniswap v4 PoolManager · X Layer</dt>
+            <dd><a href="https://www.oklink.com/x-layer/address/0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32" target="_blank" rel="noreferrer">0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32</a></dd>
+          </div>
+        </dl>
+
+        <div class="verifier">
+          <div>
+            <span class="vlabel">Reproduce the receipts locally</span>
+            <code>node scripts/verify-all.mjs</code>
+          </div>
+          <a class="ci-link" href="https://github.com/dolepee/policypool/actions/runs/26449181584" target="_blank" rel="noreferrer">
+            Latest green CI run
           </a>
-        </footer>
-      </main>
+        </div>
+      </section>
+
+      <hr class="rule" />
+
+      <footer class="colophon">
+        <span>policypool.vercel.app</span>
+        <span>OKX Hook the Future · X Layer · 2026</span>
+        <a href="https://github.com/dolepee/policypool" target="_blank" rel="noreferrer">github.com/dolepee/policypool</a>
+      </footer>
     </div>
-    <script>
-      window.addEventListener("load", () => {
-        const root = document.documentElement;
-        const button = document.querySelector("[data-theme-toggle]");
-        const meta = document.querySelector('meta[name="theme-color"]');
-        const applyTheme = (theme) => {
-          root.dataset.theme = theme;
-          meta?.setAttribute("content", theme === "dark" ? "#080b08" : "#f4f0df");
-          if (!button) return;
-          button.textContent = theme === "dark" ? "Light" : "Dark";
-          button.setAttribute("aria-label", `Switch to ${theme === "dark" ? "light" : "dark"} mode`);
-        };
-
-        applyTheme(root.dataset.theme || "light");
-        button?.addEventListener("click", () => {
-          const next = root.dataset.theme === "dark" ? "light" : "dark";
-          applyTheme(next);
-          try {
-            window.localStorage.setItem("policypool-theme", next);
-          } catch {
-            /* Theme persistence is optional. */
-          }
-        });
-
-        if (!window.location.hash) return;
-        const target = document.querySelector(window.location.hash);
-        if (target) target.scrollIntoView({ block: "start" });
-      });
-    </script>
   </body>
 </html>
