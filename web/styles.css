@@ -124,7 +124,7 @@ pre,
 
 .proof-ribbon {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-top: 12px;
 }
@@ -199,9 +199,9 @@ p {
 
 h1 {
   margin: 14px 0 20px;
-  max-width: 760px;
-  font-size: clamp(76px, 8vw, 140px);
-  line-height: 0.84;
+  max-width: 900px;
+  font-size: clamp(64px, 6.7vw, 118px);
+  line-height: 0.88;
   letter-spacing: -0.085em;
 }
 
@@ -923,6 +923,10 @@ pre {
   .hero {
     min-height: auto;
   }
+
+  .proof-ribbon {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
@@ -945,11 +949,23 @@ pre {
   }
 
   .proof-ribbon {
-    grid-template-columns: 1fr;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
   }
 
   .proof-ribbon a {
+    flex: 0 0 82%;
+    min-height: 54px;
     border-radius: 22px;
+    scroll-snap-align: start;
+  }
+
+  .proof-ribbon::-webkit-scrollbar {
+    display: none;
   }
 
   main {
@@ -957,7 +973,8 @@ pre {
   }
 
   h1 {
-    font-size: clamp(60px, 18vw, 86px);
+    font-size: clamp(48px, 14vw, 70px);
+    line-height: 0.93;
   }
 
   h2 {

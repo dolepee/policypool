@@ -5,10 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="PolicyPool is a Uniswap v4 Hook on X Layer where pools enforce their own swap-size and daily-volume covenants before execution."
+      content="PolicyPool is a Uniswap v4 Hook on X Layer where pools enforce swap covenants, and trusted policy overrides pay LPs through donate + swap."
     />
-    <meta property="og:title" content="PolicyPool · Pool covenants for Uniswap v4" />
-    <meta property="og:description" content="Same swap, two pools: one accepts, one refuses. Verifiable on X Layer." />
+    <meta property="og:title" content="PolicyPool · Policy overrides pay LPs" />
+    <meta
+      property="og:description"
+      content="A Uniswap v4 Hook where pool covenants refuse oversized swaps, or accept them only after a trusted router donates to LPs."
+    />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://policypool.vercel.app" />
     <meta property="og:image" content="https://policypool.vercel.app/og.png" />
@@ -16,10 +19,10 @@
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="PolicyPool · Pools that can say no" />
+    <meta name="twitter:title" content="PolicyPool · Pools say no, or get paid" />
     <meta
       name="twitter:description"
-      content="A Uniswap v4 Hook on X Layer where pool covenants accept or refuse swaps before execution."
+      content="A Uniswap v4 Hook on X Layer where policy overrides pay LPs via donate + swap in one transaction."
     />
     <meta name="twitter:image" content="https://policypool.vercel.app/og.png" />
     <meta name="theme-color" content="#f4f0df" />
@@ -68,7 +71,7 @@
           <strong>DONATE + SWAP</strong>
         </a>
         <a
-          href="https://github.com/dolepee/policypool/actions/workflows/test.yml"
+          href="https://github.com/dolepee/policypool/actions/runs/26449181584"
           target="_blank"
           rel="noreferrer"
         >
@@ -81,17 +84,17 @@
         <section class="hero" aria-label="PolicyPool overview">
           <div class="hero-copy">
             <p class="eyebrow">Uniswap v4 Hook · X Layer mainnet</p>
-            <h1>Pools that can say no.</h1>
+            <h1>Pools that say no, or get paid to say yes.</h1>
             <p class="lede">
-              PolicyPool gives each v4 pool its own swap-size and daily-volume covenant. The Hook checks the covenant in
-              <code>beforeSwap</code>, before liquidity is consumed.
+              PolicyPool gives each v4 pool its own swap-size and daily-volume covenant. Strict pools refuse oversized
+              flow; Surge lets a trusted router pay LPs before the pool accepts.
             </p>
             <div class="actions">
               <a class="primary" href="#proof">Inspect live proof</a>
-              <a href="https://sourcify.dev/#/lookup/0x7D676FA819D8CDF0A2BB73B944a3533870868080" target="_blank" rel="noreferrer">Verified Hook</a>
+              <a href="#deployment">Verified contracts</a>
             </div>
             <div class="hero-metrics" aria-label="PolicyPool proof summary">
-              <span>1 Hook</span>
+              <span>2 verified hooks</span>
               <span>3 v4 pools</span>
               <span>7 live proof txs</span>
             </div>
@@ -231,8 +234,8 @@
               `node scripts/verify-all.mjs` compiles the contracts, runs tests, builds the site, verifies the deployed
               Hook, then decodes the same X Layer receipts shown above.
             </p>
-            <a class="ci-proof-link" href="https://github.com/dolepee/policypool/actions/workflows/test.yml" target="_blank" rel="noreferrer">
-              Open live-proof CI
+            <a class="ci-proof-link" href="https://github.com/dolepee/policypool/actions/runs/26449181584" target="_blank" rel="noreferrer">
+              Open latest green CI
             </a>
           </div>
 
@@ -357,7 +360,7 @@ emit SwapAccepted(poolId, trader, amountIn)</code></pre>
           </div>
         </section>
 
-        <section class="deployment" aria-label="Deployment links">
+        <section class="deployment" id="deployment" aria-label="Deployment links">
           <div class="section-head compact">
             <p class="eyebrow">Deployment</p>
             <h2>Verified contracts and reproducible proof.</h2>
@@ -375,7 +378,7 @@ emit SwapAccepted(poolId, trader, amountIn)</code></pre>
               <span>Verifier</span>
               <strong>node scripts/verify-live.mjs</strong>
             </a>
-            <a href="https://github.com/dolepee/policypool/actions/workflows/test.yml" target="_blank" rel="noreferrer">
+            <a href="https://github.com/dolepee/policypool/actions/runs/26449181584" target="_blank" rel="noreferrer">
               <span>Live-proof CI</span>
               <strong>green on GitHub</strong>
             </a>
