@@ -7,7 +7,7 @@
       name="description"
       content="PolicyPool is a Uniswap v4 Hook on X Layer where pools enforce swap covenants, and trusted policy overrides pay LPs through donate + swap."
     />
-    <meta property="og:title" content="PolicyPool · Policy overrides pay LPs" />
+    <meta property="og:title" content="PolicyPool · When policy bends, LPs get paid" />
     <meta
       property="og:description"
       content="A Uniswap v4 Hook where pool covenants refuse oversized swaps, or accept them only after a trusted router donates to LPs."
@@ -19,7 +19,7 @@
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="PolicyPool · Pools say no, or get paid" />
+    <meta name="twitter:title" content="PolicyPool · LP-paid policy overrides" />
     <meta
       name="twitter:description"
       content="A Uniswap v4 Hook on X Layer where policy overrides pay LPs via donate + swap in one transaction."
@@ -84,10 +84,10 @@
         <section class="hero" aria-label="PolicyPool overview">
           <div class="hero-copy">
             <p class="eyebrow">Uniswap v4 Hook · X Layer mainnet</p>
-            <h1>Pools that say no, or get paid to say yes.</h1>
+            <h1>When policy bends, LPs get paid.</h1>
             <p class="lede">
-              PolicyPool gives each v4 pool its own swap-size and daily-volume covenant. Strict pools refuse oversized
-              flow; Surge lets a trusted router pay LPs before the pool accepts.
+              A Uniswap v4 Hook that refuses over-cap swaps unless a trusted router donates to LPs in the same
+              <code>PoolManager</code> unlock.
             </p>
             <div class="actions">
               <a class="primary" href="#proof">Inspect live proof</a>
@@ -396,5 +396,12 @@ emit SwapAccepted(poolId, trader, amountIn)</code></pre>
         </footer>
       </main>
     </div>
+    <script>
+      window.addEventListener("load", () => {
+        if (!window.location.hash) return;
+        const target = document.querySelector(window.location.hash);
+        if (target) target.scrollIntoView({ block: "start" });
+      });
+    </script>
   </body>
 </html>
