@@ -4,7 +4,7 @@ PolicyPool is a Uniswap v4 Hook on X Layer mainnet that gives each pool a small,
 
 The demo question is simple:
 
-> Same trader, same exact-input swap, same Hook. Can two pools enforce different rules?
+> Same exact-input order, different pool policy. Can the pool enforce a different onchain outcome before swap execution?
 
 The live proof answers yes.
 
@@ -17,10 +17,10 @@ The live proof answers yes through `PoolManager.Donate` plus `SurgeAccepted` in 
 ## Fast Path
 
 1. Open the app: https://policypool.vercel.app
-2. Read the first fold: `Pools that can say no.`
-3. Inspect `Proof 01`: loose pool accepts `5,000 mUSDC`; strict pool refuses the same amount.
-4. Inspect `Proof 02`: strict pool accepts two `1,000 mUSDC` fills; the third fill is refused by `DAILY_CAP_EXCEEDED`.
-5. Inspect `Proof 03`: surge router donates `40 mUSDC` to LPs, then executes the `5,000 mUSDC` swap in the same transaction.
+2. Read the first fold: `Policy bends. LPs get paid.`
+3. Inspect the featured Surge proof: the trusted router donates `40 mUSDC` to LPs, then executes the `5,000 mUSDC` swap in the same v4 unlock.
+4. Inspect the spoof-guard proof: the old router cannot activate Surge with fake `hookData`.
+5. Inspect the V1 covenant proofs: loose pool accepts `5,000 mUSDC`; strict pool refuses the same exact-input amount; strict pool accepts two `1,000 mUSDC` fills and refuses the third with `DAILY_CAP_EXCEEDED`.
 6. Run the one-command verifier:
 
 ```bash

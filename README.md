@@ -1,8 +1,8 @@
 # PolicyPool
 
-[![PolicyPool preview: pools that can say no](web/og.png)](https://policypool.vercel.app)
+[![PolicyPool preview: Policy bends. LPs get paid.](web/og.png)](https://policypool.vercel.app)
 
-PolicyPool is a Uniswap v4 Hook for pool covenants: each pool publishes the swap size and daily volume limits its liquidity will accept before execution. Same trader, same intent, two pools: one accepts, one refuses, both verifiable on X Layer. PolicyPool Surge adds a trusted-router path where an over-cap swap can execute only if the router donates a surge fee to in-range LPs inside the same v4 unlock.
+PolicyPool is a Uniswap v4 Hook for pool covenants on X Layer. Each pool publishes the exact-input swap size and daily volume limits its liquidity will accept before execution. Over-cap flow either refuses in `beforeSwap`, or goes through PolicyPool Surge, where a trusted router donates a surge fee to in-range LPs before executing the swap inside the same v4 unlock.
 
 Built for the OKX X Layer Hook the Future hackathon.
 
@@ -18,11 +18,11 @@ Fast links:
 
 ## 60-Second Judge Path
 
-1. Open the live app and read the first screen: `Pools that can say no.`
-2. Click `Inspect live proof`.
-3. Verify the max-swap proof: the same `5,000 mUSDC` order is accepted by the loose pool and refused by the strict pool.
-4. Verify the daily-cap proof: the strict pool accepts two `1,000 mUSDC` fills, then refuses the third with `DAILY_CAP_EXCEEDED`.
-5. Verify the Surge proof: the trusted surge router donates `40 mUSDC`, then executes the same `5,000 mUSDC` swap in one transaction.
+1. Open the live app and read the first screen: `Policy bends. LPs get paid.`
+2. Click the featured Surge proof or scroll to the proof ledger.
+3. Verify the Surge proof: the trusted surge router donates `40 mUSDC`, then executes a `5,000 mUSDC` swap in the same v4 unlock.
+4. Verify the spoof-guard proof: surge-looking `hookData` through the old router falls back to `MAX_SWAP_EXCEEDED`.
+5. Verify the V1 covenant proofs: a `5,000 mUSDC` exact-input order is accepted by the loose pool, refused by the strict pool, and the strict pool later refuses the third `1,000 mUSDC` fill with `DAILY_CAP_EXCEEDED`.
 6. Run the one-command verifier:
 
 ```bash
@@ -375,13 +375,12 @@ Current tests cover:
 
 Recommended demo structure:
 
-1. Show two pool cards: loose and strict.
-2. Show the same `5,000 mUSDC` swap sent to the loose pool.
-3. Show success tx and `SwapAccepted`.
-4. Show the same swap sent to the strict pool.
-5. Show `SwapBlockedCaught` after the Hook rejects with `PolicyBlocked("MAX_SWAP_EXCEEDED", 5000e6, 1000e6)`.
-6. Show the daily-cap proof: two `1,000 mUSDC` strict-pool swaps accepted, third refused with `DAILY_CAP_EXCEEDED`.
-7. Close on `node scripts/verify-live.mjs`, X Layer explorer links, the green CI run for `verify-all`, and the 20-line `beforeSwap` covenant check.
+1. Open on the live hero: `Policy bends. LPs get paid.`
+2. Show the featured Surge proof: `40 mUSDC` donated, `5,000 mUSDC` swapped, same v4 unlock.
+3. Open the Surge receipt and point to `Donate`, Hook `SwapAccepted`, and router `SurgeAccepted`.
+4. Open the spoof-guard receipt and show the old router cannot activate Surge with fake `hookData`.
+5. Return to the proof ledger and show the V1 covenant baseline: loose accepts `5,000 mUSDC`, strict refuses the same exact-input amount, and daily cap refuses the third fill.
+6. Close on `node scripts/verify-live.mjs`, X Layer explorer links, the latest green CI run for `verify-all`, and the `beforeSwap` covenant check.
 
 Target length: 90 to 120 seconds.
 
