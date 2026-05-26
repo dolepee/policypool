@@ -54,13 +54,27 @@
           <span class="payoff">LPs get paid.</span>
         </div>
         <p class="lede">
-          A Uniswap v4 Hook where over-cap swaps either <strong>refuse</strong>, or pay LPs through
-          <strong>donate + swap</strong> inside one X Layer transaction. Same trader. Same tx. Same swap unlock.
+          <em>A Uniswap v4 Hook on X Layer.</em> Over-cap swaps either <strong>refuse</strong>, or pay LPs through
+          <strong>donate + swap</strong> inside one transaction. Same exact-input order. Different pool policy.
+          Different onchain outcome.
         </p>
+        <a
+          class="feature-proof"
+          href="https://www.oklink.com/x-layer/tx/0x18096b74138d43a6683f1c914e7aa83633c8ed0ba6a533cf6e7e939f5f7ea9a8"
+          target="_blank"
+          rel="noreferrer"
+        >
+          <span class="fp-dot" aria-hidden="true"></span>
+          <span class="fp-label">Featured proof</span>
+          <span class="fp-gate">SURGE</span>
+          <span class="fp-action">donate + swap</span>
+          <span class="fp-hash">0x1809…a9a8</span>
+          <span class="fp-arrow" aria-hidden="true">↗</span>
+        </a>
         <div class="dateline">
           <span>X Layer mainnet · chain 196</span>
-          <span>7 proof transactions · all onchain</span>
-          <span>Verified on Sourcify · reproduced by CI</span>
+          <span>7 proof txs · all onchain</span>
+          <span>Sourcify verified · CI reproduces</span>
         </div>
       </section>
 
@@ -68,8 +82,9 @@
 
       <section class="ledger" id="ledger" aria-label="Live proof ledger">
         <div class="section-head">
-          <h2>The proof ledger.</h2>
-          <p>Seven X Layer transactions. Three pools, two enforcement modes, one trusted router. Every row links to the receipt.</p>
+          <span class="kicker">§ 01 · Proof ledger</span>
+          <h2>Seven receipts, all on X Layer.</h2>
+          <p>Three pools, two enforcement modes, one trusted router. Every row links to the OKLink receipt.</p>
         </div>
 
         <ol class="rows">
@@ -164,8 +179,9 @@
 
       <section class="mechanism" id="mechanism" aria-label="Mechanism">
         <div class="section-head">
-          <h2>The mechanism, in plain Solidity.</h2>
-          <p>No oracle. No offchain matcher. No governance. The Hook checks two numbers; the Surge router pays LPs before the swap clears.</p>
+          <span class="kicker">§ 02 · Mechanism</span>
+          <h2>Two numbers, one trusted router.</h2>
+          <p>No oracle. No offchain matcher. No governance. The Hook checks two policy limits; the Surge router pays LPs before the swap clears.</p>
         </div>
 
         <pre><code><span class="mono-h">v1 · policy gate</span>
@@ -187,7 +203,8 @@ surgeRouter.swapWithDonate(amountIn, surgeFee):
 
       <section class="notes" aria-label="Reviewer notes">
         <div class="section-head">
-          <h2>Notes for the reviewer.</h2>
+          <span class="kicker">§ 03 · Reviewer notes</span>
+          <h2>What the Hook actually guarantees.</h2>
         </div>
         <div class="note-rows">
           <p>
@@ -212,8 +229,9 @@ surgeRouter.swapWithDonate(amountIn, surgeFee):
 
       <section class="contracts" id="contracts" aria-label="Deployed contracts">
         <div class="section-head">
-          <h2>Verified contracts.</h2>
-          <p>All Sourcify exact-match. Click any address for the verified source.</p>
+          <span class="kicker">§ 04 · Contracts</span>
+          <h2>All Sourcify exact-match.</h2>
+          <p>Click any address for the verified source on Sourcify.</p>
         </div>
 
         <dl class="contract-list">

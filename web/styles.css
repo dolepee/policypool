@@ -36,7 +36,7 @@ code, pre, .mono, .eyebrow, .dateline, .colophon, .idx, .gate, .verdict, .hash, 
 .paper {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 64px 56px 80px;
+  padding: 36px 56px 80px;
 }
 
 .masthead {
@@ -81,18 +81,18 @@ code, pre, .mono, .eyebrow, .dateline, .colophon, .idx, .gate, .verdict, .hash, 
 .rule {
   border: 0;
   border-top: 1px solid var(--rule);
-  margin: 22px 0;
+  margin: 18px 0;
 }
 
 .hero {
-  padding: 28px 0 36px;
+  padding: 14px 0 22px;
 }
 
 .headline {
   display: block;
   font-family: "Arial Black", "Helvetica Neue", Arial, sans-serif;
   font-weight: 900;
-  font-size: clamp(64px, 11vw, 156px);
+  font-size: clamp(60px, 9.5vw, 132px);
   line-height: 0.9;
   letter-spacing: -0.04em;
 }
@@ -100,7 +100,7 @@ code, pre, .mono, .eyebrow, .dateline, .colophon, .idx, .gate, .verdict, .hash, 
 .headline .strike {
   display: block;
   position: relative;
-  color: var(--muted);
+  color: #6B6354;
   width: max-content;
   max-width: 100%;
 }
@@ -111,57 +111,136 @@ code, pre, .mono, .eyebrow, .dateline, .colophon, .idx, .gate, .verdict, .hash, 
   left: 0.5%;
   right: 0;
   top: 52%;
-  height: clamp(6px, 0.85vw, 10px);
+  height: clamp(6px, 0.78vw, 9px);
   background: var(--red);
 }
 
 .headline .payoff {
   display: block;
   color: var(--black);
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .lede {
-  max-width: 780px;
-  margin: 38px 0 0;
-  font-size: clamp(20px, 1.7vw, 26px);
+  max-width: 820px;
+  margin: 22px 0 0;
+  font-size: clamp(18px, 1.45vw, 22px);
   line-height: 1.4;
   color: var(--body);
   font-weight: 500;
 }
 
+.lede em {
+  font-family: "Georgia", "Charter", "New York", "Times New Roman", serif;
+  font-style: italic;
+  color: var(--black);
+  font-weight: 500;
+}
+
 .lede strong { color: var(--black); font-weight: 800; }
 
-.dateline {
-  margin-top: 32px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 28px;
+.feature-proof {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 22px;
+  padding: 10px 16px 10px 14px;
+  background: var(--black);
+  color: var(--paper);
+  border-left: 4px solid var(--red);
+  font-family: ui-monospace, "SFMono-Regular", "Menlo", monospace;
   font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
+  transition: background 0.12s ease;
+}
+
+.feature-proof:hover { background: #1a1814; color: var(--paper); }
+
+.fp-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  display: inline-block;
+}
+
+.fp-label {
+  color: rgba(244, 237, 217, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.fp-gate {
+  color: var(--paper);
+  letter-spacing: 0.18em;
+  font-weight: 900;
+}
+
+.fp-action {
+  color: #E87878;
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+}
+
+.fp-hash {
+  color: var(--paper);
+  letter-spacing: 0.04em;
+  font-weight: 700;
+}
+
+.fp-arrow {
+  color: rgba(244, 237, 217, 0.7);
+  font-size: 14px;
+}
+
+.dateline {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
-.section-head { margin-bottom: 22px; }
+.section-head { margin-bottom: 20px; }
+
+.ledger .section-head { margin-bottom: 14px; }
+
+.kicker {
+  display: block;
+  font-family: ui-monospace, "SFMono-Regular", "Menlo", monospace;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--red);
+  margin-bottom: 10px;
+}
 
 h2 {
-  font-family: "Arial Black", "Helvetica Neue", Arial, sans-serif;
-  font-weight: 900;
-  font-size: clamp(36px, 4.4vw, 60px);
-  line-height: 0.95;
-  letter-spacing: -0.035em;
+  font-family: "Georgia", "Charter", "New York", "Times New Roman", serif;
+  font-weight: 700;
+  font-style: italic;
+  font-size: clamp(30px, 3.4vw, 44px);
+  line-height: 1.08;
+  letter-spacing: -0.015em;
   color: var(--black);
-  margin: 0 0 12px;
+  margin: 0 0 14px;
 }
 
 .section-head p {
-  max-width: 720px;
+  max-width: 680px;
   margin: 0;
   color: var(--body);
-  font-size: 18px;
-  line-height: 1.5;
+  font-size: 17px;
+  line-height: 1.55;
 }
 
 .ledger .rows {
@@ -175,11 +254,11 @@ h2 {
 
 .ledger .rows a {
   display: grid;
-  grid-template-columns: 56px 130px 150px 1fr auto;
+  grid-template-columns: 48px 120px 140px 1fr auto;
   align-items: center;
-  gap: 22px;
-  padding: 18px 4px;
-  font-size: 15px;
+  gap: 20px;
+  padding: 12px 4px;
+  font-size: 14px;
   transition: background 0.12s ease;
 }
 
@@ -200,7 +279,7 @@ h2 {
 .ledger .verdict.ok { color: var(--green); }
 .ledger .verdict.no { color: var(--red); }
 .ledger .verdict.pay { color: var(--red); }
-.ledger .detail { color: var(--body); font-family: "Inter", sans-serif; font-size: 16px; }
+.ledger .detail { color: var(--body); font-family: "Inter", sans-serif; font-size: 15px; }
 .ledger .detail code {
   font-family: ui-monospace, "SFMono-Regular", "Menlo", monospace;
   font-size: 13px;
@@ -369,16 +448,36 @@ h2 {
 @media (max-width: 900px) {
   .paper { padding: 36px 24px 56px; }
 
+  .feature-proof {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 6px 10px;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .fp-dot { align-self: center; }
+  .fp-label { grid-column: 2 / span 2; }
+  .fp-gate { grid-column: 2; }
+  .fp-action { grid-column: 2; }
+  .fp-hash {
+    grid-column: 3;
+    grid-row: 2 / span 2;
+    align-self: center;
+    text-align: right;
+  }
+  .fp-arrow { display: none; }
+
   .ledger .rows a {
-    grid-template-columns: 48px 1fr auto;
-    grid-template-rows: auto auto;
-    gap: 4px 14px;
+    grid-template-columns: 44px minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    gap: 3px 14px;
     padding: 16px 4px;
   }
-  .ledger .idx { grid-row: 1 / span 2; align-self: center; }
+  .ledger .idx { grid-row: 1 / span 3; align-self: center; }
   .ledger .gate { grid-column: 2; grid-row: 1; font-size: 12px; }
-  .ledger .verdict { grid-column: 3; grid-row: 1; font-size: 12px; text-align: right; }
-  .ledger .detail { grid-column: 2 / span 2; grid-row: 2; font-size: 15px; }
+  .ledger .verdict { grid-column: 2; grid-row: 2; font-size: 12px; text-align: left; }
+  .ledger .detail { grid-column: 2; grid-row: 3; font-size: 15px; min-width: 0; }
   .ledger .hash { display: none; }
 
   .contract-list > div { grid-template-columns: 1fr; gap: 4px; }
