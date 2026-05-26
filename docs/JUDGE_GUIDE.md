@@ -89,10 +89,10 @@ For an invariant-by-invariant review path, see [HOOK_INVARIANTS.md](HOOK_INVARIA
 | `PolicyPoolDemoRouter` | [`0xCD46b2C1e6dD9d0fd3Edd9B26F0137E02F3Fc29e`](https://sourcify.dev/#/lookup/0xCD46b2C1e6dD9d0fd3Edd9B26F0137E02F3Fc29e) |
 | `MockUSDC` | [`0xBb856B7ce87315eaBF1005861B1b321826a6D33c`](https://sourcify.dev/#/lookup/0xBb856B7ce87315eaBF1005861B1b321826a6D33c) |
 | `MockETH` | [`0xEA76c34E0d6d43326c9AB98088536d129242d181`](https://sourcify.dev/#/lookup/0xEA76c34E0d6d43326c9AB98088536d129242d181) |
-| `PolicyPoolSurgeHook` | [`0xf44d9C1f9efF1231E53C60EDB9A73761aa99c080`](https://www.oklink.com/x-layer/address/0xf44d9C1f9efF1231E53C60EDB9A73761aa99c080) |
-| `PolicyPoolSurgeRouter` | [`0xd05AAD5b86f6FFCc10872803bEdb5fa911e0E1fD`](https://www.oklink.com/x-layer/address/0xd05AAD5b86f6FFCc10872803bEdb5fa911e0E1fD) |
+| `PolicyPoolSurgeHook` | [`0xf44d9C1f9efF1231E53C60EDB9A73761aa99c080`](https://sourcify.dev/#/lookup/0xf44d9C1f9efF1231E53C60EDB9A73761aa99c080) |
+| `PolicyPoolSurgeRouter` | [`0xd05AAD5b86f6FFCc10872803bEdb5fa911e0E1fD`](https://sourcify.dev/#/lookup/0xd05AAD5b86f6FFCc10872803bEdb5fa911e0E1fD) |
 
-The V1 contracts are verified on Sourcify with exact matches. The Surge contracts are live on X Layer and checked by `scripts/verify-surge.mjs`.
+The V1 and Surge contracts are verified on Sourcify with exact matches. The live Surge receipts are also checked by `scripts/verify-surge.mjs`.
 
 ## Live Proof Transactions
 

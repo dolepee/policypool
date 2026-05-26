@@ -213,9 +213,9 @@ Deployed on X Layer mainnet, chain `196`.
 | `PolicyPoolDemoRouter` | [`0xCD46b2C1e6dD9d0fd3Edd9B26F0137E02F3Fc29e`](https://sourcify.dev/#/lookup/0xCD46b2C1e6dD9d0fd3Edd9B26F0137E02F3Fc29e) |
 | `MockUSDC` | [`0xBb856B7ce87315eaBF1005861B1b321826a6D33c`](https://sourcify.dev/#/lookup/0xBb856B7ce87315eaBF1005861B1b321826a6D33c) |
 | `MockETH` | [`0xEA76c34E0d6d43326c9AB98088536d129242d181`](https://sourcify.dev/#/lookup/0xEA76c34E0d6d43326c9AB98088536d129242d181) |
-| `PolicySurgeHookDeployer` | [`0x10B48e541bC8eD94aC0106F1CA69Ffe255479dCB`](https://www.oklink.com/x-layer/address/0x10B48e541bC8eD94aC0106F1CA69Ffe255479dCB) |
-| `PolicyPoolSurgeHook` | [`0xf44d9C1f9efF1231E53C60EDB9A73761aa99c080`](https://www.oklink.com/x-layer/address/0xf44d9C1f9efF1231E53C60EDB9A73761aa99c080) |
-| `PolicyPoolSurgeRouter` | [`0xd05AAD5b86f6FFCc10872803bEdb5fa911e0E1fD`](https://www.oklink.com/x-layer/address/0xd05AAD5b86f6FFCc10872803bEdb5fa911e0E1fD) |
+| `PolicySurgeHookDeployer` | [`0x10B48e541bC8eD94aC0106F1CA69Ffe255479dCB`](https://sourcify.dev/#/lookup/0x10B48e541bC8eD94aC0106F1CA69Ffe255479dCB) |
+| `PolicyPoolSurgeHook` | [`0xf44d9C1f9efF1231E53C60EDB9A73761aa99c080`](https://sourcify.dev/#/lookup/0xf44d9C1f9efF1231E53C60EDB9A73761aa99c080) |
+| `PolicyPoolSurgeRouter` | [`0xd05AAD5b86f6FFCc10872803bEdb5fa911e0E1fD`](https://sourcify.dev/#/lookup/0xd05AAD5b86f6FFCc10872803bEdb5fa911e0E1fD) |
 
 Pool IDs:
 
@@ -237,7 +237,7 @@ Proof txs:
 | Surge router donated `40 mUSDC` and executed `5,000 mUSDC` swap | [`0x18096b74138d43a6683f1c914e7aa83633c8ed0ba6a533cf6e7e939f5f7ea9a8`](https://www.oklink.com/x-layer/tx/0x18096b74138d43a6683f1c914e7aa83633c8ed0ba6a533cf6e7e939f5f7ea9a8) |
 | Old router could not spoof Surge with hookData | [`0x4877a6cf2214148d8ba0b3ca7d036da1cde7e35a33eeaaf79718f3e54ee4843a`](https://www.oklink.com/x-layer/tx/0x4877a6cf2214148d8ba0b3ca7d036da1cde7e35a33eeaaf79718f3e54ee4843a) |
 
-The V1 contracts are verified on Sourcify with exact matches. The Surge contracts are live on X Layer and checked by `scripts/verify-surge.mjs`.
+The V1 and Surge contracts are verified on Sourcify with exact matches. The live Surge receipts are also checked by `scripts/verify-surge.mjs`.
 
 Deployment steps:
 

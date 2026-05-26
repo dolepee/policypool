@@ -73,9 +73,9 @@ Captured on X Layer mainnet, chain `196`:
 
 - `PolicyPoolHook`: `0x7D676FA819D8CDF0A2BB73B944a3533870868080`
 - `PolicyPoolDemoRouter`: `0xCD46b2C1e6dD9d0fd3Edd9B26F0137E02F3Fc29e`
-- `PolicySurgeHookDeployer`: `0x10B48e541bC8eD94aC0106F1CA69Ffe255479dCB`
-- `PolicyPoolSurgeHook`: `0xf44d9C1f9efF1231E53C60EDB9A73761aa99c080`
-- `PolicyPoolSurgeRouter`: `0xd05AAD5b86f6FFCc10872803bEdb5fa911e0E1fD`
+- `PolicySurgeHookDeployer`: `0x10B48e541bC8eD94aC0106F1CA69Ffe255479dCB` (Sourcify exact match)
+- `PolicyPoolSurgeHook`: `0xf44d9C1f9efF1231E53C60EDB9A73761aa99c080` (Sourcify exact match)
+- `PolicyPoolSurgeRouter`: `0xd05AAD5b86f6FFCc10872803bEdb5fa911e0E1fD` (Sourcify exact match)
 - loose pool initialized: `0x969e4254336180c5bac71cb9851feacaed2f0fd7c2dabe63b748159909a245a7`
 - strict pool initialized: `0x64793e514c6dd69102f3c4fb459391004bcf47c29fc527328f55afaff2014d46`
 - loose pool accepted `5,000 mUSDC`: `0x1ee4c6e668306c1ed7dddb0a47cb8c722607f892d03f69746d2822df13423396`
@@ -85,7 +85,7 @@ Captured on X Layer mainnet, chain `196`:
 - strict pool recorded `DAILY_CAP_EXCEEDED`: `0x71130fce6387f081b5f2ded837879c38cdd18640fd62a8a11533d48737be771c`
 - surge router donated `40 mUSDC` and executed `5,000 mUSDC`: `0x18096b74138d43a6683f1c914e7aa83633c8ed0ba6a533cf6e7e939f5f7ea9a8`
 - untrusted router failed to activate surge with hookData: `0x4877a6cf2214148d8ba0b3ca7d036da1cde7e35a33eeaaf79718f3e54ee4843a`
-- V1 contracts verified on Sourcify with exact matches; Surge contracts checked by `scripts/verify-surge.mjs`
+- V1 and Surge contracts verified on Sourcify with exact matches; Surge receipts checked by `scripts/verify-surge.mjs`
 
 ## Submission Claim
 
