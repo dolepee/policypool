@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 const steps = [
   ["node", ["--dns-result-order=ipv4first", "scripts/verify-deployment.mjs"], "deployed Hook and pool policy state"],
   ["node", ["--dns-result-order=ipv4first", "scripts/verify-proof.mjs"], "live accepted/refused receipts"],
+  ["node", ["--dns-result-order=ipv4first", "scripts/verify-surge.mjs"], "live surge receipts"],
 ];
 
 function run(command, args, label) {

@@ -60,6 +60,14 @@
           <strong>DAILY_CAP_EXCEEDED</strong>
         </a>
         <a
+          href="https://www.oklink.com/x-layer/tx/0x18096b74138d43a6683f1c914e7aa83633c8ed0ba6a533cf6e7e939f5f7ea9a8"
+          target="_blank"
+          rel="noreferrer"
+        >
+          <span>surge proof</span>
+          <strong>DONATE + SWAP</strong>
+        </a>
+        <a
           href="https://github.com/dolepee/policypool/actions/workflows/test.yml"
           target="_blank"
           rel="noreferrer"
@@ -84,8 +92,8 @@
             </div>
             <div class="hero-metrics" aria-label="PolicyPool proof summary">
               <span>1 Hook</span>
-              <span>2 v4 pools</span>
-              <span>5 live proof txs</span>
+              <span>3 v4 pools</span>
+              <span>7 live proof txs</span>
             </div>
           </div>
 
@@ -105,6 +113,17 @@
               <div class="gate-line"></div>
               <div class="gate-label">beforeSwap</div>
             </div>
+
+            <a
+              class="surge-control"
+              href="https://www.oklink.com/x-layer/tx/0x18096b74138d43a6683f1c914e7aa83633c8ed0ba6a533cf6e7e939f5f7ea9a8"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <span class="surge-toggle">Accept surge fee</span>
+              <strong>40 mUSDC</strong>
+              <small>trusted router donates to LPs before swap</small>
+            </a>
 
             <div class="verdict-stack">
               <a
@@ -134,10 +153,10 @@
         <section class="proof-board" id="proof" aria-label="Live proof">
           <div class="section-head">
             <p class="eyebrow">Live proof</p>
-            <h2>Two covenants, both proven onchain.</h2>
+            <h2>Three outcomes, all proven onchain.</h2>
             <p>
-              The demo is intentionally binary. Same hook, same pool family, real X Layer transactions: max-swap refusal
-              and daily-cap refusal.
+              The demo is intentionally direct. Same pool-covenant primitive, real X Layer transactions: max-swap refusal,
+              daily-cap refusal, and surge acceptance where the trusted router donates to LPs before the swap.
             </p>
           </div>
 
@@ -182,6 +201,25 @@
                 </a>
               </div>
             </article>
+
+            <article class="proof-card surge-proof">
+              <div class="proof-card-head">
+                <span>Proof 03</span>
+                <strong>Surge pays LPs</strong>
+              </div>
+              <p>
+                The surge router donates 40 mUSDC to in-range LPs, then executes the 5,000 mUSDC swap in the same unlock.
+                The old router cannot spoof this path.
+              </p>
+              <div class="proof-links">
+                <a href="https://www.oklink.com/x-layer/tx/0x18096b74138d43a6683f1c914e7aa83633c8ed0ba6a533cf6e7e939f5f7ea9a8" target="_blank" rel="noreferrer">
+                  Surge accepted · 0x1809...a9a8
+                </a>
+                <a href="https://www.oklink.com/x-layer/tx/0x4877a6cf2214148d8ba0b3ca7d036da1cde7e35a33eeaaf79718f3e54ee4843a" target="_blank" rel="noreferrer">
+                  Spoof blocked · 0x4877...843a
+                </a>
+              </div>
+            </article>
           </div>
         </section>
 
@@ -220,6 +258,13 @@
               <p>
                 strict pool refuses by <strong>MAX_SWAP_EXCEEDED</strong>
                 <small>attempted 5,000 mUSDC · limit 1,000 mUSDC</small>
+              </p>
+            </div>
+            <div class="verify-line ok">
+              <span>✓</span>
+              <p>
+                surge pool accepts after a <strong>40 mUSDC</strong> LP donation
+                <small>same tx includes `Donate`, `SwapAccepted`, and `SurgeAccepted`</small>
               </p>
             </div>
             <div class="verify-line ok">

@@ -9,6 +9,7 @@ const steps = [
   ["npm", ["run", "build", "--prefix", "web"], "web build"],
   ["node", ["--dns-result-order=ipv4first", "scripts/verify-deployment.mjs"], "live deployment verifier"],
   ["node", ["--dns-result-order=ipv4first", "scripts/verify-proof.mjs"], "live proof verifier"],
+  ["node", ["--dns-result-order=ipv4first", "scripts/verify-surge.mjs"], "live surge verifier"],
 ];
 
 function run(command, args, label) {

@@ -1,6 +1,6 @@
 # Hook Invariants
 
-This file maps PolicyPool's v1 invariants to the code path, test coverage, and live X Layer proof. It is intentionally narrow: the deployed Hook proves pool-level max-swap and daily-cap covenants for exact-input swaps.
+This file maps PolicyPool's invariants to the code path, test coverage, and live X Layer proof. V1 proves pool-level max-swap and daily-cap covenants for exact-input swaps. Surge adds a trusted-router override that must pay LPs through `PoolManager.donate` before the over-cap swap executes.
 
 ## Core Invariant
 
@@ -23,6 +23,9 @@ The covenant check happens in `PolicyPoolHook.beforeSwap` before Uniswap v4 cont
 | Accepted swaps increment `spentToday` before the swap continues. | `policy.spentToday = nextSpent` before returning selector | `testBeforeSwapAcceptsBelowMaxAndIncrementsDailySpent` | Daily-cap proof depends on the first two accepted fills carrying forward into the third refusal. |
 | Refused swaps do not increment `spentToday`. | Revert before storage update | strict-pool rejection tests assert `spentToday == 0` after refusal | `verify-proof.mjs` decodes the caught refusal and asserts attempted amount and covenant limit. |
 | Refused Hook logs do not need to persist. | Demo router catches the revert and emits `SwapBlockedCaught` | `testDemoRouterCanRecordStrictPoolBlock` | Refused proof txs are successful router transactions that record the original `PolicyBlocked` revert bytes. |
+| Surge cannot be activated by arbitrary hookData. | `PolicyPoolSurgeHook` treats hookData as surge only when `sender == AUTHORIZED_SURGE_ROUTER`. | `testUntrustedRouterCannotActivateSurgeWithHookData` | Old router attempted surge-looking hookData and still recorded `MAX_SWAP_EXCEEDED`: `0x4877a6cf2214148d8ba0b3ca7d036da1cde7e35a33eeaaf79718f3e54ee4843a`. |
+| Surge pays LPs before the over-cap swap executes. | `PolicyPoolSurgeRouter` calls `PoolManager.donate` before `PoolManager.swap` in one unlock callback. | `testSurgeRouterDonatesAndSwapsInOneUnlock` | Surge tx includes `Donate`, `SwapAccepted`, and `SurgeAccepted`: `0x18096b74138d43a6683f1c914e7aa83633c8ed0ba6a533cf6e7e939f5f7ea9a8`. |
+| Daily cap still applies to surge swaps. | Surge only bypasses max-swap after sufficient router-paid donation; daily cap is checked afterward. | `testDailyCapStillAppliesToSurgeSwap` | Covered locally; live surge pool daily cap is set to `10,000 mUSDC` and verified by `verify-surge.mjs`. |
 
 ## What The Live Verifier Checks
 
@@ -40,6 +43,14 @@ The covenant check happens in `PolicyPoolHook.beforeSwap` before Uniswap v4 cont
    - refused swap receipts include `SwapBlockedCaught`;
    - v4 `WrappedError` is unwrapped;
    - inner `PolicyBlocked` reason, attempted amount, and limit are decoded and asserted.
+3. `scripts/verify-surge.mjs`
+   - surge Hook and router bytecode exist;
+   - surge Hook address bits equal `BEFORE_SWAP_FLAG`;
+   - surge Hook is bound to the official X Layer `PoolManager`;
+   - surge Hook authorizes only `PolicyPoolSurgeRouter`;
+   - surge pool policy matches `1,000 mUSDC` max, `10,000 mUSDC` daily cap, and `100` bps surge rate;
+   - the surge success tx includes `PoolManager.Donate`, Hook `SwapAccepted`, and router `SurgeAccepted`;
+   - the untrusted-router tx records `MAX_SWAP_EXCEEDED` and emits no donate or surge event.
 
 ## Trust Boundary
 
@@ -47,4 +58,4 @@ PolicyPool v1 proves enforcement after a policy is set. Policy ownership is owne
 
 ## Non-Claims
 
-PolicyPool v1 does not claim slippage covenants, oracle checks, KYC, compliance gating, per-LP aggregation, or production DEX readiness. Those are separate mechanisms. The primitive proven here is pool-level flow refusal inside Uniswap v4 swap execution.
+PolicyPool does not claim slippage covenants, oracle checks, KYC, compliance gating, per-LP aggregation, or production DEX readiness. Surge is not a permissionless hookData bypass: the live proof depends on a trusted router that actually donates to LPs before the swap. The primitive proven here is pool-level flow refusal and trusted-router LP capture inside Uniswap v4 swap execution.

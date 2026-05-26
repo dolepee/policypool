@@ -1,6 +1,6 @@
 # PolicyPool Judge Guide
 
-PolicyPool is a Uniswap v4 Hook on X Layer mainnet that gives each pool a small, public execution covenant. Before a swap executes, the Hook checks whether the order fits that pool's `maxSwapAmount` and `dailyCap`.
+PolicyPool is a Uniswap v4 Hook on X Layer mainnet that gives each pool a small, public execution covenant. Before a swap executes, the Hook checks whether the order fits that pool's `maxSwapAmount` and `dailyCap`. PolicyPool Surge adds a trusted router that can bend the max-swap covenant only by donating a surge fee to LPs inside the same v4 unlock.
 
 The demo question is simple:
 
@@ -8,13 +8,20 @@ The demo question is simple:
 
 The live proof answers yes.
 
+The Surge proof adds the LP-capture question:
+
+> If a trader wants past the cap, can the pool get paid in the same v4 transaction?
+
+The live proof answers yes through `PoolManager.Donate` plus `SurgeAccepted` in one tx.
+
 ## Fast Path
 
 1. Open the app: https://policypool.vercel.app
 2. Read the first fold: `Pools that can say no.`
 3. Inspect `Proof 01`: loose pool accepts `5,000 mUSDC`; strict pool refuses the same amount.
 4. Inspect `Proof 02`: strict pool accepts two `1,000 mUSDC` fills; the third fill is refused by `DAILY_CAP_EXCEEDED`.
-5. Run the one-command verifier:
+5. Inspect `Proof 03`: surge router donates `40 mUSDC` to LPs, then executes the `5,000 mUSDC` swap in the same transaction.
+6. Run the one-command verifier:
 
 ```bash
 node scripts/verify-all.mjs
@@ -24,7 +31,7 @@ It runs formatting, contract build, contract tests, web build, deployment-state 
 
 The same command runs in GitHub Actions, so the public CI badge is also a live-proof signal, not only a local unit-test signal.
 
-6. For a shorter live-only check, run:
+7. For a shorter live-only check, run:
 
 ```bash
 node scripts/verify-live.mjs
@@ -32,16 +39,17 @@ node scripts/verify-live.mjs
 
 That command verifies deployed Hook state and the live proof receipts without printing the local Forge build-size table.
 
-7. Or inspect the live checks separately. Verify deployment state:
+8. Or inspect the live checks separately. Verify deployment state:
 
 ```bash
 node scripts/verify-deployment.mjs
 ```
 
-8. Verify proof receipts:
+9. Verify proof receipts:
 
 ```bash
 node scripts/verify-proof.mjs
+node scripts/verify-surge.mjs
 ```
 
 Expected result:
@@ -53,6 +61,10 @@ Expected result:
 ✓ strict pool accepts second 1,000 mUSDC daily-cap fill (1000 mUSDC)
 ✓ strict pool refuses third 1,000 mUSDC by daily-cap covenant (DAILY_CAP_EXCEEDED, attempted 3000 mUSDC, limit 2000 mUSDC)
 PolicyPool proof verified on X Layer.
+✓ surge hook deployment and policy verified
+✓ surge swap donated 40 mUSDC and executed 5,000 mUSDC in one tx
+✓ untrusted router hookData falls back to V1 max-swap refusal
+PolicyPool Surge proof verified on X Layer.
 ```
 
 ## Scoring Map
@@ -77,8 +89,10 @@ For an invariant-by-invariant review path, see [HOOK_INVARIANTS.md](HOOK_INVARIA
 | `PolicyPoolDemoRouter` | [`0xCD46b2C1e6dD9d0fd3Edd9B26F0137E02F3Fc29e`](https://sourcify.dev/#/lookup/0xCD46b2C1e6dD9d0fd3Edd9B26F0137E02F3Fc29e) |
 | `MockUSDC` | [`0xBb856B7ce87315eaBF1005861B1b321826a6D33c`](https://sourcify.dev/#/lookup/0xBb856B7ce87315eaBF1005861B1b321826a6D33c) |
 | `MockETH` | [`0xEA76c34E0d6d43326c9AB98088536d129242d181`](https://sourcify.dev/#/lookup/0xEA76c34E0d6d43326c9AB98088536d129242d181) |
+| `PolicyPoolSurgeHook` | [`0xf44d9C1f9efF1231E53C60EDB9A73761aa99c080`](https://www.oklink.com/x-layer/address/0xf44d9C1f9efF1231E53C60EDB9A73761aa99c080) |
+| `PolicyPoolSurgeRouter` | [`0xd05AAD5b86f6FFCc10872803bEdb5fa911e0E1fD`](https://www.oklink.com/x-layer/address/0xd05AAD5b86f6FFCc10872803bEdb5fa911e0E1fD) |
 
-All project contracts above are verified on Sourcify with exact matches.
+The V1 contracts are verified on Sourcify with exact matches. The Surge contracts are live on X Layer and checked by `scripts/verify-surge.mjs`.
 
 ## Live Proof Transactions
 
@@ -89,6 +103,8 @@ All project contracts above are verified on Sourcify with exact matches.
 | Strict pool accepted first `1,000 mUSDC` daily-cap fill | [`0x2a26...f178`](https://www.oklink.com/x-layer/tx/0x2a260e92507918a290117e17445aea183b9fa2f1959bbd5719750b487b56f178) |
 | Strict pool accepted second `1,000 mUSDC` daily-cap fill | [`0xc608...292b`](https://www.oklink.com/x-layer/tx/0xc6085e4feaa9e6559a04a21d10eb55503224a86a924c19622e51a31b0a45292b) |
 | Strict pool refused third `1,000 mUSDC` fill with `DAILY_CAP_EXCEEDED` | [`0x7113...771c`](https://www.oklink.com/x-layer/tx/0x71130fce6387f081b5f2ded837879c38cdd18640fd62a8a11533d48737be771c) |
+| Surge router donated `40 mUSDC` and executed `5,000 mUSDC` | [`0x1809...a9a8`](https://www.oklink.com/x-layer/tx/0x18096b74138d43a6683f1c914e7aa83633c8ed0ba6a533cf6e7e939f5f7ea9a8) |
+| Old router could not spoof Surge with hookData | [`0x4877...843a`](https://www.oklink.com/x-layer/tx/0x4877a6cf2214148d8ba0b3ca7d036da1cde7e35a33eeaaf79718f3e54ee4843a) |
 
 ## Fresh Clone Verification
 

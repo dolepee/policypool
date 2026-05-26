@@ -401,6 +401,58 @@ h2 {
   text-transform: uppercase;
 }
 
+.surge-control {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px 18px;
+  align-items: center;
+  border: 1px solid rgba(219, 255, 91, 0.24);
+  border-radius: 24px;
+  padding: 18px 20px;
+  color: #f6ffe9;
+  background:
+    radial-gradient(circle at 86% 18%, rgba(219, 255, 91, 0.2), transparent 10rem),
+    rgba(255, 251, 237, 0.06);
+}
+
+.surge-control strong {
+  color: var(--green);
+  font-size: clamp(28px, 2.8vw, 42px);
+  line-height: 0.9;
+  letter-spacing: -0.07em;
+}
+
+.surge-control small {
+  grid-column: 1 / -1;
+  color: rgba(255, 251, 237, 0.58);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.surge-toggle {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 10px;
+  color: rgba(255, 251, 237, 0.78);
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.surge-toggle::before {
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 72% 50%, var(--black) 0 4px, transparent 5px),
+    linear-gradient(135deg, var(--green), var(--green-2));
+  content: "";
+}
+
 .verdict-stack {
   position: relative;
   z-index: 1;
@@ -492,7 +544,7 @@ h2 {
 
 .proof-grid {
   display: grid;
-  grid-template-columns: 0.9fr 1.1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
 }
 
@@ -556,6 +608,12 @@ h2 {
 .cap-proof {
   background:
     radial-gradient(circle at 82% 20%, rgba(255, 82, 104, 0.12), transparent 18rem),
+    var(--paper-soft);
+}
+
+.surge-proof {
+  background:
+    radial-gradient(circle at 82% 20%, rgba(219, 255, 91, 0.18), transparent 18rem),
     var(--paper-soft);
 }
 
