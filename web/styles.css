@@ -15,6 +15,20 @@
   --shadow: 0 28px 90px rgba(16, 22, 15, 0.14);
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #080b08;
+  --paper-soft: #10170f;
+  --ink: #f6f4e6;
+  --muted: #a6b39d;
+  --line: rgba(246, 255, 233, 0.16);
+  --green-ink: #8fff86;
+  --red-soft: #3a1518;
+  --black: #070a07;
+  --charcoal: #0c110b;
+  --shadow: 0 28px 90px rgba(0, 0, 0, 0.42);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -26,6 +40,7 @@ html {
 body {
   margin: 0;
   color: var(--ink);
+  overflow-x: hidden;
   font-family: "Space Grotesk", "Satoshi", "Aptos Display", "Segoe UI Variable Display", sans-serif;
   background:
     radial-gradient(circle at 14% 8%, rgba(102, 255, 112, 0.2), transparent 22rem),
@@ -42,6 +57,19 @@ body::before {
   inset: 0;
   pointer-events: none;
   background: linear-gradient(180deg, rgba(255, 251, 237, 0.45), transparent 34%, rgba(7, 10, 7, 0.05));
+}
+
+:root[data-theme="dark"] body {
+  background:
+    radial-gradient(circle at 12% 8%, rgba(102, 255, 112, 0.12), transparent 22rem),
+    radial-gradient(circle at 92% 12%, rgba(255, 82, 104, 0.09), transparent 24rem),
+    linear-gradient(90deg, rgba(246, 255, 233, 0.055) 1px, transparent 1px),
+    linear-gradient(rgba(246, 255, 233, 0.055) 1px, transparent 1px),
+    var(--paper);
+}
+
+:root[data-theme="dark"] body::before {
+  background: linear-gradient(180deg, rgba(8, 11, 8, 0.35), transparent 42%, rgba(102, 255, 112, 0.035));
 }
 
 a {
@@ -117,9 +145,25 @@ pre,
   font-weight: 850;
 }
 
-.nav nav a:hover {
+.theme-toggle {
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.nav nav a:hover,
+.theme-toggle:hover {
   color: var(--ink);
   background: rgba(16, 22, 15, 0.06);
+}
+
+.theme-toggle {
+  border-radius: 999px;
+  padding: 12px 14px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 14px;
+  font-weight: 850;
 }
 
 .proof-ribbon {
@@ -281,7 +325,7 @@ h2 {
   overflow: hidden;
   border: 1px solid rgba(244, 240, 223, 0.12);
   border-radius: 34px;
-  color: var(--paper-soft);
+  color: #fffbed;
   background:
     linear-gradient(90deg, rgba(102, 255, 112, 0.065) 1px, transparent 1px),
     linear-gradient(rgba(102, 255, 112, 0.055) 1px, transparent 1px),
@@ -910,6 +954,89 @@ pre {
   font-weight: 950;
 }
 
+:root[data-theme="dark"] .nav,
+:root[data-theme="dark"] .proof-ribbon a,
+:root[data-theme="dark"] .actions a,
+:root[data-theme="dark"] .hero-metrics span,
+:root[data-theme="dark"] .proof-board,
+:root[data-theme="dark"] .verifier-panel,
+:root[data-theme="dark"] .mechanism,
+:root[data-theme="dark"] .reviewer-checks,
+:root[data-theme="dark"] .market-path,
+:root[data-theme="dark"] .deployment,
+:root[data-theme="dark"] .site-footer {
+  background: rgba(13, 18, 13, 0.74);
+}
+
+:root[data-theme="dark"] .nav {
+  box-shadow: 0 12px 50px rgba(0, 0, 0, 0.32);
+}
+
+:root[data-theme="dark"] .nav nav a:hover,
+:root[data-theme="dark"] .theme-toggle:hover {
+  background: rgba(246, 255, 233, 0.08);
+}
+
+:root[data-theme="dark"] .proof-ribbon a:hover {
+  background: rgba(18, 25, 17, 0.92);
+}
+
+:root[data-theme="dark"] .proof-ribbon a:nth-child(2) strong {
+  color: #ff8995;
+}
+
+:root[data-theme="dark"] .actions .primary,
+:root[data-theme="dark"] .site-footer a {
+  color: #070a07;
+}
+
+:root[data-theme="dark"] .actions a.primary {
+  color: #070a07;
+  background: linear-gradient(135deg, var(--green), var(--green-2));
+}
+
+:root[data-theme="dark"] .terminal-card {
+  box-shadow: 0 34px 120px rgba(0, 0, 0, 0.46);
+}
+
+:root[data-theme="dark"] .proof-card,
+:root[data-theme="dark"] .use-case-grid article {
+  background: var(--paper-soft);
+}
+
+:root[data-theme="dark"] .primary-proof {
+  background:
+    radial-gradient(circle at 80% 18%, rgba(102, 255, 112, 0.14), transparent 16rem),
+    var(--paper-soft);
+}
+
+:root[data-theme="dark"] .cap-proof {
+  background:
+    radial-gradient(circle at 82% 20%, rgba(255, 82, 104, 0.13), transparent 18rem),
+    var(--paper-soft);
+}
+
+:root[data-theme="dark"] .surge-proof {
+  background:
+    radial-gradient(circle at 82% 20%, rgba(219, 255, 91, 0.13), transparent 18rem),
+    var(--paper-soft);
+}
+
+:root[data-theme="dark"] .proof-links a,
+:root[data-theme="dark"] .ci-proof-link,
+:root[data-theme="dark"] .use-case-grid span {
+  color: var(--green);
+  background: rgba(102, 255, 112, 0.1);
+}
+
+:root[data-theme="dark"] .cap-step {
+  background: rgba(246, 255, 233, 0.04);
+}
+
+:root[data-theme="dark"] .deploy-grid a {
+  background: rgba(13, 18, 13, 0.72);
+}
+
 @media (max-width: 1060px) {
   .hero,
   .proof-grid,
@@ -937,16 +1064,27 @@ pre {
 
   .nav {
     position: static;
+    flex-wrap: wrap;
+    gap: 8px;
     border-radius: 28px;
   }
 
-  .nav nav {
-    gap: 2px;
+  .brand {
+    width: 100%;
   }
 
-  .nav nav a {
-    padding: 10px 7px;
-    font-size: 12px;
+  .nav nav {
+    width: 100%;
+    gap: 6px;
+    justify-content: space-between;
+  }
+
+  .nav nav a,
+  .theme-toggle {
+    flex: 1 1 0;
+    padding: 10px 6px;
+    text-align: center;
+    font-size: 11px;
   }
 
   .proof-ribbon {

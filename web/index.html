@@ -26,6 +26,23 @@
     />
     <meta name="twitter:image" content="https://policypool.vercel.app/og.png" />
     <meta name="theme-color" content="#f4f0df" />
+    <script>
+      (() => {
+        try {
+          const requested = new URLSearchParams(window.location.search).get("theme");
+          const stored = window.localStorage.getItem("policypool-theme");
+          const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          const theme =
+            requested === "dark" || requested === "light" ? requested : stored || (systemDark ? "dark" : "light");
+          document.documentElement.dataset.theme = theme;
+          document
+            .querySelector('meta[name="theme-color"]')
+            ?.setAttribute("content", theme === "dark" ? "#080b08" : "#f4f0df");
+        } catch {
+          document.documentElement.dataset.theme = "light";
+        }
+      })();
+    </script>
     <title>PolicyPool · Uniswap v4 Hook on X Layer</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="shortcut icon" href="./favicon.svg" type="image/svg+xml" />
@@ -42,6 +59,7 @@
           <a href="#proof">Proof</a>
           <a href="#hook">Hook</a>
           <a href="https://github.com/dolepee/policypool" target="_blank" rel="noreferrer">GitHub</a>
+          <button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to dark mode">Dark</button>
         </nav>
       </header>
 
@@ -398,6 +416,28 @@ emit SwapAccepted(poolId, trader, amountIn)</code></pre>
     </div>
     <script>
       window.addEventListener("load", () => {
+        const root = document.documentElement;
+        const button = document.querySelector("[data-theme-toggle]");
+        const meta = document.querySelector('meta[name="theme-color"]');
+        const applyTheme = (theme) => {
+          root.dataset.theme = theme;
+          meta?.setAttribute("content", theme === "dark" ? "#080b08" : "#f4f0df");
+          if (!button) return;
+          button.textContent = theme === "dark" ? "Light" : "Dark";
+          button.setAttribute("aria-label", `Switch to ${theme === "dark" ? "light" : "dark"} mode`);
+        };
+
+        applyTheme(root.dataset.theme || "light");
+        button?.addEventListener("click", () => {
+          const next = root.dataset.theme === "dark" ? "light" : "dark";
+          applyTheme(next);
+          try {
+            window.localStorage.setItem("policypool-theme", next);
+          } catch {
+            /* Theme persistence is optional. */
+          }
+        });
+
         if (!window.location.hash) return;
         const target = document.querySelector(window.location.hash);
         if (target) target.scrollIntoView({ block: "start" });
