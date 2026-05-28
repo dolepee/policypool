@@ -15,11 +15,12 @@ PolicyPool is a focused Hook submission, not a production risk engine. These not
 
 ## V1 Trust Boundaries
 
-- Policy ownership is owner-managed. The first address to call `setPolicy(poolId, ...)` becomes that pool's policy owner.
-- Policy updates are immediate. In v1, updating a policy resets `spentToday` and `lastResetTimestamp`.
+- Policy ownership is owner-managed. The first address to call `setPolicy(poolId, ...)` becomes that pool's policy owner. The deployer EOA that won this race for the live pools is the address visible in each pool's `PolicySet` event on X Layer; `verify-deployment.mjs` and `verify-surge.mjs` log the resolved owner so judges can cross-reference it against the deployment tx history.
+- Policy updates are immediate. In v1, updating a policy resets `spentToday` and `lastResetTimestamp`. Owners can therefore refresh the daily counter mid-window. This is documented as an owner-trusted behavior in v1; a production version should require timelocked changes or distinguish between cap-raises and counter-resets.
 - The demo pools are initialized by the deployer for hackathon proof. A production version should bind policy ownership to a factory, governance process, or timelocked pool owner.
 - Refused Hook logs do not persist after a revert. `PolicyPoolDemoRouter.swapOrRecord` catches the revert and emits `SwapBlockedCaught` so indexers can display the refusal. The Hook itself still enforces the block inside `beforeSwap`.
 - Mock assets are used to isolate Hook behavior from liquidity and token-list risk.
+- `PolicyPoolSurgeRouter.SurgeAccepted` is emitted for any `swapWithSurge` action, including calls with `surgeAmount = 0`. Indexers should filter by non-zero `surgeAmount` to count actual surge overrides; the `PoolManager.Donate` log is the canonical signal that a surge fee was paid.
 
 ## Not In Scope For V1
 

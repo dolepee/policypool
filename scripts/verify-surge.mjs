@@ -23,7 +23,10 @@ const SELECTORS = {
   poolManager: "0x62308e85",
   authorizedSurgeRouter: "0xe3490521",
   policies: "0xddbfd8ef",
+  policyOwner: "0x54de327c",
 };
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 const TOPICS = {
   donate: "0x29ef05caaff9404b7cb6d1c0e9bbae9eaa7ab2541feba1a9c4248594c08156cb",
@@ -177,7 +180,10 @@ const policyRaw = await ethCall(SURGE_HOOK, callData(SELECTORS.policies, SURGE_P
 assertEqual(wordToBigInt(wordAt(policyRaw, 0)), 1_000n * USDC, "surge policy maxSwapAmount");
 assertEqual(wordToBigInt(wordAt(policyRaw, 1)), 10_000n * USDC, "surge policy dailyCap");
 assertEqual(wordToBigInt(wordAt(policyRaw, 4)), 100n, "surge policy surgeRateBps");
-console.log("✓ surge hook deployment and policy verified");
+
+const surgeOwner = wordToAddress(await ethCall(SURGE_HOOK, callData(SELECTORS.policyOwner, SURGE_POOL_ID)));
+assert(surgeOwner !== ZERO_ADDRESS, "surge policy: missing owner");
+console.log(`✓ surge hook deployment and policy verified (owner ${surgeOwner})`);
 
 const surgeReceipt = await rpc("eth_getTransactionReceipt", [SURGE_SUCCESS_TX]);
 assert(surgeReceipt && surgeReceipt.status === "0x1", "surge success tx missing or failed");

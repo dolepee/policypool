@@ -145,10 +145,17 @@ assert(
 );
 console.log("✓ getHookPermissions returns only beforeSwap=true");
 
+let firstOwner;
 for (const expected of expectedPolicies) {
   const ownerRaw = await ethCall(HOOK, callData(SELECTORS.policyOwner, expected.poolId));
   const owner = wordToAddress(ownerRaw);
   assert(owner !== ZERO_ADDRESS, `${expected.label}: missing owner`);
+
+  if (firstOwner === undefined) {
+    firstOwner = owner;
+  } else {
+    assertEqual(owner, firstOwner, `${expected.label}: owner differs from first pool owner`);
+  }
 
   const policyRaw = await ethCall(HOOK, callData(SELECTORS.policies, expected.poolId));
   const maxSwapAmount = wordToBigInt(wordAt(policyRaw, 0));
@@ -158,7 +165,9 @@ for (const expected of expectedPolicies) {
   assertEqual(maxSwapAmount, expected.maxSwapAmount, `${expected.label} maxSwapAmount`);
   assertEqual(dailyCap, expected.dailyCap, `${expected.label} dailyCap`);
   assert(lastResetTimestamp > 0n, `${expected.label}: lastResetTimestamp is zero`);
-  console.log(`✓ ${expected.label} is set (${maxSwapAmount / USDC} / ${dailyCap / USDC} mUSDC)`);
+  console.log(
+    `✓ ${expected.label} is set (${maxSwapAmount / USDC} / ${dailyCap / USDC} mUSDC, owner ${owner})`,
+  );
 }
 
 console.log("PolicyPool deployment verified on X Layer.");

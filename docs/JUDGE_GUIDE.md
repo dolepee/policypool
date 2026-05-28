@@ -142,6 +142,15 @@ No. The Hook rejects inside `beforeSwap` before the v4 pool consumes liquidity. 
 
 Not for these pools. Any swap routed through the v4 `PoolManager` for a pool using this Hook must pass the Hook's `beforeSwap` callback. A different router can choose whether to send flow, but it cannot make this pool ignore its covenant.
 
+### How does the Hook know the surge router actually donated?
+
+Two layers, not one:
+
+1. `PolicyPoolSurgeHook.AUTHORIZED_SURGE_ROUTER` is `immutable`. The hook only accepts surge `hookData` from that single address. The trusted router's source is verified on Sourcify, and the surge routine in `unlockCallback` is fixed: `donate` first, then `swap`, both inside the same v4 `unlock`.
+2. Even if a future upgraded router were authorized, v4 settlement is atomic. The `donate` call increments the router's owed delta by `surgeAmount`; the router must `settle` it from the payer before the unlock returns or the entire transaction reverts. A router that took the surge fee but skipped `donate` would fail with a delta imbalance, not silently succeed.
+
+The live surge proof transaction emits `PoolManager.Donate(40 mUSDC)` before `Hook.SwapAccepted` and router `SurgeAccepted`, all in one receipt. The untrusted-router fallback proof emits neither `Donate` nor `SurgeAccepted` and reverts with `MAX_SWAP_EXCEEDED`. `verify-surge.mjs` asserts both positive and negative log presence.
+
 ### Why use mock assets?
 
 The hackathon asks for a v4 Pool and Hook on X Layer with Hook behavior triggered by real transactions. Mock assets isolate the Hook mechanism from liquidity sourcing and token-market noise. The proof is about whether the pool covenant is enforced before execution.

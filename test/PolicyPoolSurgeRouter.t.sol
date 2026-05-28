@@ -13,6 +13,7 @@ import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/Pool
 import {PolicyPoolDemoRouter} from "../src/PolicyPoolDemoRouter.sol";
 import {PolicyPoolSurgeHook} from "../src/PolicyPoolSurgeHook.sol";
 import {PolicyPoolSurgeRouter} from "../src/PolicyPoolSurgeRouter.sol";
+import {PolicyReasons, PolicyBlocked} from "../src/PolicyTypes.sol";
 
 contract PolicyPoolSurgeRouterTest is Deployers {
     using PoolIdLibrary for PoolKey;
@@ -81,7 +82,7 @@ contract PolicyPoolSurgeRouterTest is Deployers {
         (bool ok, bytes memory result) = surgeRouter.swapWithSurgeOrRecord(surgeKey, _swapParams(5_000 ether), 39 ether);
 
         assertFalse(ok);
-        assertGt(result.length, 0);
+        _assertWrappedPolicyBlocked(result, bytes32("SURGE_INSUFFICIENT"), 39 ether, 40 ether);
 
         (,, uint256 spentToday,,) = hook.policies(surgePoolId);
         assertEq(spentToday, 0);
@@ -92,7 +93,7 @@ contract PolicyPoolSurgeRouterTest is Deployers {
             untrustedRouter.swapOrRecord(surgeKey, _swapParams(5_000 ether), abi.encode(40 ether));
 
         assertFalse(ok);
-        assertGt(result.length, 0);
+        _assertWrappedPolicyBlocked(result, PolicyReasons.MAX_SWAP_EXCEEDED, 5_000 ether, 1_000 ether);
 
         (,, uint256 spentToday,,) = hook.policies(surgePoolId);
         assertEq(spentToday, 0);
@@ -104,10 +105,39 @@ contract PolicyPoolSurgeRouterTest is Deployers {
         (bool ok, bytes memory result) = surgeRouter.swapWithSurgeOrRecord(surgeKey, _swapParams(5_000 ether), 40 ether);
 
         assertFalse(ok);
-        assertGt(result.length, 0);
+        _assertWrappedPolicyBlocked(result, PolicyReasons.DAILY_CAP_EXCEEDED, 5_000 ether, 2_000 ether);
 
         (,, uint256 spentToday,,) = hook.policies(surgePoolId);
         assertEq(spentToday, 0);
+    }
+
+    function _assertWrappedPolicyBlocked(
+        bytes memory revertData,
+        bytes32 expectedReason,
+        uint256 expectedAttempted,
+        uint256 expectedLimit
+    ) internal pure {
+        bytes memory expectedInner = abi.encodeWithSelector(
+            PolicyBlocked.selector, expectedReason, expectedAttempted, expectedLimit
+        );
+        require(_containsBytes(revertData, expectedInner), "expected PolicyBlocked payload not found in wrapped revert");
+    }
+
+    function _containsBytes(bytes memory haystack, bytes memory needle) internal pure returns (bool) {
+        if (needle.length == 0) return true;
+        if (haystack.length < needle.length) return false;
+        uint256 end = haystack.length - needle.length;
+        for (uint256 i = 0; i <= end; i++) {
+            bool match_ = true;
+            for (uint256 j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) {
+                    match_ = false;
+                    break;
+                }
+            }
+            if (match_) return true;
+        }
+        return false;
     }
 
     function _swapParams(uint256 amountIn) internal pure returns (SwapParams memory) {
