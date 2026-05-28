@@ -1,6 +1,6 @@
 # Policy Covenant Schema
 
-PolicyPool v1 uses a deliberately small pool-level covenant. It is designed to be easy to verify in code, tests, and the demo.
+PolicyPool v1 uses a deliberately small pool-level covenant. It is designed to be easy to verify in code, tests, and live X Layer receipts.
 
 ## Covenant Fields
 
@@ -35,7 +35,7 @@ PolicyPool uses `bytes32` reason constants so the Hook revert and router-caught 
 - V1 does not enforce slippage caps.
 - V1 does not enforce asset allowlists.
 - V1 covenant is per pool, not per LP.
-- Refused swaps revert inside the Hook; reverted Hook logs do not persist. The live demo proof uses `PolicyPoolDemoRouter.swapOrRecord` to catch the `PolicyBlocked` revert and emit `SwapBlockedCaught` with the original revert bytes, which the verifier decodes.
+- Refused swaps revert inside the Hook; reverted Hook logs do not persist. The live proof uses `PolicyPoolDemoRouter.swapOrRecord` to catch the `PolicyBlocked` revert and emit `SwapBlockedCaught` with the original revert bytes, which the verifier decodes.
 
 ## Scope
 

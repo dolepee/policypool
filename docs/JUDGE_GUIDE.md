@@ -2,7 +2,7 @@
 
 PolicyPool is a Uniswap v4 Hook on X Layer mainnet that gives each pool a small, public execution covenant. Before a swap executes, the Hook checks whether the order fits that pool's `maxSwapAmount` and `dailyCap`. PolicyPool Surge adds a trusted router that can bend the max-swap covenant only by donating a surge fee to LPs inside the same v4 unlock.
 
-The demo question is simple:
+The proof question is simple:
 
 > Same exact-input order, different pool policy. Can the pool enforce a different onchain outcome before swap execution?
 
@@ -154,7 +154,7 @@ No. Dynamic fee Hooks still let the swap execute at a different price. PolicyPoo
 
 Factory-owned policy setup, optional immutable or timelocked covenants, real asset pools, and a production deployment process. Those are adoption hardening steps, not requirements for proving the Hook primitive.
 
-## Why The Demo Uses Mock Assets
+## Why The Proof Uses Mock Assets
 
 The hackathon requirement is a deployed Uniswap v4 Pool and Hook on X Layer with Hook behavior triggered by real transactions. PolicyPool uses mock assets so the proof focuses on Hook semantics, not asset liquidity. The pool covenant logic is independent of the token pair.
 

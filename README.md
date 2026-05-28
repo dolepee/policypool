@@ -63,7 +63,7 @@ PolicyPool keeps the first submission deliberately narrow:
 - One Hook: `PolicyPoolHook.sol`
 - One covenant schema: `maxSwapAmount`, `dailyCap`, `spentToday`, `lastResetTimestamp`
 - One callback: `beforeSwap`
-- One pair for the demo: `MockUSDC / MockETH`
+- One proof pair: `MockUSDC / MockETH`
 - Two v4 pools using the same Hook but different fee tiers, so they have different `PoolId`s
 - Two live proofs:
   - a `5,000 mUSDC` exact-input swap passes the loose pool and fails the strict pool
@@ -123,7 +123,7 @@ The spoof guard is part of the proof. Passing surge-looking `hookData` through t
 
 ## Why X Layer
 
-PolicyPool is deployed on X Layer mainnet because the product needs cheap, repeatable swap proofs and an active onchain trading environment. The demo does not stop at deployment: it initializes v4 pools, runs accepted swaps, records max-swap refusal, records daily-cap refusal, and verifies all of it from X Layer receipts.
+PolicyPool is deployed on X Layer mainnet because the product needs cheap, repeatable swap proofs and an active onchain trading environment. The submission does not stop at deployment: it initializes v4 pools, runs accepted swaps, records max-swap refusal, records daily-cap refusal, records Surge execution, and verifies all of it from X Layer receipts.
 
 ## File Structure
 
@@ -164,7 +164,7 @@ docs/
   SECURITY_NOTES.md
   DEPLOYMENT_PLAN.md
 web/
-  index.html               # static judge/demo page shell
+  index.html               # static judge proof page shell
 ```
 
 ## Hook Callback Plan
@@ -371,18 +371,15 @@ Current tests cover:
 - demo router caught strict-pool refusal and emitted `SwapBlockedCaught`
 - live X Layer proof verifier for accepted, max-swap refused, and daily-cap refused outcomes
 
-## Demo Video Structure
+## No-Video Review Path
 
-Recommended demo structure:
+The repo and live site are structured so judges can verify PolicyPool without a recorded walkthrough:
 
-1. Open on the live hero: `Policy bends. LPs get paid.`
-2. Show the featured Surge proof: `40 mUSDC` donated, `5,000 mUSDC` swapped, same v4 unlock.
-3. Open the Surge receipt and point to `Donate`, Hook `SwapAccepted`, and router `SurgeAccepted`.
-4. Open the spoof-guard receipt and show the old router cannot activate Surge with fake `hookData`.
-5. Return to the proof ledger and show the V1 covenant baseline: loose accepts `5,000 mUSDC`, strict refuses the same exact-input amount, and daily cap refuses the third fill.
-6. Close on `node scripts/verify-live.mjs`, X Layer explorer links, the latest green CI run for `verify-all`, and the `beforeSwap` covenant check.
-
-Target length: 90 to 120 seconds.
+1. Open the live hero: `Policy bends. LPs get paid.`
+2. Click the featured Surge proof and inspect the `Donate`, Hook `SwapAccepted`, and router `SurgeAccepted` logs.
+3. Click the spoof-guard proof and inspect the old-router refusal path.
+4. Return to the proof ledger and inspect the V1 covenant baseline: loose accepts `5,000 mUSDC`, strict refuses the same exact-input amount, and daily cap refuses the third fill.
+5. Run `node scripts/verify-live.mjs` for the concise live verifier or `node scripts/verify-all.mjs` for the full local + live proof path.
 
 ## Current Status
 
