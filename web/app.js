@@ -92,6 +92,7 @@ const PROOFS = [
 
 const ROUTES = new Map([
   ["/", "home"],
+  ["/simulate", "simulate"],
   ["/console", "console"],
   ["/receipts", "receipts"],
 ]);
@@ -131,11 +132,13 @@ function renderRoute(path = window.location.pathname) {
     else node.removeAttribute("aria-current");
   });
   document.title =
-    page === "console"
-      ? "PolicyPool Console · X Layer"
-      : page === "receipts"
-        ? "PolicyPool Receipts · X Layer"
-        : "PolicyPool · X Layer policy console";
+    page === "simulate"
+      ? "PolicyPool Simulator · X Layer"
+      : page === "console"
+        ? "PolicyPool Console · X Layer"
+        : page === "receipts"
+          ? "PolicyPool Receipts · X Layer"
+          : "PolicyPool · Liquidity covenant layer for X Layer";
 }
 
 function onRouteClick(event) {
@@ -300,6 +303,56 @@ async function copyTarget(button) {
   }, 1200);
 }
 
+function fmt(value) {
+  return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function simNum(id, min = 0) {
+  const value = Number(document.querySelector(id)?.value);
+  return Number.isFinite(value) ? Math.max(min, value) : min;
+}
+
+// Mirrors the onchain beforeSwap covenant: daily cap is a hard stop, then
+// max-swap overflow either surges (LPs paid first) or refuses.
+function runSimulation() {
+  const badge = document.querySelector("#sim-badge");
+  if (!badge) return;
+  const maxSwap = simNum("#sim-max", 1);
+  const dailyCap = simNum("#sim-cap", 1);
+  const today = simNum("#sim-today", 0);
+  const surgeOn = document.querySelector("#sim-surge")?.value !== "off";
+  const feeBps = simNum("#sim-fee", 0);
+  const trade = simNum("#sim-trade", 1);
+  const roomLeft = Math.max(0, dailyCap - today);
+
+  let verdict = "ALLOW";
+  let reason = "";
+  let lpPaid = 0;
+
+  if (today + trade > dailyCap) {
+    verdict = "BLOCK";
+    reason = `Refused: DAILY_CAP_EXCEEDED. ${fmt(today)} already traded plus ${fmt(trade)} exceeds the ${fmt(dailyCap)} daily cap. Only ${fmt(roomLeft)} mUSDC left today.`;
+  } else if (trade <= maxSwap) {
+    verdict = "ALLOW";
+    reason = `Cleared. ${fmt(trade)} mUSDC is within the ${fmt(maxSwap)} max swap and the daily cap, so beforeSwap accepts it.`;
+  } else if (surgeOn) {
+    verdict = "SURGE";
+    lpPaid = (trade * feeBps) / 10000;
+    reason = `Passes via Surge. ${fmt(trade)} mUSDC is over the ${fmt(maxSwap)} max swap, so the router donates ${fmt(lpPaid)} mUSDC to in-range LPs first, then the swap clears in the same v4 unlock.`;
+  } else {
+    verdict = "BLOCK";
+    reason = `Refused: MAX_SWAP_EXCEEDED. ${fmt(trade)} mUSDC is over the ${fmt(maxSwap)} max swap and Surge is off, so beforeSwap reverts before liquidity is touched.`;
+  }
+
+  badge.textContent = verdict;
+  badge.className = `verdict-badge verdict-${verdict.toLowerCase()}`;
+  document.querySelector("#sim-reason").textContent = reason;
+  document.querySelector("#sim-out-trade").textContent = `${fmt(trade)} mUSDC`;
+  document.querySelector("#sim-out-max").textContent = `${fmt(maxSwap)} mUSDC`;
+  document.querySelector("#sim-out-room").textContent = `${fmt(roomLeft)} mUSDC`;
+  document.querySelector("#sim-out-lp").textContent = lpPaid > 0 ? `${fmt(lpPaid)} mUSDC` : "—";
+}
+
 document.addEventListener("click", (event) => {
   onRouteClick(event);
   const copyButton = event.target.closest("[data-copy-target]");
@@ -309,9 +362,11 @@ document.addEventListener("click", (event) => {
 window.addEventListener("popstate", () => renderRoute());
 document.querySelector("#connect-wallet")?.addEventListener("click", connectWallet);
 document.querySelector("#policy-form")?.addEventListener("input", updateConsoleOutput);
+document.querySelector("#sim-form")?.addEventListener("input", runSimulation);
 
 renderRoute();
 renderReceipts();
 updateStats();
 updateConsoleOutput();
+runSimulation();
 void hydrateReceiptTimes();

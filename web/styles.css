@@ -771,3 +771,51 @@ td.mono {
     text-transform: uppercase;
   }
 }
+
+.hero-sub {
+  margin: var(--space-3) 0 0;
+  color: var(--text-primary);
+  font-size: var(--type-h2-size);
+  line-height: var(--type-h2-line);
+  font-weight: 600;
+}
+
+.verdict {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.verdict-badge {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-5);
+  font-size: var(--type-h2-size);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.verdict-allow {
+  background: var(--positive-soft);
+  color: var(--positive);
+}
+
+.verdict-surge {
+  background: var(--risk-soft);
+  color: var(--risk);
+}
+
+.verdict-block {
+  background: var(--negative-soft);
+  color: var(--negative);
+}
+
+.verdict-reason {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-line);
+}

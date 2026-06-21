@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="PolicyPool is a Uniswap v4 hook on X Layer mainnet where pools enforce per-swap and daily-volume policy rails with onchain accept and refusal receipts."
+      content="PolicyPool is the liquidity covenant layer for X Layer markets: liquidity that can say no, or charge overflow to pay LPs first. Enforceable max size, daily caps, refusal, and LP-first surge, with onchain receipts."
     />
     <link rel="canonical" href="https://policypool.vercel.app/" />
-    <meta property="og:title" content="PolicyPool · Pools that enforce their own policy" />
+    <meta property="og:title" content="PolicyPool · The liquidity covenant layer for X Layer markets" />
     <meta
       property="og:description"
-      content="Live X Layer mainnet proof: the same swap succeeds in a loose pool and is refused by a strict pool with a decoded PolicyBlocked receipt."
+      content="Liquidity that can say no, or charge overflow to pay LPs first. Live on X Layer mainnet with onchain accept, refuse, and surge receipts."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://policypool.vercel.app/" />
@@ -20,14 +20,14 @@
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="PolicyPool · Pools that enforce their own policy" />
+    <meta name="twitter:title" content="PolicyPool · The liquidity covenant layer for X Layer markets" />
     <meta
       name="twitter:description"
-      content="A product console and live receipts for X Layer mainnet pool policy rails."
+      content="Simulate any trade against a covenant: allow, block, or surge. Live on X Layer mainnet."
     />
     <meta name="twitter:image" content="https://policypool.vercel.app/og.png" />
     <meta name="theme-color" content="#0A0A10" />
-    <title>PolicyPool · X Layer policy console</title>
+    <title>PolicyPool · Liquidity covenant layer for X Layer</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="shortcut icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="preload" href="./tokens.css" as="style" />
@@ -47,6 +47,7 @@
 
         <nav class="nav-links" aria-label="Primary">
           <a href="/" data-route data-nav="home">Overview</a>
+          <a href="/simulate" data-route data-nav="simulate">Simulator</a>
           <a href="/console" data-route data-nav="console">Console</a>
           <a href="/receipts" data-route data-nav="receipts">Receipts</a>
         </nav>
@@ -59,7 +60,7 @@
             </svg>
           </a>
           <a class="text-link" href="https://github.com/dolepee/policypool/blob/main/docs/JUDGE_GUIDE.md" target="_blank" rel="noreferrer">Docs</a>
-          <a class="button button-primary" href="/console" data-route>Open console</a>
+          <a class="button button-primary" href="/simulate" data-route>Try the simulator</a>
         </div>
       </div>
     </header>
@@ -69,13 +70,14 @@
         <div class="container">
           <div class="hero-grid">
             <div class="hero-copy">
-              <span class="eyebrow">POOL POLICY RAILS</span>
-              <h1>Pools that enforce their own policy.</h1>
+              <span class="eyebrow">LIQUIDITY COVENANT LAYER</span>
+              <h1>Liquidity covenants for X Layer markets.</h1>
+              <p class="hero-sub">Liquidity that can say no, or charge overflow to pay LPs first.</p>
               <p class="hero-lede">
-                Per-pool swap-size and daily-volume rules, enforced by a Uniswap v4 hook, with refusals receipted onchain.
+                LPs and market operators publish enforceable trading terms, max size, daily caps, refusal, and LP-first surge, enforced before capital moves and receipted onchain. The first adapter is a Uniswap v4 hook, live on X Layer mainnet.
               </p>
               <div class="button-row" aria-label="Primary actions">
-                <a class="button button-primary" href="/console" data-route>Open the console</a>
+                <a class="button button-primary" href="/simulate" data-route>Try the simulator</a>
                 <a class="button button-ghost" href="#accept-refuse">See it refuse a swap</a>
               </div>
             </div>
@@ -106,7 +108,7 @@
             <div class="section-head section-head-row">
               <div>
                 <span class="eyebrow">ACCEPT VS REFUSE</span>
-                <h2 id="proof-title">Same swap parameters. Different pool policy.</h2>
+                <h2 id="proof-title">Same swap parameters. Different pool covenant.</h2>
               </div>
               <span class="chip chip-risk">X Layer mainnet</span>
             </div>
@@ -121,7 +123,7 @@
                 <p>The loose pool accepts the exact-input order and emits <code>SwapAccepted</code>.</p>
                 <dl class="metric-list">
                   <div><dt>Amount</dt><dd>5,000 mUSDC</dd></div>
-                  <div><dt>Policy</dt><dd>max 10,000 · daily 50,000</dd></div>
+                  <div><dt>Covenant</dt><dd>max 10,000 · daily 50,000</dd></div>
                   <div><dt>Tx</dt><dd><a href="https://www.oklink.com/x-layer/tx/0x1ee4c6e668306c1ed7dddb0a47cb8c722607f892d03f69746d2822df13423396" target="_blank" rel="noreferrer">0x1ee4…3396</a></dd></div>
                 </dl>
               </article>
@@ -195,12 +197,81 @@
         </div>
       </section>
 
+      <section class="page page-simulate" data-page="simulate" hidden>
+        <div class="container">
+          <div class="page-title-row">
+            <div>
+              <span class="eyebrow">COVENANT SIMULATOR</span>
+              <h1>Will this trade pass the covenant?</h1>
+              <p>Set a liquidity covenant, enter a trade, and see whether it is allowed, blocked, or surged, with the LP payment shown. No wallet needed. This mirrors the onchain beforeSwap rules the live PolicyPool hook enforces.</p>
+            </div>
+            <span class="chip chip-neutral">No wallet</span>
+          </div>
+
+          <div class="console-grid">
+            <section class="data-card" aria-labelledby="sim-form-title">
+              <div class="card-head">
+                <h2 id="sim-form-title">Covenant and trade</h2>
+                <span class="chip chip-neutral">mUSDC</span>
+              </div>
+              <form class="policy-form" id="sim-form">
+                <label>
+                  <span>Max swap size</span>
+                  <input id="sim-max" type="number" min="1" step="1" value="1000" inputmode="decimal" />
+                </label>
+                <label>
+                  <span>Daily volume cap</span>
+                  <input id="sim-cap" type="number" min="1" step="1" value="50000" inputmode="decimal" />
+                </label>
+                <label>
+                  <span>Already traded today</span>
+                  <input id="sim-today" type="number" min="0" step="1" value="0" inputmode="decimal" />
+                </label>
+                <label>
+                  <span>Surge overflow</span>
+                  <select id="sim-surge">
+                    <option value="on">Enabled · overflow pays LPs</option>
+                    <option value="off">Disabled · refuse over cap</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Surge fee (bps of trade)</span>
+                  <input id="sim-fee" type="number" min="0" step="1" value="80" inputmode="decimal" />
+                </label>
+                <label>
+                  <span>Incoming trade size</span>
+                  <input id="sim-trade" type="number" min="1" step="1" value="5000" inputmode="decimal" />
+                </label>
+              </form>
+            </section>
+
+            <section class="data-card" aria-labelledby="sim-result-title">
+              <div class="card-head">
+                <h2 id="sim-result-title">Verdict</h2>
+                <span class="chip chip-neutral">beforeSwap</span>
+              </div>
+              <div class="verdict" aria-live="polite">
+                <span class="verdict-badge verdict-allow" id="sim-badge">ALLOW</span>
+                <p class="verdict-reason" id="sim-reason"></p>
+              </div>
+              <dl class="metric-list">
+                <div><dt>Trade</dt><dd id="sim-out-trade">—</dd></div>
+                <div><dt>Max swap</dt><dd id="sim-out-max">—</dd></div>
+                <div><dt>Daily room left</dt><dd id="sim-out-room">—</dd></div>
+                <div><dt>LP surge paid</dt><dd id="sim-out-lp">—</dd></div>
+              </dl>
+              <p class="fine-print">Allow means the trade clears under the covenant. Surge means it exceeds max swap but passes because LPs are paid the surge fee first. Block means it is refused in beforeSwap before liquidity is touched.</p>
+            </section>
+          </div>
+        </div>
+      </section>
+
       <section class="page page-console" data-page="console" hidden>
         <div class="container">
           <div class="page-title-row">
             <div>
-              <span class="eyebrow">POLICY CONSOLE</span>
-              <h1>Configure a pool policy.</h1>
+              <span class="eyebrow">COVENANT CONSOLE</span>
+              <h1>Configure a pool covenant.</h1>
               <p>Generate the exact X Layer transaction path for a pool using the live PolicyPool hook.</p>
             </div>
             <span class="chip chip-risk">X Layer mainnet</span>
@@ -209,7 +280,7 @@
           <div class="console-grid">
             <section class="data-card" aria-labelledby="policy-form-title">
               <div class="card-head">
-                <h2 id="policy-form-title">Policy inputs</h2>
+                <h2 id="policy-form-title">Covenant inputs</h2>
                 <span class="chip chip-neutral">Mock tokens</span>
               </div>
               <form class="policy-form" id="policy-form">
@@ -317,9 +388,9 @@
 
     <footer class="site-footer">
       <div class="container footer-inner">
-        <span>PolicyPool, pool policy rails with public receipts</span>
+        <span>PolicyPool, the liquidity covenant layer for X Layer markets</span>
         <nav aria-label="Footer">
-          <a href="/receipts" data-route>Receipts</a>
+          <a href="/simulate" data-route>Simulator</a>
           <a href="https://github.com/dolepee/policypool" target="_blank" rel="noreferrer">GitHub</a>
           <a href="https://x.com/PolicyPoolHQ" target="_blank" rel="noreferrer">X @PolicyPoolHQ</a>
         </nav>

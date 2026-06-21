@@ -2,9 +2,11 @@
 
 [![PolicyPool preview: Policy bends. LPs get paid.](web/og.png)](https://policypool.vercel.app)
 
-PolicyPool is a Uniswap v4 Hook for pool covenants on X Layer. Each pool publishes the exact-input swap size and daily volume limits its liquidity will accept before execution. Over-cap flow either refuses in `beforeSwap`, or goes through PolicyPool Surge, where a trusted router donates a surge fee to in-range LPs before executing the swap inside the same v4 unlock.
+PolicyPool is the liquidity covenant layer for X Layer markets: liquidity that can say no, or charge overflow to pay LPs first. LPs and market operators publish enforceable trading terms, max swap size, daily volume caps, refusal, and LP-first surge, enforced before capital moves with onchain receipts.
 
-Built for the OKX X Layer Hook the Future hackathon.
+The first adapter is a Uniswap v4 hook live on X Layer mainnet: each pool publishes the exact-input swap size and daily volume limits its liquidity will accept before execution, and over-cap flow either refuses in `beforeSwap`, or goes through PolicyPool Surge, where a trusted router donates a surge fee to in-range LPs before executing the swap inside the same v4 unlock. The covenant engine is execution-agnostic by design, so the same terms extend to launchpad pools and Exchange OS venues as new adapters.
+
+First proven at the OKX X Layer Hook the Future hackathon (2nd place).
 
 CI: [![CI](https://github.com/dolepee/policypool/actions/workflows/test.yml/badge.svg)](https://github.com/dolepee/policypool/actions/workflows/test.yml)
 
