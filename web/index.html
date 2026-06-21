@@ -49,6 +49,7 @@
           <a href="/" data-route data-nav="home">Overview</a>
           <a href="/simulate" data-route data-nav="simulate">Simulator</a>
           <a href="/console" data-route data-nav="console">Console</a>
+          <a href="/registry" data-route data-nav="registry">Registry</a>
           <a href="/receipts" data-route data-nav="receipts">Receipts</a>
         </nav>
 
@@ -382,6 +383,23 @@
               </table>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section class="page page-registry" data-page="registry" hidden>
+        <div class="container">
+          <div class="page-title-row">
+            <div>
+              <span class="eyebrow">COVENANT REGISTRY</span>
+              <h1>Pools with verified liquidity covenants.</h1>
+              <p>Every pool here publishes enforceable terms onchain, and every total is backed by the verified X Layer mainnet proof set. PolicyPool's own pools first; external pools are listed only after a covenant review.</p>
+            </div>
+            <span class="chip chip-risk">X Layer mainnet</span>
+          </div>
+          <div class="registry-grid" id="registry-rows"></div>
+          <p class="fine-print">
+            Terms and flow totals reflect the committed proof set, replayable on <a href="/receipts" data-route>Receipts</a> and in the <a href="https://github.com/dolepee/policypool/blob/main/scripts/verify-proof.mjs" target="_blank" rel="noreferrer">verifier</a>. Background: the <a href="https://github.com/dolepee/policypool/blob/main/docs/LIQUIDITY_COVENANTS.md" target="_blank" rel="noreferrer">Liquidity Covenant Note</a>. Want your pool listed? Open an issue for a covenant review.
+          </p>
         </div>
       </section>
     </main>

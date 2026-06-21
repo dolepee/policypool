@@ -819,3 +819,10 @@ td.mono {
   font-size: var(--type-body-size);
   line-height: var(--type-body-line);
 }
+
+.registry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+}

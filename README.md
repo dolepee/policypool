@@ -12,6 +12,9 @@ CI: [![CI](https://github.com/dolepee/policypool/actions/workflows/test.yml/badg
 
 Fast links:
 [Live app](https://policypool.vercel.app) ·
+[Simulator](https://policypool.vercel.app/simulate) ·
+[Registry](https://policypool.vercel.app/registry) ·
+[Liquidity Covenant Note](docs/LIQUIDITY_COVENANTS.md) ·
 [Judge guide](docs/JUDGE_GUIDE.md) ·
 [Reviewer questions](docs/JUDGE_GUIDE.md#reviewer-questions) ·
 [Hook invariants](docs/HOOK_INVARIANTS.md) ·

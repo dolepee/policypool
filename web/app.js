@@ -94,6 +94,7 @@ const ROUTES = new Map([
   ["/", "home"],
   ["/simulate", "simulate"],
   ["/console", "console"],
+  ["/registry", "registry"],
   ["/receipts", "receipts"],
 ]);
 
@@ -136,9 +137,11 @@ function renderRoute(path = window.location.pathname) {
       ? "PolicyPool Simulator · X Layer"
       : page === "console"
         ? "PolicyPool Console · X Layer"
-        : page === "receipts"
-          ? "PolicyPool Receipts · X Layer"
-          : "PolicyPool · Liquidity covenant layer for X Layer";
+        : page === "registry"
+          ? "PolicyPool Registry · X Layer"
+          : page === "receipts"
+            ? "PolicyPool Receipts · X Layer"
+            : "PolicyPool · Liquidity covenant layer for X Layer";
 }
 
 function onRouteClick(event) {
@@ -303,6 +306,84 @@ async function copyTarget(button) {
   }, 1200);
 }
 
+const REGISTRY = [
+  {
+    pool: "Loose",
+    version: "V1",
+    pair: "MockUSDC / MockETH",
+    adapter: "PolicyPoolHook",
+    adapterAddr: "0x7D676FA819D8CDF0A2BB73B944a3533870868080",
+    maxSwap: "10,000 mUSDC",
+    dailyCap: "50,000 mUSDC",
+    surge: "—",
+    allowed: "5,000 mUSDC",
+    blocked: "0 mUSDC",
+    surgePaid: "—",
+    poolId: POOLS.loose,
+    proofs: 1,
+  },
+  {
+    pool: "Strict",
+    version: "V1",
+    pair: "MockUSDC / MockETH",
+    adapter: "PolicyPoolHook",
+    adapterAddr: "0x7D676FA819D8CDF0A2BB73B944a3533870868080",
+    maxSwap: "1,000 mUSDC",
+    dailyCap: "2,000 mUSDC",
+    surge: "—",
+    allowed: "2,000 mUSDC",
+    blocked: "6,000 mUSDC",
+    surgePaid: "—",
+    poolId: POOLS.strict,
+    proofs: 4,
+  },
+  {
+    pool: "Surge",
+    version: "V2",
+    pair: "MockUSDC / MockETH",
+    adapter: "PolicyPoolSurgeHook",
+    adapterAddr: "0xf44d9C1f9efF1231E53C60EDB9A73761aa99c080",
+    maxSwap: "1,000 mUSDC",
+    dailyCap: "—",
+    surge: "80 bps to LPs",
+    allowed: "5,000 mUSDC via surge",
+    blocked: "5,000 mUSDC",
+    surgePaid: "40 mUSDC",
+    poolId: POOLS.surge,
+    proofs: 2,
+  },
+];
+
+function renderRegistry(rows = REGISTRY) {
+  const host = document.querySelector("#registry-rows");
+  if (!host) return;
+  host.innerHTML = rows
+    .map((r) => {
+      const chip = r.pool === "Surge" ? "chip-risk" : "chip-neutral";
+      return `
+        <article class="data-card">
+          <div class="card-head">
+            <span class="eyebrow">${r.pool.toUpperCase()} POOL</span>
+            <span class="chip ${chip}">${r.version}</span>
+          </div>
+          <dl class="metric-list">
+            <div><dt>Pair</dt><dd>${r.pair}</dd></div>
+            <div><dt>Adapter</dt><dd><a href="https://sourcify.dev/#/lookup/${r.adapterAddr}" target="_blank" rel="noreferrer">${r.adapter}</a></dd></div>
+            <div><dt>Max swap</dt><dd>${r.maxSwap}</dd></div>
+            <div><dt>Daily cap</dt><dd>${r.dailyCap}</dd></div>
+            <div><dt>Surge</dt><dd>${r.surge}</dd></div>
+            <div><dt>Allowed flow</dt><dd>${r.allowed}</dd></div>
+            <div><dt>Blocked flow</dt><dd>${r.blocked}</dd></div>
+            <div><dt>Surge to LPs</dt><dd>${r.surgePaid}</dd></div>
+            <div><dt>Pool id</dt><dd class="mono">${shortHash(r.poolId)}</dd></div>
+            <div><dt>Onchain proofs</dt><dd>${r.proofs}</dd></div>
+          </dl>
+        </article>
+      `;
+    })
+    .join("");
+}
+
 function fmt(value) {
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
@@ -366,6 +447,7 @@ document.querySelector("#sim-form")?.addEventListener("input", runSimulation);
 
 renderRoute();
 renderReceipts();
+renderRegistry();
 updateStats();
 updateConsoleOutput();
 runSimulation();
