@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">PolicyPool Agent Coverage avatar</title>
+  <desc id="desc">Flat geometric violet policy shield with a pooled reserve dot.</desc>
+  <rect width="512" height="512" rx="112" fill="#141022"/>
+  <path d="M256 70 390 126v112c0 92-52 160-134 204-82-44-134-112-134-204V126L256 70Z" fill="#7C3AED"/>
+  <path d="M256 106 354 147v91c0 68-37 118-98 153-61-35-98-85-98-153v-91l98-41Z" fill="#1F1633"/>
+  <path d="M172 246h168v42H172z" fill="#C4FF5E"/>
+  <circle cx="256" cy="246" r="70" fill="none" stroke="#C4FF5E" stroke-width="28"/>
+  <circle cx="256" cy="288" r="31" fill="#C4FF5E"/>
+</svg>

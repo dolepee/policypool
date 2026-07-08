@@ -6,6 +6,7 @@
     { "source": "/simulate", "destination": "/index.html" },
     { "source": "/console", "destination": "/index.html" },
     { "source": "/registry", "destination": "/index.html" },
-    { "source": "/receipts", "destination": "/index.html" }
+    { "source": "/receipts", "destination": "/index.html" },
+    { "source": "/agent", "destination": "/agent.html" }
   ]
 }

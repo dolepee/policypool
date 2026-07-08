@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="PolicyPool Agent Coverage checks proposed agent jobs against published policy, issues covenant receipts, and records objective breach coverage outcomes."
+    />
+    <link rel="canonical" href="https://policypool.vercel.app/agent" />
+    <meta property="og:title" content="PolicyPool Agent Coverage" />
+    <meta
+      property="og:description"
+      content="A guard plus coverage receipt for agent work: declined, issued, or payout-due."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://policypool.vercel.app/agent" />
+    <meta property="og:image" content="https://policypool.vercel.app/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#141022" />
+    <title>PolicyPool Agent Coverage</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./tokens.css" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="/" aria-label="PolicyPool home">
+          <span class="brand-mark" aria-hidden="true">P</span>
+          <span>PolicyPool</span>
+        </a>
+        <nav class="nav-links" aria-label="Primary">
+          <a href="/">Hook proof</a>
+          <a href="/agent" aria-current="page">Agent Coverage</a>
+          <a href="/receipts">Receipts</a>
+        </nav>
+        <div class="header-actions">
+          <span class="chip chip-risk">X Layer</span>
+          <a class="button button-primary" href="/api/covered-job-receipt">API</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="page page-home">
+        <div class="container">
+          <div class="hero-grid">
+            <div class="hero-copy">
+              <span class="eyebrow">AGENT COVERAGE</span>
+              <h1>Agents can prove their rules, then back them with a reserve.</h1>
+              <p class="hero-sub">PolicyPool checks an agent job before coverage is issued, and records what happens when objective rules break.</p>
+              <p class="hero-lede">
+                The marketplace handles the order lifecycle. PolicyPool adds an external reserve-backed receipt that records whether objective service rules were followed. It is a software guarantee layer, not a trading or advisory service.
+              </p>
+              <div class="button-row" aria-label="Primary actions">
+                <a class="button button-primary" href="/api/covered-job-receipt">Call the endpoint</a>
+                <a class="button button-ghost" href="#outcomes">See outcomes</a>
+              </div>
+            </div>
+
+            <div class="hero-proof data-card" aria-label="Agent coverage summary">
+              <div class="card-head">
+                <span class="eyebrow">ONE SERVICE</span>
+                <span class="chip chip-neutral">A2MCP</span>
+              </div>
+              <dl class="proof-kv">
+                <div>
+                  <dt>Service</dt>
+                  <dd>Covered Job Receipt</dd>
+                </div>
+                <div>
+                  <dt>Price</dt>
+                  <dd>1 USDT</dd>
+                </div>
+                <div id="reserve">
+                  <dt>Reserve wallet</dt>
+                  <dd><code>0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7</code></dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+
+          <section class="section" id="outcomes" aria-labelledby="outcomes-title">
+            <div class="section-head section-head-row">
+              <div>
+                <span class="eyebrow">GUARD + COVERAGE</span>
+                <h2 id="outcomes-title">One call returns one receipted outcome.</h2>
+              </div>
+              <span class="chip chip-positive">Objective rules only</span>
+            </div>
+            <div class="compare-grid">
+              <article class="data-card proof-card-refused">
+                <div class="card-head">
+                  <span class="eyebrow">DECLINED</span>
+                  <span class="chip chip-risk">Blocked</span>
+                </div>
+                <h3>Request breaks policy.</h3>
+                <p>Unfunded work, forbidden actions, prompt-injection attempts, or review-outcome promises receive a refusal receipt.</p>
+              </article>
+              <article class="data-card proof-card-accepted">
+                <div class="card-head">
+                  <span class="eyebrow">ISSUED</span>
+                  <span class="chip chip-positive">Active</span>
+                </div>
+                <h3>Coverage covenant created.</h3>
+                <p>The receipt records target agent, job description, deadline, coverage cap, premium, and objective breach rules.</p>
+              </article>
+              <article class="data-card">
+                <div class="card-head">
+                  <span class="eyebrow">PAYOUT</span>
+                  <span class="chip chip-neutral">Due or paid</span>
+                </div>
+                <h3>Objective breach detected.</h3>
+                <p>Deadline missed, no delivery, absent delivery hash, or listing mismatch can produce a payout record linked to the reserve.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="section" aria-labelledby="sample-title">
+            <div class="section-head">
+              <span class="eyebrow">API SAMPLE</span>
+              <h2 id="sample-title">Paid replay returns a covenant receipt.</h2>
+            </div>
+            <pre class="data-card"><code>POST /api/covered-job-receipt
+{
+  "targetAgent": "Foreman#4348",
+  "jobDescription": "Create a scoped launch readiness pack.",
+  "paymentStatus": "funded",
+  "deadline": "2026-07-17T00:00:00.000Z",
+  "requestedCoverageUSDT": 5
+}</code></pre>
+          </section>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

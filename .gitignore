@@ -11,3 +11,4 @@ broadcast/
 # Local-only social source files. Final rendered graphics live in Downloads.
 social-kit/
 .vercel
+.env*

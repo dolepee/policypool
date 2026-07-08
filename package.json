@@ -1,0 +1,18 @@
+{
+  "name": "policypool",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "PolicyPool Agent Coverage adds money-backed policy receipts for agent work.",
+  "scripts": {
+    "build": "npm run build --prefix web",
+    "typecheck": "node --check api/covered-job-receipt.js && node --check scripts/*.mjs && node --check scripts/lib/*.mjs",
+    "agent:verify": "node scripts/verify-agent-api.mjs",
+    "agent:verify-live": "node scripts/verify-agent-live.mjs",
+    "agent:probe": "node scripts/probe-agent-coverage.mjs",
+    "agent:gate": "npm run typecheck && npm run agent:verify && npm run agent:probe && npm run build"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
