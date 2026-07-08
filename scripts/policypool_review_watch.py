@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Poll OKX listing state and buried review messages for PolicyPool."""
+"""Poll OKX listing state and buried review messages for OKX ASPs."""
 
 from __future__ import annotations
 
@@ -13,8 +13,11 @@ import urllib.request
 from pathlib import Path
 
 
-AGENT_ID = "4674"
-AGENT_NAME = "PolicyPool"
+AGENTS = {
+    "4674": "PolicyPool",
+    "4348": "Foreman",
+    "3465": "GlassDesk",
+}
 HOME = Path.home()
 ONCHAINOS = os.environ.get("ONCHAINOS_BIN", str(HOME / ".local" / "bin" / "onchainos"))
 TASK_HOME = Path(os.environ.get("OKX_AGENT_TASK_HOME", HOME / ".okx-agent-task"))
@@ -92,24 +95,27 @@ def save_state(state: dict) -> None:
     tmp.replace(STATE_PATH)
 
 
-def get_agent_status() -> dict | None:
+def get_agent_statuses() -> list[dict]:
     try:
-        out = subprocess.run([ONCHAINOS, "agent", "get-my-agents"], capture_output=True, text=True, timeout=30).stdout
+        out = subprocess.run([ONCHAINOS, "agent", "get-my-agents"], capture_output=True, text=True, timeout=90).stdout
         payload = json.loads(out)
+        statuses = []
         for account in payload.get("data", {}).get("list", []):
             for agent in account.get("agentList", []):
-                if str(agent.get("agentId")) == AGENT_ID:
-                    return {
+                agent_id = str(agent.get("agentId"))
+                if agent_id in AGENTS:
+                    statuses.append({
                         "agentId": str(agent.get("agentId")),
                         "name": agent.get("name"),
                         "approvalLabel": agent.get("approvalLabel"),
                         "statusLabel": agent.get("statusLabel"),
                         "onlineStatus": agent.get("onlineStatus"),
                         "approvalRemark": agent.get("approvalRemark"),
-                    }
+                    })
+        return statuses
     except Exception as exc:
         log(f"status check failed {type(exc).__name__}: {str(exc)[:180]}")
-    return None
+    return []
 
 
 def iter_raw_texts(value):
@@ -133,35 +139,43 @@ def scan_back_session(state: dict) -> None:
         log(f"back-session parse failed {type(exc).__name__}: {str(exc)[:180]}")
         return
     seen = set(state.get("seen", []))
+    agent_needles = [name.lower() for name in AGENTS.values()] + [f"#{agent_id}" for agent_id in AGENTS]
     for text in iter_raw_texts(payload):
-        if AGENT_NAME.lower() not in text.lower() and f"#{AGENT_ID}" not in text:
+        lower_text = text.lower()
+        if not any(needle.lower() in lower_text for needle in agent_needles):
             continue
-        if not any(term in text.lower() for term in ("review", "listing", "approved", "rejected", "live", "suspended", "adjustments")):
+        if not any(term in lower_text for term in ("review", "listing", "approved", "rejected", "live", "suspended", "adjustments")):
             continue
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         if digest in seen:
             continue
         seen.add(digest)
         state.setdefault("seen", []).append(digest)
-        notify("PolicyPool review message found in OKX backup log:\n" + text[:1200])
+        notify("OKX agent review message found in backup log:\n" + text[:1200])
 
 
 def main() -> None:
     state = load_state()
-    status = get_agent_status()
-    if status:
-        key = json.dumps(status, sort_keys=True)
-        if key != state.get("lastStatus"):
-            state["lastStatus"] = key
+    statuses = get_agent_statuses()
+    if statuses:
+        key = json.dumps(statuses, sort_keys=True)
+        if key != state.get("lastStatuses"):
+            state["lastStatuses"] = key
+            lines = []
+            for status in statuses:
+                lines.extend([
+                    f"{status.get('name')} #{status.get('agentId')}",
+                    f"approval={status.get('approvalLabel')}",
+                    f"status={status.get('statusLabel')}",
+                    f"online={status.get('onlineStatus')}",
+                    f"remark={status.get('approvalRemark') or ''}",
+                    "",
+                ])
             notify(
-                "PolicyPool listing status update:\n"
-                f"agent #{AGENT_ID}\n"
-                f"approval={status.get('approvalLabel')}\n"
-                f"status={status.get('statusLabel')}\n"
-                f"online={status.get('onlineStatus')}\n"
-                f"remark={status.get('approvalRemark') or ''}"
+                "OKX agent listing status update:\n"
+                + "\n".join(lines).strip()
             )
-            log(f"status changed {key}")
+            log(f"statuses changed {key}")
     scan_back_session(state)
     save_state(state)
 
