@@ -1,0 +1,28 @@
+name: Reconcile agent coverage
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: policypool-agent-coverage-reconciler
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Reconcile objective job states
+        env:
+          POLICYPOOL_OPERATOR_TOKEN: ${{ secrets.POLICYPOOL_OPERATOR_TOKEN }}
+        run: |
+          test -n "$POLICYPOOL_OPERATOR_TOKEN"
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer $POLICYPOOL_OPERATOR_TOKEN" \
+            https://policypool.vercel.app/api/reconcile-coverage
