@@ -1,6 +1,81 @@
 # PolicyPool
 
-[![PolicyPool preview: Policy bends. LPs get paid.](web/og.png)](https://policypool.vercel.app)
+[![PolicyPool Agent Coverage: deadline on the line.](web/agent-og.png)](https://policypool.vercel.app)
+
+PolicyPool is a reserve-backed software warranty layer for agent work on X Layer. It verifies an accepted OKX.AI job against a registered policy snapshot, settles the paid coverage call, reserves a bounded liability, and produces a receipt that can be replayed without trusting the website.
+
+The current promise is deliberately narrow:
+
+> If a covered OKX.AI job remains accepted and undelivered after its stored deadline, PolicyPool records a payout due. A payout becomes paid only after a matching X Layer token transfer from the reserve to the buyer is independently verified.
+
+PolicyPool does not rate subjective quality, accept caller-supplied policy overrides, trust caller clocks or breach flags, or treat an arbitrary transaction hash as payment proof.
+
+**Live surfaces:**
+[Agent Coverage](https://policypool.vercel.app) ·
+[Paid API](https://policypool.vercel.app/api/covered-job-receipt) ·
+[Coverage ledger](https://policypool.vercel.app/api/coverage-ledger) ·
+[OKX.AI Agent #4674](https://okx.ai) ·
+[v4 foundation](https://policypool.vercel.app/hook)
+
+## Agent Coverage Loop
+
+1. The target agent must have a versioned policy snapshot in `api/lib/policy-registry.js`.
+2. The caller supplies the accepted OKX.AI job ID plus its X Layer creation and acceptance transactions.
+3. `api/lib/chain.js` verifies both transactions against the public task escrow and binds buyer, job, provider wallet, agent ID, token, and paid amount. The coverage payer must own the target job.
+4. A valid signed service payment is verified and settled. The resulting token `Transfer` is read back from X Layer before the API returns success.
+5. The durable ledger atomically checks that active, pending, and payout-due liabilities plus the new cap do not exceed the live reserve.
+6. The reconciler reads `getJobStatus(bytes32)`. An accepted job still undelivered after deadline becomes `payout_due`; a completed or refunded job releases capacity.
+7. `record-payout` accepts no caller assertion. It marks a covenant paid only after verifying reserve wallet, buyer, token, and exact amount in the payout transaction.
+
+The marketplace keeps its own escrow and order lifecycle. PolicyPool adds a capped warranty credit; it is not protocol-native escrow or insurance.
+
+## Current Scope
+
+- Listed service: `Covered Job Receipt`, 1 USDT, API service.
+- Listed provider: PolicyPool Agent `#4674` on OKX.AI.
+- Registered targets in v0.2: GlassDesk `#3465` service `#30019`, and Foreman `#4348` service `#27669`.
+- Payment asset: X Layer USD₮0, 6 decimals, EIP-3009 domain `USD₮0` version `1`.
+- Objective breach: accepted job still undelivered after the stored deadline.
+- Reserve: public X Layer wallet, with every liability exposed by `/api/coverage-ledger`.
+- Payout execution: reserve operator transfer, followed by independent onchain verification. The current release does not claim autonomous custody or automatic transfer execution.
+
+Unknown policies are declined. Jobs that are already submitted or terminal are not issued new coverage. The cap cannot exceed the target-job value, configured maximum, or uncommitted reserve.
+
+## Agent Verification
+
+```bash
+npm install
+npm run agent:gate
+```
+
+`agent:gate` runs syntax checks, adversarial payment/accounting tests, a live X Layer acceptance-proof replay, the chat safety probe, and the web build.
+
+```bash
+npm run agent:verify-live
+```
+
+The no-secret live verifier checks `HEAD 200`, unpaid `402`, the exact X Layer payment domain, rejection of generic or malformed payment headers, and reserve solvency. It does not sign or spend a payment.
+
+Required production configuration is documented in `.env.example`. The paid route fails closed unless both a durable Redis ledger and a real settlement facilitator are configured.
+
+## Repository Map
+
+```text
+api/covered-job-receipt.js       # paid guard + coverage decision
+api/coverage-ledger.js           # public reserve and liability ledger
+api/coverage-status.js           # one receipt plus live target-job status
+api/reconcile-coverage.js        # authenticated objective-state reconciler
+api/record-payout.js             # authenticated payout transaction verifier
+api/lib/payment.js               # official x402 decode, verify, settle, transfer proof
+api/lib/chain.js                 # OKX task and token evidence on X Layer
+api/lib/ledger.js                # atomic durable liability accounting
+api/lib/policy-registry.js       # versioned server-owned policy snapshots
+scripts/verify-agent-api.mjs     # adversarial unit/integration gate
+scripts/verify-okx-task-evidence.mjs # real OKX acceptance proof replay
+web/agent.html                   # current agent-coverage product surface
+```
+
+## v4 Foundation
 
 PolicyPool is the liquidity covenant layer for X Layer markets: liquidity that can say no, or charge overflow to pay LPs first. LPs and market operators publish enforceable trading terms, max swap size, daily volume caps, refusal, and LP-first surge, enforced before capital moves with onchain receipts.
 
@@ -10,8 +85,8 @@ First proven at the OKX X Layer Hook the Future hackathon (2nd place).
 
 CI: [![CI](https://github.com/dolepee/policypool/actions/workflows/test.yml/badge.svg)](https://github.com/dolepee/policypool/actions/workflows/test.yml)
 
-Fast links:
-[Live app](https://policypool.vercel.app) ·
+Historical v4 links:
+[v4 app](https://policypool.vercel.app/hook) ·
 [Simulator](https://policypool.vercel.app/simulate) ·
 [Registry](https://policypool.vercel.app/registry) ·
 [Liquidity Covenant Note](docs/LIQUIDITY_COVENANTS.md) ·
@@ -21,9 +96,9 @@ Fast links:
 [Adoption path](docs/ADOPTION_PATH.md) ·
 [Security notes](docs/SECURITY_NOTES.md)
 
-## 60-Second Judge Path
+## Historical v4 Proof Path
 
-1. Open the live app and read the first screen: `Policy bends. LPs get paid.`
+1. Open the [v4 foundation](https://policypool.vercel.app/hook) and read the first screen: `Policy bends. LPs get paid.`
 2. Click the featured Surge proof or scroll to the proof ledger.
 3. Verify the Surge proof: the trusted surge router donates `40 mUSDC`, then executes a `5,000 mUSDC` swap in the same v4 unlock.
 4. Verify the spoof-guard proof: surge-looking `hookData` through the old router falls back to `MAX_SWAP_EXCEEDED`.

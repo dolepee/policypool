@@ -6,13 +6,21 @@
   "description": "PolicyPool Agent Coverage adds money-backed policy receipts for agent work.",
   "scripts": {
     "build": "npm run build --prefix web",
-    "typecheck": "node --check api/covered-job-receipt.js && node --check scripts/*.mjs && node --check scripts/lib/*.mjs && python3 -m py_compile scripts/policypool_fast_responder.py scripts/policypool_review_watch.py",
+    "typecheck": "node --check api/*.js && node --check api/lib/*.js && node --check scripts/*.mjs && node --check scripts/lib/*.mjs && python3 -m py_compile scripts/policypool_fast_responder.py scripts/policypool_review_watch.py",
     "agent:verify": "node scripts/verify-agent-api.mjs",
+    "agent:verify-chain": "node scripts/verify-okx-task-evidence.mjs",
     "agent:verify-live": "node scripts/verify-agent-live.mjs",
     "agent:probe": "node scripts/probe-agent-coverage.mjs",
-    "agent:gate": "npm run typecheck && npm run agent:verify && npm run agent:probe && npm run build"
+    "agent:gate": "npm run typecheck && npm run agent:verify && npm run agent:verify-chain && npm run agent:probe && npm run build",
+    "agent:gate-live": "npm run agent:gate && npm run agent:verify-live"
   },
   "engines": {
-    "node": ">=22"
+    "node": "22.x"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.36.2",
+    "@x402/core": "^2.17.0",
+    "@x402/evm": "^2.17.0",
+    "viem": "^2.55.0"
   }
 }

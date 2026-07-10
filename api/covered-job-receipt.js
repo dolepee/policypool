@@ -1,28 +1,23 @@
-import { createHash } from "node:crypto";
-
-const PAYMENT = {
-  network: "eip155:196",
-  asset: process.env.POLICYPOOL_PAYMENT_ASSET || "0x779ded0c9e1022225f8e0630b35a9b54be713736",
-  amount: process.env.POLICYPOOL_PRICE_ATOMIC || "1000000",
-  decimals: 6,
-  symbol: process.env.POLICYPOOL_PAYMENT_SYMBOL || "USDT",
-  name: process.env.POLICYPOOL_PAYMENT_NAME || "Tether USD",
-  payTo: process.env.POLICYPOOL_PAY_TO || "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7",
-};
-
-const RESERVE = {
-  wallet: process.env.POLICYPOOL_RESERVE_WALLET || PAYMENT.payTo,
-  chain: "X Layer",
-  chainId: 196,
-  publicUrl: process.env.POLICYPOOL_RESERVE_URL || "https://policypool.vercel.app/agent#reserve",
-};
-
-const OBJECTIVE_BREACHES = new Set([
-  "deadline_missed",
-  "no_delivery",
-  "delivery_hash_absent",
-  "listing_mismatch",
-]);
+import { COVERAGE, OBJECTIVE_BREACH_RULES, PAYMENT, XLAYER, paymentRequirements } from "./lib/config.js";
+import { createChainService, EvidenceError } from "./lib/chain.js";
+import { createLedger } from "./lib/ledger.js";
+import {
+  createPaymentService,
+  PaymentConfigurationError,
+  PaymentVerificationError,
+} from "./lib/payment.js";
+import { findPublishedPolicy } from "./lib/policy-registry.js";
+import {
+  clean,
+  encodeBase64Json,
+  formatUsdtAtomic,
+  header,
+  isBytes32,
+  parseUsdtAtomic,
+  sendJson,
+  sha256,
+  stableStringify,
+} from "./lib/utils.js";
 
 const FORBIDDEN_PATTERNS = [
   [/investment advice|financial advice|buy signal|sell signal|price prediction/i, "regulated_or_trading_advice"],
@@ -32,84 +27,61 @@ const FORBIDDEN_PATTERNS = [
   [/ignore (all )?(previous|prior) instructions|disregard (your|the) restrictions/i, "instruction_override_attempt"],
 ];
 
-const DEFAULT_POLICY = {
-  allowedActions: ["scope_check", "covenant_issue", "objective_breach_check"],
-  forbiddenActions: [
-    "regulated advice",
-    "review-outcome promises",
-    "private key requests",
-    "marketplace manipulation",
-    "subjective quality underwriting",
-  ],
-  objectiveBreachRules: [...OBJECTIVE_BREACHES],
-};
-
-function clean(value, max = 900) {
-  return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
-}
-
-function numberOrDefault(value, fallback) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
-}
-
-function isoOrEmpty(value) {
-  const text = clean(value, 80);
-  if (!text) return "";
-  const date = new Date(text);
-  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
-}
-
-function parseJsonMaybe(value) {
-  if (!value || typeof value !== "string") return value;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
-}
-
-function readInput(req) {
-  const source = req.method === "POST" ? req.body : req.query;
-  const body = source && typeof source === "object" && !Array.isArray(source) ? source : {};
-  const policy = parseJsonMaybe(body.policy) || {};
-  const requestedCoverageUSDT = numberOrDefault(
-    body.requestedCoverageUSDT ?? body.coverageCapUSDT ?? body.capUSDT,
-    5,
-  );
-
-  return {
-    targetAgent: clean(body.targetAgent || body.agent || body.agentId || body.serviceId || "sample-agent"),
-    serviceDescription: clean(body.serviceDescription || body.service || body.listing || "Agent service with a published scope."),
-    jobDescription: clean(body.jobDescription || body.job || body.task || body.prompt || "Prepare an in-scope agent service deliverable."),
-    requestedAction: clean(body.requestedAction || body.action || "issue_coverage"),
-    paymentStatus: clean(body.paymentStatus || body.escrowStatus || body.fundingStatus || "funded").toLowerCase(),
-    deadline: isoOrEmpty(body.deadline || body.dueAt || body.expiresAt),
-    now: isoOrEmpty(body.now) || new Date().toISOString(),
-    deliveryHash: clean(body.deliveryHash || body.outputHash || ""),
-    breachType: clean(body.breachType || body.claimType || ""),
-    listingMismatch: Boolean(body.listingMismatch === true || body.listingMismatch === "true"),
-    payoutTxHash: clean(body.payoutTxHash || body.txHash || ""),
-    requestedCoverageUSDT,
-    policy: {
-      ...DEFAULT_POLICY,
-      ...(policy && typeof policy === "object" && !Array.isArray(policy) ? policy : {}),
+const OUTPUT_SCHEMA = {
+  input: {
+    type: "http",
+    method: "POST",
+    bodyType: "json",
+    body: {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      properties: {
+        targetAgent: {
+          type: "string",
+          description: "Registered target agent id, service id, or public service name.",
+        },
+        targetJobId: {
+          type: "string",
+          description: "The accepted OKX.AI job id (bytes32).",
+        },
+        targetCreationTxHash: {
+          type: "string",
+          description: "X Layer transaction that created the target job and binds its buyer wallet.",
+        },
+        targetAcceptanceTxHash: {
+          type: "string",
+          description: "X Layer transaction that moved the target job from created to accepted.",
+        },
+        jobDescription: {
+          type: "string",
+          description: "The target job scope being covered.",
+        },
+        deadline: {
+          type: "string",
+          description: "Future ISO-8601 delivery deadline, no more than seven days away.",
+        },
+        requestedCoverageUSDT: {
+          type: ["string", "number"],
+          description: "Requested cap. It cannot exceed target-job value, configured cap, or uncommitted reserve.",
+        },
+      },
+      required: ["targetAgent", "targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash", "jobDescription", "deadline"],
+      additionalProperties: false,
     },
-  };
-}
-
-function hasPayment(req) {
-  return Boolean(
-    header(req, "payment-signature")
-    || header(req, "x-payment")
-    || header(req, "authorization"),
-  );
-}
-
-function header(req, name) {
-  const direct = req.headers?.[name] ?? req.headers?.[name.toLowerCase()] ?? req.headers?.[name.toUpperCase()];
-  return Array.isArray(direct) ? direct[0] : direct || "";
-}
+  },
+  output: {
+    type: "json",
+    example: {
+      ok: true,
+      agent: "PolicyPool",
+      service: "Covered Job Receipt",
+      receipt: {
+        outcome: { type: "ISSUED", status: "coverage_active" },
+        receiptHash: "sha256:...",
+      },
+    },
+  },
+};
 
 function absoluteUrl(req) {
   const host = header(req, "x-forwarded-host") || header(req, "host") || "policypool.vercel.app";
@@ -117,315 +89,419 @@ function absoluteUrl(req) {
   return req.url?.startsWith("http") ? req.url : `${proto}://${host}${req.url || "/api/covered-job-receipt"}`;
 }
 
-function encodeHeader(payload) {
-  return Buffer.from(JSON.stringify(payload)).toString("base64");
-}
-
-function sha256Json(value) {
-  return createHash("sha256").update(stableStringify(value)).digest("hex");
-}
-
-function stableStringify(value) {
-  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-function sendJson(res, status, payload) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, PAYMENT-SIGNATURE, X-PAYMENT");
-  res.setHeader("Access-Control-Expose-Headers", "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-RESPONSE");
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.status(status).send(JSON.stringify(payload, null, 2));
-}
-
-function paymentRequired(req, res) {
-  const outputSchema = {
-    input: {
-      type: "http",
-      method: "POST",
-      bodyType: "json",
-      body: {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
-        type: "object",
-        properties: {
-          targetAgent: {
-            type: "string",
-            description: "Target agent id, service id, or public service name.",
-          },
-          serviceDescription: {
-            type: "string",
-            description: "Published service scope for the target agent.",
-          },
-          jobDescription: {
-            type: "string",
-            description: "The proposed job to cover.",
-          },
-          requestedAction: {
-            type: "string",
-            description: "Action being checked, such as issue_coverage or deliver_work.",
-          },
-          paymentStatus: {
-            type: "string",
-            description: "funded, paid, escrowed, unfunded, unpaid, or no_escrow.",
-          },
-          deadline: {
-            type: "string",
-            description: "ISO-8601 deadline for objective breach checks.",
-          },
-          requestedCoverageUSDT: {
-            type: "number",
-            description: "Requested coverage cap in USDT.",
-          },
-          breachType: {
-            type: "string",
-            description: "Optional objective breach: deadline_missed, no_delivery, delivery_hash_absent, listing_mismatch.",
-          },
-          deliveryHash: {
-            type: "string",
-            description: "Optional hash of delivered output.",
-          },
-          payoutTxHash: {
-            type: "string",
-            description: "Optional reserve payout transaction hash once executed.",
-          },
-        },
-        required: ["targetAgent", "jobDescription", "paymentStatus", "deadline"],
-        additionalProperties: true,
-      },
-    },
-    output: {
-      type: "json",
-      example: {
-        ok: true,
-        agent: "PolicyPool",
-        service: "Covered Job Receipt",
-        receipt: {
-          outcome: { type: "ISSUED", status: "coverage_active" },
-          receiptHash: "sha256:...",
-        },
-      },
-    },
-  };
-  const requirements = {
-    scheme: "exact",
-    network: PAYMENT.network,
-    asset: PAYMENT.asset,
-    amount: PAYMENT.amount,
-    maxAmountRequired: PAYMENT.amount,
-    decimals: PAYMENT.decimals,
-    symbol: PAYMENT.symbol,
-    payTo: PAYMENT.payTo,
-    maxTimeoutSeconds: 600,
-    extra: {
-      name: PAYMENT.name,
-      version: "2",
-      decimals: PAYMENT.decimals,
-      symbol: PAYMENT.symbol,
-      service: "PolicyPool Covered Job Receipt",
-    },
-    outputSchema,
-  };
-  const challenge = {
+function challengeFor(req, error = "Payment required") {
+  return {
     x402Version: 2,
+    error,
     resource: {
       url: absoluteUrl(req),
       description: "PolicyPool Covered Job Receipt API",
       mimeType: "application/json",
     },
-    outputSchema,
-    accepts: [requirements],
+    outputSchema: OUTPUT_SCHEMA,
+    accepts: [{
+      ...paymentRequirements(),
+      outputSchema: OUTPUT_SCHEMA,
+    }],
   };
-  res.setHeader("PAYMENT-REQUIRED", encodeHeader(challenge));
+}
+
+function paymentRequired(req, res, error = "Payment required") {
+  const challenge = challengeFor(req, error);
+  res.setHeader("PAYMENT-REQUIRED", encodeBase64Json(challenge));
   return sendJson(res, 402, {
     ok: false,
-    error: "Payment required",
+    error,
     charged: false,
     ...challenge,
   });
 }
 
-function guard(input) {
-  const text = `${input.serviceDescription} ${input.jobDescription} ${input.requestedAction}`;
-  for (const [pattern, reason] of FORBIDDEN_PATTERNS) {
-    if (pattern.test(text)) {
-      return {
-        verdict: "BLOCK",
-        reason,
-        rule: "published_policy_forbidden_action",
-      };
-    }
-  }
-
-  if (["unfunded", "unpaid", "no_escrow", "none", "missing"].includes(input.paymentStatus)) {
-    return {
-      verdict: "NEEDS_ESCROW",
-      reason: "covered_work_requires_funded_order_or_payment_status",
-      rule: "payment_required_before_coverage",
-    };
-  }
-
-  if (!input.deadline) {
-    return {
-      verdict: "BLOCK",
-      reason: "deadline_required_for_objective_coverage",
-      rule: "objective_breach_needs_timestamp",
-    };
-  }
-
-  if (new Date(input.deadline).getTime() <= Date.now() && !input.breachType) {
-    return {
-      verdict: "BLOCK",
-      reason: "deadline_must_be_future_when_issuing_new_coverage",
-      rule: "future_deadline_required",
-    };
-  }
-
+function readInput(req) {
+  const source = req.method === "POST" ? req.body : req.query;
+  const body = source && typeof source === "object" && !Array.isArray(source) ? source : {};
+  const requested = body.requestedCoverageUSDT ?? body.coverageCapUSDT ?? body.capUSDT ?? "1";
   return {
-    verdict: "ALLOW",
-    reason: "request_matches_published_policy_and_has_funding_status",
-    rule: "covered_job_policy",
+    targetAgent: clean(body.targetAgent || body.agent || body.agentId || body.serviceId),
+    targetJobId: clean(body.targetJobId || body.jobId, 80),
+    targetCreationTxHash: clean(body.targetCreationTxHash || body.creationTxHash, 80),
+    targetAcceptanceTxHash: clean(body.targetAcceptanceTxHash || body.acceptanceTxHash, 80),
+    jobDescription: clean(body.jobDescription || body.job || body.task || body.prompt),
+    deadline: clean(body.deadline || body.dueAt || body.expiresAt, 80),
+    requestedCoverageAtomic: parseUsdtAtomic(String(requested), PAYMENT.decimals),
   };
 }
 
-function detectBreach(input) {
-  const nowMs = new Date(input.now).getTime();
-  const deadlineMs = input.deadline ? new Date(input.deadline).getTime() : Number.NaN;
-  if (input.listingMismatch) return "listing_mismatch";
-  if (input.breachType && OBJECTIVE_BREACHES.has(input.breachType)) return input.breachType;
-  if (input.deadline && nowMs > deadlineMs && !input.deliveryHash) return "deadline_missed";
-  if (input.deadline && nowMs > deadlineMs && input.deliveryHash === "") return "delivery_hash_absent";
-  return "";
-}
-
-function buildReceipt(input) {
-  const guardVerdict = guard(input);
-  const breach = detectBreach(input);
-  const coverageCapUSDT = Math.max(0.01, Math.min(input.requestedCoverageUSDT, 25));
-  const base = {
-    protocol: "PolicyPool Agent Coverage",
-    version: "0.1.0",
-    generatedAt: new Date().toISOString(),
-    reserve: RESERVE,
-    target: {
-      agent: input.targetAgent,
-      serviceDescription: input.serviceDescription,
-    },
-    job: {
-      description: input.jobDescription,
-      requestedAction: input.requestedAction,
-      paymentStatus: input.paymentStatus,
-      deadline: input.deadline,
-      deliveryHash: input.deliveryHash || null,
-    },
-    policy: {
-      guard: guardVerdict,
-      objectiveBreachRules: [...OBJECTIVE_BREACHES],
-      forbiddenActions: input.policy.forbiddenActions || DEFAULT_POLICY.forbiddenActions,
-      coverageCapUSDT,
-      coverageIsLimitedByReserve: true,
-    },
-  };
-
-  let outcome;
-  if (guardVerdict.verdict !== "ALLOW") {
-    outcome = {
-      type: "DECLINED",
-      status: "coverage_not_issued",
-      reason: guardVerdict.reason,
-      payout: null,
-    };
-  } else if (breach) {
-    outcome = {
-      type: "PAYOUT",
-      status: input.payoutTxHash ? "paid_from_reserve" : "payout_due",
-      reason: breach,
-      payout: {
-        amountUSDT: coverageCapUSDT,
-        reserveWallet: RESERVE.wallet,
-        txHash: input.payoutTxHash || null,
-        note: input.payoutTxHash
-          ? "Reserve payout transaction supplied and linked."
-          : "Objective breach detected. v0 records payout due; reserve operator must execute and attach tx hash.",
-      },
-    };
-  } else {
-    outcome = {
-      type: "ISSUED",
-      status: "coverage_active",
-      reason: "guard_allowed_and_no_objective_breach_detected",
-      covenant: {
-        deadline: input.deadline,
-        coverageCapUSDT,
-        premiumUSDT: 1,
-        breachRules: [...OBJECTIVE_BREACHES],
-      },
-      payout: null,
-    };
+function evaluateGuard(input, policy, nowMs) {
+  if (!policy) return { verdict: "BLOCK", reason: "target_policy_not_registered" };
+  if (!isBytes32(input.targetJobId)) return { verdict: "BLOCK", reason: "target_job_id_required" };
+  if (!isBytes32(input.targetCreationTxHash)) {
+    return { verdict: "BLOCK", reason: "target_creation_transaction_required" };
   }
+  if (!isBytes32(input.targetAcceptanceTxHash)) {
+    return { verdict: "BLOCK", reason: "target_acceptance_transaction_required" };
+  }
+  if (!input.jobDescription) return { verdict: "BLOCK", reason: "job_description_required" };
+  const deadlineMs = Date.parse(input.deadline);
+  if (!Number.isFinite(deadlineMs)) return { verdict: "BLOCK", reason: "valid_deadline_required" };
+  if (deadlineMs <= nowMs) return { verdict: "BLOCK", reason: "future_deadline_required" };
+  if ((deadlineMs - nowMs) / 1000 > COVERAGE.maxDurationSeconds) {
+    return { verdict: "BLOCK", reason: "deadline_exceeds_maximum_coverage_window" };
+  }
+  if (input.requestedCoverageAtomic < BigInt(COVERAGE.minAtomic)) {
+    return { verdict: "BLOCK", reason: "requested_coverage_below_minimum" };
+  }
+  const text = `${policy.serviceName} ${policy.publishedScope.join(" ")} ${input.jobDescription}`;
+  for (const [pattern, reason] of FORBIDDEN_PATTERNS) {
+    if (pattern.test(text)) return { verdict: "BLOCK", reason };
+  }
+  if (!policy.allowedKeywords.some((keyword) => input.jobDescription.toLowerCase().includes(keyword))) {
+    return { verdict: "BLOCK", reason: "job_outside_registered_policy" };
+  }
+  return { verdict: "ALLOW", reason: "registered_policy_and_objective_job_evidence_required" };
+}
 
-  const receiptDraft = {
-    ...base,
-    outcome,
-    disclaimers: [
-      "Not protocol-native escrow.",
-      "Objective software guarantee layer only.",
-      "Objective breach coverage only.",
-      "Coverage is never promised beyond live reserve capacity.",
+function minBigInt(...values) {
+  return values.reduce((minimum, value) => (value < minimum ? value : minimum));
+}
+
+function receiptHash(receipt) {
+  return `sha256:${sha256(stableStringify(receipt))}`;
+}
+
+function buildReceipt({
+  receiptId,
+  input,
+  policy,
+  guard,
+  targetOrder,
+  payer,
+  coverageCapAtomic,
+  reserveBalanceAtomic,
+  settlement,
+  generatedAt,
+}) {
+  const issued = guard.verdict === "ALLOW";
+  const draft = {
+    protocol: "PolicyPool Agent Coverage",
+    version: "0.2.0",
+    receiptId,
+    generatedAt,
+    outcome: issued
+      ? {
+        type: "ISSUED",
+        status: "coverage_active",
+        reason: "registered_policy_matched_and_target_job_acceptance_verified",
+      }
+      : {
+        type: "DECLINED",
+        status: "coverage_not_issued",
+        reason: guard.reason,
+      },
+    buyer: {
+      address: payer,
+    },
+    target: policy ? {
+      agentId: policy.agentId,
+      agentName: policy.agentName,
+      serviceIds: policy.serviceIds,
+      serviceName: policy.serviceName,
+      providerWallet: policy.providerWallet,
+      policyHash: policy.policyHash,
+      publishedScope: policy.publishedScope,
+    } : {
+      requestedAgent: input.targetAgent,
+      policyHash: null,
+    },
+    targetJob: targetOrder || {
+      jobId: input.targetJobId || null,
+      creationTxHash: input.targetCreationTxHash || null,
+      acceptanceTxHash: input.targetAcceptanceTxHash || null,
+      verified: false,
+    },
+    covenant: issued ? {
+      deadline: new Date(input.deadline).toISOString(),
+      coverageCapAtomic: coverageCapAtomic.toString(),
+      coverageCapUSDT: formatUsdtAtomic(coverageCapAtomic, PAYMENT.decimals),
+      objectiveBreachRules: OBJECTIVE_BREACH_RULES,
+    } : null,
+    guard: {
+      ...guard,
+      callerSuppliedPolicyIgnored: true,
+      callerSuppliedBreachAndPayoutFieldsIgnored: true,
+    },
+    reserve: {
+      chain: XLAYER.name,
+      chainId: XLAYER.id,
+      wallet: COVERAGE.reserveWallet,
+      asset: PAYMENT.asset,
+      balanceAtomicAtDecision: reserveBalanceAtomic.toString(),
+      balanceUSDTAtDecision: formatUsdtAtomic(reserveBalanceAtomic, PAYMENT.decimals),
+      publicUrl: COVERAGE.publicUrl,
+    },
+    servicePayment: {
+      verified: true,
+      settled: true,
+      network: settlement.network,
+      transaction: settlement.transaction,
+      payer: settlement.payer,
+      recipient: PAYMENT.payTo,
+      amountAtomic: PAYMENT.amountAtomic,
+      amountUSDT: formatUsdtAtomic(PAYMENT.amountAtomic, PAYMENT.decimals),
+      transferBlock: settlement.transfer.blockNumber,
+    },
+    limitations: [
+      "Coverage is objective and limited to the stated cap.",
+      "PolicyPool is not protocol-native escrow or insurance.",
+      "A payout-due state must be derived from the stored covenant and public OKX.AI job status.",
+      "A payout is paid only after its X Layer token transfer is independently verified.",
     ],
   };
-  const receiptHash = `sha256:${sha256Json(receiptDraft)}`;
-  const receiptId = `pp-agent-${receiptHash.slice(7, 19)}`;
-  return {
-    ...receiptDraft,
-    receiptId,
-    receiptHash,
-  };
+  return { ...draft, receiptHash: receiptHash(draft) };
 }
 
-export default async function handler(req, res) {
-  if (req.method === "OPTIONS") return sendJson(res, 200, { ok: true });
-  if (req.method === "HEAD") {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, PAYMENT-SIGNATURE, X-PAYMENT");
-    res.setHeader("Access-Control-Expose-Headers", "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-RESPONSE");
-    res.status(200).end();
-    return;
+function respondWithRecord(res, record) {
+  if (record.paymentResponseHeader) {
+    res.setHeader("PAYMENT-RESPONSE", record.paymentResponseHeader);
+    res.setHeader("X-PAYMENT-RESPONSE", record.paymentResponseHeader);
   }
-  if (req.method !== "GET" && req.method !== "POST") {
-    return sendJson(res, 405, { ok: false, error: "method_not_allowed" });
-  }
-
-  if (!hasPayment(req)) return paymentRequired(req, res);
-
-  const input = readInput(req);
-  const receipt = buildReceipt(input);
-  const paymentResponse = {
-    success: true,
-    network: PAYMENT.network,
-    amount: PAYMENT.amount,
-    recipient: PAYMENT.payTo,
-    service: "PolicyPool Covered Job Receipt",
-  };
-  res.setHeader("PAYMENT-RESPONSE", encodeHeader(paymentResponse));
-  res.setHeader("X-PAYMENT-RESPONSE", encodeHeader(paymentResponse));
   return sendJson(res, 200, {
     ok: true,
     agent: "PolicyPool",
     service: "Covered Job Receipt",
-    mode: "a2mcp_api",
-    input,
-    receipt,
+    mode: "api_service",
+    idempotentReplay: Boolean(record.replayed),
+    receipt: record.receipt,
   });
 }
 
+export function createHandler(dependencies = {}) {
+  let runtimeChain = dependencies.chain;
+  let runtimeLedger = dependencies.ledger;
+  let runtimePayment = dependencies.payment;
+  const now = dependencies.now || (() => Date.now());
+  const getChain = () => (runtimeChain ||= createChainService());
+  const getLedger = () => (runtimeLedger ||= createLedger());
+  const getPayment = () => (runtimePayment ||= createPaymentService({ chain: getChain() }));
+
+  return async function handler(req, res) {
+    if (req.method === "OPTIONS") return sendJson(res, 200, { ok: true });
+    if (req.method === "HEAD") {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, PAYMENT-SIGNATURE, X-PAYMENT");
+      res.setHeader("Access-Control-Expose-Headers", "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-RESPONSE");
+      res.status(200).end();
+      return;
+    }
+    if (req.method !== "GET" && req.method !== "POST") {
+      return sendJson(res, 405, { ok: false, error: "method_not_allowed" });
+    }
+
+    const paymentSignature = header(req, "payment-signature");
+    if (!paymentSignature) return paymentRequired(req, res);
+
+    let ledger;
+    let payment;
+    try {
+      ledger = getLedger();
+      payment = getPayment();
+    } catch (error) {
+      return sendJson(res, 503, {
+        ok: false,
+        error: "service_not_ready",
+        detail: error instanceof Error ? error.message : String(error),
+        charged: false,
+      });
+    }
+
+    const paymentId = payment.fingerprint(req);
+    try {
+      const existingPayment = await ledger.findByPaymentId(paymentId);
+      if (existingPayment?.receipt) {
+        return respondWithRecord(res, { ...existingPayment, replayed: true });
+      }
+    } catch (error) {
+      return sendJson(res, 503, {
+        ok: false,
+        error: "durable_ledger_unavailable",
+        detail: error instanceof Error ? error.message : String(error),
+        charged: false,
+      });
+    }
+
+    const requirements = paymentRequirements();
+    let verified;
+    try {
+      verified = await payment.verify(req, requirements);
+    } catch (error) {
+      if (error instanceof PaymentConfigurationError) {
+        return sendJson(res, 503, { ok: false, error: "payment_service_not_ready", charged: false });
+      }
+      if (error instanceof PaymentVerificationError) {
+        return paymentRequired(req, res, error.code);
+      }
+      return paymentRequired(req, res, "payment_verification_failed");
+    }
+
+    const input = readInput(req);
+    const policy = findPublishedPolicy(input.targetAgent);
+    let guard = evaluateGuard(input, policy, now());
+    let targetOrder = null;
+    let reserveBalanceAtomic;
+    let coverageCapAtomic = 0n;
+
+    try {
+      reserveBalanceAtomic = await getChain().getReserveBalance();
+    } catch {
+      return sendJson(res, 503, {
+        ok: false,
+        error: "reserve_balance_unavailable",
+        charged: false,
+      });
+    }
+
+    if (guard.verdict === "ALLOW") {
+      try {
+        targetOrder = await getChain().verifyTargetOrder({
+          jobId: input.targetJobId,
+          creationTxHash: input.targetCreationTxHash,
+          acceptanceTxHash: input.targetAcceptanceTxHash,
+          buyer: verified.payer,
+          policy,
+        });
+        coverageCapAtomic = minBigInt(
+          input.requestedCoverageAtomic,
+          BigInt(targetOrder.amountAtomic),
+          BigInt(COVERAGE.maxAtomic),
+        );
+        if (coverageCapAtomic < BigInt(COVERAGE.minAtomic)) {
+          guard = { verdict: "BLOCK", reason: "verified_coverage_cap_below_minimum" };
+          coverageCapAtomic = 0n;
+        }
+      } catch (error) {
+        if (error instanceof EvidenceError) {
+          guard = { verdict: "BLOCK", reason: error.code };
+          coverageCapAtomic = 0n;
+        } else {
+          return sendJson(res, 503, {
+            ok: false,
+            error: "target_or_reserve_verifier_unavailable",
+            charged: false,
+          });
+        }
+      }
+    }
+
+    const requestId = `sha256:${sha256({
+      targetAgentId: policy?.agentId || input.targetAgent,
+      targetJobId: input.targetJobId,
+    })}`;
+    const receiptId = `ppc-${requestId.slice(7, 23)}`;
+    const createdAt = new Date(now()).toISOString();
+    let pending = {
+      receiptId,
+      requestId,
+      paymentId: verified.paymentId,
+      state: "pending",
+      createdAt,
+      liabilityAtomic: coverageCapAtomic.toString(),
+      input,
+      guard,
+      targetOrder,
+      payer: verified.payer,
+    };
+
+    let reservation;
+    try {
+      reservation = await ledger.reserve(pending, reserveBalanceAtomic);
+      if (reservation.status === "insufficient_reserve" && coverageCapAtomic > 0n) {
+        guard = { verdict: "BLOCK", reason: "insufficient_uncommitted_reserve" };
+        coverageCapAtomic = 0n;
+        pending = { ...pending, liabilityAtomic: "0", guard };
+        reservation = await ledger.reserve(pending, reserveBalanceAtomic);
+      }
+    } catch (error) {
+      return sendJson(res, 503, {
+        ok: false,
+        error: "durable_ledger_unavailable",
+        detail: error instanceof Error ? error.message : String(error),
+        charged: false,
+      });
+    }
+
+    if (reservation.status === "payment_exists") {
+      const existing = await ledger.get(reservation.receiptId);
+      if (existing?.receipt) return respondWithRecord(res, { ...existing, replayed: true });
+      return sendJson(res, 409, { ok: false, error: "payment_is_already_processing", charged: false });
+    }
+    if (reservation.status === "request_exists") {
+      return sendJson(res, 409, { ok: false, error: "request_already_has_a_receipt", charged: false });
+    }
+    if (reservation.status !== "reserved") {
+      return sendJson(res, 503, { ok: false, error: "coverage_reservation_failed", charged: false });
+    }
+
+    let settlement;
+    try {
+      settlement = await payment.settle(verified, requirements);
+    } catch (error) {
+      await ledger.release(pending).catch(() => undefined);
+      if (error instanceof PaymentVerificationError) return paymentRequired(req, res, error.code);
+      return paymentRequired(req, res, "payment_settlement_failed");
+    }
+
+    const receipt = buildReceipt({
+      receiptId,
+      input,
+      policy,
+      guard,
+      targetOrder,
+      payer: verified.payer,
+      coverageCapAtomic,
+      reserveBalanceAtomic,
+      settlement,
+      generatedAt: new Date(now()).toISOString(),
+    });
+    const finalRecord = {
+      ...pending,
+      state: guard.verdict === "ALLOW" ? "active" : "declined",
+      finalizedAt: new Date(now()).toISOString(),
+      liabilityAtomic: coverageCapAtomic.toString(),
+      guard,
+      settlement: {
+        network: settlement.network,
+        transaction: settlement.transaction,
+        payer: settlement.payer,
+        amountAtomic: settlement.amount,
+        transfer: settlement.transfer,
+      },
+      paymentResponseHeader: settlement.responseHeader,
+      receipt,
+    };
+
+    try {
+      await ledger.finalize(finalRecord);
+    } catch (error) {
+      return sendJson(res, 503, {
+        ok: false,
+        error: "payment_settled_receipt_pending_reconciliation",
+        charged: true,
+        paymentTransaction: settlement.transaction,
+        receiptId,
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return respondWithRecord(res, finalRecord);
+  };
+}
+
+const handler = createHandler();
+export default handler;
+
 export const __test = {
   buildReceipt,
-  guard,
-  paymentRequired,
+  challengeFor,
+  evaluateGuard,
   readInput,
 };

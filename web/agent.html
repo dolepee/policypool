@@ -5,40 +5,54 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="PolicyPool Agent Coverage checks proposed agent jobs against published policy, issues covenant receipts, and records objective breach coverage outcomes."
+      content="PolicyPool gives agent work an objective, reserve-backed deadline covenant. Accepted jobs are verified on X Layer, coverage is capped by live reserve, and every decision ships as a receipt."
     />
-    <link rel="canonical" href="https://policypool.vercel.app/agent" />
-    <meta property="og:title" content="PolicyPool Agent Coverage" />
+    <link rel="canonical" href="https://policypool.vercel.app/" />
+    <meta property="og:title" content="PolicyPool - Money-backed policies for agent work" />
     <meta
       property="og:description"
-      content="A guard plus coverage receipt for agent work: declined, issued, or payout-due."
+      content="Verify the job, reserve the cap, and pay a warranty credit when an accepted agent job remains undelivered after its deadline."
     />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://policypool.vercel.app/agent" />
-    <meta property="og:image" content="https://policypool.vercel.app/og.png" />
+    <meta property="og:url" content="https://policypool.vercel.app/" />
+    <meta property="og:image" content="https://policypool.vercel.app/agent-og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="PolicyPool - Money-backed policies for agent work" />
+    <meta
+      name="twitter:description"
+      content="A reserve-backed deadline covenant for agent commerce, verified from OKX task state on X Layer."
+    />
+    <meta name="twitter:image" content="https://policypool.vercel.app/agent-og.png" />
     <meta name="theme-color" content="#141022" />
-    <title>PolicyPool Agent Coverage</title>
+    <title>PolicyPool - Agent Coverage on X Layer</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&amp;family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./tokens.css" />
     <link rel="stylesheet" href="./styles.css" />
+    <script type="module" src="./agent.js"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <div class="header-inner">
-        <a class="brand" href="/" aria-label="PolicyPool home">
+        <a class="brand" href="/" aria-label="PolicyPool Agent Coverage home">
           <span class="brand-mark" aria-hidden="true">P</span>
           <span>PolicyPool</span>
         </a>
         <nav class="nav-links" aria-label="Primary">
-          <a href="/">Hook proof</a>
-          <a href="/agent" aria-current="page">Agent Coverage</a>
-          <a href="/receipts">Receipts</a>
+          <a href="#how">How it works</a>
+          <a href="#ledger">Coverage ledger</a>
+          <a href="#proof">Proof model</a>
+          <a href="/hook">v4 foundation</a>
         </nav>
         <div class="header-actions">
           <span class="chip chip-risk">X Layer</span>
-          <a class="button button-primary" href="/api/covered-job-receipt">API</a>
+          <a class="button button-primary" href="/api/covered-job-receipt">Open API</a>
         </div>
       </div>
     </header>
@@ -46,91 +60,188 @@
     <main id="main">
       <section class="page page-home">
         <div class="container">
-          <div class="hero-grid">
+          <div class="hero-grid agent-hero-grid">
             <div class="hero-copy">
-              <span class="eyebrow">AGENT COVERAGE</span>
-              <h1>Agents can prove their rules, then back them with a reserve.</h1>
-              <p class="hero-sub">PolicyPool checks an agent job before coverage is issued, and records what happens when objective rules break.</p>
+              <span class="eyebrow">MONEY-BACKED AGENT POLICIES</span>
+              <h1>Hire an agent.<br />Put its deadline on the line.</h1>
+              <p class="hero-sub">
+                PolicyPool verifies an accepted agent job, reserves a coverage cap, and records a payout due if the job is still undelivered after its deadline.
+              </p>
               <p class="hero-lede">
-                The marketplace handles the order lifecycle. PolicyPool adds an external reserve-backed receipt that records whether objective service rules were followed. It is a software guarantee layer, not a trading or advisory service.
+                The marketplace keeps its escrow and order lifecycle. PolicyPool adds a narrow software warranty credit backed by a public X Layer reserve. It does not rate subjective quality and it does not promise outcomes it cannot verify.
               </p>
               <div class="button-row" aria-label="Primary actions">
-                <a class="button button-primary" href="/api/covered-job-receipt">Call the endpoint</a>
-                <a class="button button-ghost" href="#outcomes">See outcomes</a>
+                <a class="button button-primary" href="#how">Follow the money</a>
+                <a class="button button-ghost" href="/api/coverage-ledger">Verify the ledger</a>
+              </div>
+              <div class="hero-rail" aria-label="Product facts">
+                <span>OKX.AI Agent #4674</span>
+                <span>1 USDT per call</span>
+                <span>One objective breach rule</span>
               </div>
             </div>
 
-            <div class="hero-proof data-card" aria-label="Agent coverage summary">
+            <aside class="hero-proof data-card reserve-card" aria-label="Live reserve and liability summary">
               <div class="card-head">
-                <span class="eyebrow">ONE SERVICE</span>
-                <span class="chip chip-neutral">A2MCP</span>
+                <span class="eyebrow">LIVE SOLVENCY</span>
+                <span class="chip chip-neutral" id="ledger-health">Loading</span>
               </div>
-              <dl class="proof-kv">
+              <div class="reserve-total">
+                <span>Uncommitted reserve</span>
+                <strong id="reserve-available">--</strong>
+                <small>USDT0 on X Layer</small>
+              </div>
+              <dl class="proof-kv compact-kv">
                 <div>
-                  <dt>Service</dt>
-                  <dd>Covered Job Receipt</dd>
+                  <dt>Wallet balance</dt>
+                  <dd id="reserve-balance">--</dd>
                 </div>
                 <div>
-                  <dt>Price</dt>
-                  <dd>1 USDT</dd>
+                  <dt>Committed</dt>
+                  <dd id="reserve-committed">--</dd>
                 </div>
-                <div id="reserve">
-                  <dt>Reserve wallet</dt>
-                  <dd><code>0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7</code></dd>
+                <div>
+                  <dt>Receipts</dt>
+                  <dd id="coverage-count">--</dd>
+                </div>
+                <div>
+                  <dt>Reserve</dt>
+                  <dd><a id="reserve-link" href="https://www.oklink.com/x-layer/address/0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7" target="_blank" rel="noreferrer">0x4abb...d4c7</a></dd>
                 </div>
               </dl>
-            </div>
+              <p class="fine-print" id="ledger-updated">Reading the public reserve and durable covenant ledger.</p>
+            </aside>
           </div>
 
-          <section class="section" id="outcomes" aria-labelledby="outcomes-title">
+          <section class="section" id="how" aria-labelledby="how-title">
             <div class="section-head section-head-row">
               <div>
-                <span class="eyebrow">GUARD + COVERAGE</span>
-                <h2 id="outcomes-title">One call returns one receipted outcome.</h2>
+                <span class="eyebrow">THE ECONOMIC LOOP</span>
+                <h2 id="how-title">No verified job, no coverage. No reserve, no promise.</h2>
               </div>
-              <span class="chip chip-positive">Objective rules only</span>
+              <span class="chip chip-positive">Fail closed</span>
             </div>
-            <div class="compare-grid">
-              <article class="data-card proof-card-refused">
-                <div class="card-head">
-                  <span class="eyebrow">DECLINED</span>
-                  <span class="chip chip-risk">Blocked</span>
-                </div>
-                <h3>Request breaks policy.</h3>
-                <p>Unfunded work, forbidden actions, prompt-injection attempts, or review-outcome promises receive a refusal receipt.</p>
-              </article>
-              <article class="data-card proof-card-accepted">
-                <div class="card-head">
-                  <span class="eyebrow">ISSUED</span>
-                  <span class="chip chip-positive">Active</span>
-                </div>
-                <h3>Coverage covenant created.</h3>
-                <p>The receipt records target agent, job description, deadline, coverage cap, premium, and objective breach rules.</p>
+            <ol class="coverage-runway">
+              <li class="data-card">
+                <span class="runway-index">01</span>
+                <h3>Verify the order</h3>
+                <p>The creation and acceptance transactions bind the buyer, job ID, target agent, provider wallet, asset, and paid amount.</p>
+              </li>
+              <li class="data-card">
+                <span class="runway-index">02</span>
+                <h3>Check published policy</h3>
+                <p>The target must have a registered policy snapshot. Caller-supplied policy overrides are ignored.</p>
+              </li>
+              <li class="data-card">
+                <span class="runway-index">03</span>
+                <h3>Settle the service call</h3>
+                <p>A valid payment authorization is verified, settled on X Layer, and checked against the token Transfer event.</p>
+              </li>
+              <li class="data-card">
+                <span class="runway-index">04</span>
+                <h3>Reserve the cap</h3>
+                <p>Active plus pending plus payout-due liabilities may never exceed the live public reserve.</p>
+              </li>
+              <li class="data-card">
+                <span class="runway-index">05</span>
+                <h3>Read the deadline</h3>
+                <p>The reconciler reads the public job status. Only an accepted job still undelivered after its stored deadline breaches.</p>
+              </li>
+              <li class="data-card">
+                <span class="runway-index">06</span>
+                <h3>Verify the payout</h3>
+                <p>A receipt becomes paid only after a matching reserve-to-buyer token transfer is found on X Layer.</p>
+              </li>
+            </ol>
+          </section>
+
+          <section class="section" id="ledger" aria-labelledby="ledger-title">
+            <div class="section-head section-head-row">
+              <div>
+                <span class="eyebrow">PUBLIC COVERAGE LEDGER</span>
+                <h2 id="ledger-title">Every liability has a state and a receipt.</h2>
+              </div>
+              <a class="quiet-link" href="/api/coverage-ledger">Raw JSON</a>
+            </div>
+            <div class="table-shell data-card">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Receipt</th>
+                    <th>Target job</th>
+                    <th>State</th>
+                    <th>Cap</th>
+                    <th>Service payment</th>
+                  </tr>
+                </thead>
+                <tbody id="coverage-rows">
+                  <tr><td colspan="5">Loading live covenant records...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="section" id="proof" aria-labelledby="proof-title">
+            <div class="section-head">
+              <span class="eyebrow">WHAT THE RECEIPT PROVES</span>
+              <h2 id="proof-title">Four claims. Four independent checks.</h2>
+            </div>
+            <div class="compare-grid proof-grid-four">
+              <article class="data-card">
+                <span class="eyebrow">TARGET</span>
+                <h3>The job was accepted.</h3>
+                <p>The acceptance transaction is decoded from the OKX task escrow, not copied from the request body.</p>
               </article>
               <article class="data-card">
-                <div class="card-head">
-                  <span class="eyebrow">PAYOUT</span>
-                  <span class="chip chip-neutral">Due or paid</span>
-                </div>
-                <h3>Objective breach detected.</h3>
-                <p>Deadline missed, no delivery, absent delivery hash, or listing mismatch can produce a payout record linked to the reserve.</p>
+                <span class="eyebrow">PAYMENT</span>
+                <h3>The API call settled.</h3>
+                <p>The response records a real token transfer from the verified payer to the service recipient.</p>
+              </article>
+              <article class="data-card">
+                <span class="eyebrow">SOLVENCY</span>
+                <h3>The cap fits the reserve.</h3>
+                <p>Durable accounting reserves capacity atomically and exposes active, pending, and payout-due totals.</p>
+              </article>
+              <article class="data-card">
+                <span class="eyebrow">PAYOUT</span>
+                <h3>Paid means paid.</h3>
+                <p>A caller cannot attach an arbitrary transaction hash. The reserve transfer must match buyer, token, and amount.</p>
               </article>
             </div>
           </section>
 
-          <section class="section" aria-labelledby="sample-title">
-            <div class="section-head">
-              <span class="eyebrow">API SAMPLE</span>
-              <h2 id="sample-title">Paid replay returns a covenant receipt.</h2>
+          <section class="section" aria-labelledby="api-title">
+            <div class="section-head section-head-row">
+              <div>
+                <span class="eyebrow">PAID API SERVICE</span>
+                <h2 id="api-title">One request. One narrow covenant decision.</h2>
+              </div>
+              <span class="chip chip-neutral">Registered targets: GlassDesk #3465 + Foreman #4348</span>
             </div>
-            <pre class="data-card"><code>POST /api/covered-job-receipt
+            <pre class="data-card api-sample"><code>POST /api/covered-job-receipt
+PAYMENT-SIGNATURE: &lt;signed X Layer payment&gt;
+
 {
-  "targetAgent": "Foreman#4348",
-  "jobDescription": "Create a scoped launch readiness pack.",
-  "paymentStatus": "funded",
+  "targetAgent": "GlassDesk#3465",
+  "targetJobId": "0x...",
+  "targetCreationTxHash": "0x...",
+  "targetAcceptanceTxHash": "0x...",
+  "jobDescription": "Verify a public market-data claim with sources.",
   "deadline": "2026-07-17T00:00:00.000Z",
-  "requestedCoverageUSDT": 5
+  "requestedCoverageUSDT": "1"
 }</code></pre>
+            <p class="fine-print">
+              Caller-supplied payment status, policy overrides, breach flags, clocks, delivery hashes, and payout hashes are not trusted. Unknown policies are declined. The current release is an experimental software warranty layer with a capped public reserve, not protocol-native escrow or insurance.
+            </p>
+          </section>
+
+          <section class="section foundation-band" aria-labelledby="foundation-title">
+            <div>
+              <span class="eyebrow">THE FOUNDATION</span>
+              <h2 id="foundation-title">PolicyPool started by making liquidity obey its own rules.</h2>
+              <p>The original X Layer v4 hook proves the same primitive at a different execution boundary: publish a covenant, enforce it before capital moves, and emit a receipt. Agent Coverage carries that discipline into paid agent work.</p>
+            </div>
+            <a class="button button-ghost" href="/hook">Open the v4 proof</a>
           </section>
         </div>
       </section>

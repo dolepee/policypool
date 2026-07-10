@@ -7,7 +7,7 @@ body {
   min-width: 320px;
   color: var(--text-primary);
   background: var(--bg-page);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Manrope", ui-sans-serif, system-ui, sans-serif;
   font-size: var(--type-body-size);
   line-height: var(--type-body-line);
   -webkit-font-smoothing: antialiased;
@@ -26,7 +26,7 @@ table,
 .metric-list dd,
 .address-card code,
 .tx-output code {
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
 }
 
 .skip-link {
@@ -825,4 +825,181 @@ td.mono {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: var(--space-4);
   margin-top: var(--space-6);
+}
+
+/* Agent Coverage is the current product surface; the v4 UI remains under /hook. */
+.agent-hero-grid {
+  align-items: stretch;
+}
+
+.agent-hero-grid .hero-copy h1 {
+  max-width: 780px;
+  font-size: clamp(48px, 6.4vw, 82px);
+  line-height: 0.96;
+  letter-spacing: -0.055em;
+}
+
+.agent-hero-grid .hero-lede {
+  max-width: 760px;
+}
+
+.hero-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+.hero-rail span {
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 7px 11px;
+  color: var(--text-secondary);
+  font-size: var(--type-label-size);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.reserve-card {
+  position: relative;
+  overflow: hidden;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at 90% 5%, rgba(43, 212, 138, 0.13), transparent 42%),
+    linear-gradient(145deg, rgba(124, 92, 255, 0.09), rgba(255, 255, 255, 0.025));
+}
+
+.reserve-card::after {
+  content: "";
+  position: absolute;
+  width: 180px;
+  height: 180px;
+  right: -95px;
+  bottom: -95px;
+  border: 1px solid rgba(124, 92, 255, 0.2);
+  border-radius: 50%;
+  box-shadow: 0 0 0 28px rgba(124, 92, 255, 0.03), 0 0 0 56px rgba(124, 92, 255, 0.02);
+  pointer-events: none;
+}
+
+.reserve-total {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-8) 0;
+}
+
+.reserve-total span,
+.reserve-total small {
+  color: var(--text-secondary);
+}
+
+.reserve-total strong {
+  color: var(--positive);
+  font-size: clamp(44px, 6vw, 72px);
+  line-height: 1;
+  letter-spacing: -0.05em;
+}
+
+.compact-kv {
+  position: relative;
+  z-index: 1;
+}
+
+.coverage-runway {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  padding: 0;
+  margin: var(--space-6) 0 0;
+  list-style: none;
+  counter-reset: none;
+}
+
+.coverage-runway li {
+  min-height: 210px;
+}
+
+.runway-index {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: var(--space-8);
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.coverage-runway h3,
+.proof-grid-four h3 {
+  margin: 0 0 var(--space-2);
+}
+
+.coverage-runway p,
+.proof-grid-four p,
+.foundation-band p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.table-shell {
+  overflow-x: auto;
+  padding-top: var(--space-2);
+}
+
+.proof-grid-four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.api-sample {
+  overflow-x: auto;
+  border-color: rgba(124, 92, 255, 0.28);
+  background: linear-gradient(135deg, rgba(124, 92, 255, 0.08), var(--code-fill));
+}
+
+.foundation-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-8);
+  align-items: end;
+  margin-bottom: var(--space-12);
+  padding: clamp(24px, 4vw, 48px);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-card);
+  background:
+    linear-gradient(120deg, rgba(240, 180, 60, 0.08), transparent 52%),
+    var(--card-fill);
+}
+
+.foundation-band h2 {
+  max-width: 760px;
+}
+
+@media (max-width: 900px) {
+  .coverage-runway,
+  .proof-grid-four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .agent-hero-grid .hero-copy h1 {
+    font-size: 44px;
+  }
+
+  .coverage-runway,
+  .proof-grid-four,
+  .foundation-band {
+    grid-template-columns: 1fr;
+  }
+
+  .coverage-runway li {
+    min-height: 0;
+  }
+
+  .runway-index {
+    margin-bottom: var(--space-5);
+  }
 }

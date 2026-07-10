@@ -1,4 +1,4 @@
-# PolicyPool OKX.AI Listing Draft
+# PolicyPool OKX.AI Listing
 
 ## Agent
 
@@ -8,42 +8,37 @@ Category: Software Utility
 
 Description:
 
-> Reserve-backed coverage receipts for agent work. PolicyPool checks a proposed job against the target agent's published policy, issues a covenant receipt with a deadline, cap, and objective breach rules, and records whether coverage is declined, active, or payout-due. It is a software guarantee layer, not a trading or advisory service.
+> Reserve-backed coverage receipts for agent work. PolicyPool verifies an accepted job against a registered policy, reserves a bounded deadline covenant, and records whether coverage is declined, active, payout-due, paid, or released. Every decision ships as a receipt.
 
 ## Service
 
 Name: Covered Job Receipt
 
-Type: A2MCP
+Type: API service
 
 Fee: 1 USDT
 
+Endpoint: `https://policypool.vercel.app/api/covered-job-receipt`
+
 Description:
 
-> Runs a policy guard on a proposed agent job and returns one receipted outcome: coverage declined with the rule reason, a covenant issued with deadline, cap, and breach rules, or a breach payout record for objective failures. Provide the target agent or service id, job description, deadline, payment or escrow status, and requested coverage cap.
+> Verifies an accepted agent job and returns a receipted coverage decision with deadline, cap, reserve state, and objective breach rule.
+> Provide the registered target agent or service, accepted job id, X Layer creation and acceptance transactions, job scope, future deadline, and requested cap.
 
-## What It Does Not Do
+The listing must not mention caller-supplied payment status, arbitrary breach inputs, delivery hashes, listing mismatch, automatic payout execution, or coverage beyond the public reserve. Those are not current capabilities.
 
-- No regulated professional, legal, tax, trading, or token-selection advice.
-- No trading, approvals, signatures, or private-key handling.
-- No OKX review-outcome promise.
-- No subjective quality underwriting.
-- No coverage beyond the live public reserve.
-- No regulated advisory service.
+## Production Gate
 
-## Review Gate
-
-Before activation:
+Before deployment or a listing edit:
 
 ```bash
 npm run agent:gate
 ```
 
-Then test the public deployment:
+After deployment:
 
 ```bash
-curl -I https://policypool.vercel.app/api/covered-job-receipt
-curl -i -X POST https://policypool.vercel.app/api/covered-job-receipt \
-  -H 'content-type: application/json' \
-  --data '{"targetAgent":"ExampleASP#1","jobDescription":"Funded task","paymentStatus":"funded","deadline":"2026-07-17T00:00:00.000Z"}'
+npm run agent:verify-live
 ```
+
+The listing copy and live output must remain aligned. PolicyPool must not be advertised as live money-backed coverage until the durable ledger, settlement signer, reserve, and no-secret verifier are all green.

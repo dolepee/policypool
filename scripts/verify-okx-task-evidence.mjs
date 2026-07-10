@@ -1,0 +1,25 @@
+import assert from "node:assert/strict";
+import { createChainService } from "../api/lib/chain.js";
+import { PAYMENT } from "../api/lib/config.js";
+import { findPublishedPolicy } from "../api/lib/policy-registry.js";
+
+const chain = createChainService();
+const proof = await chain.verifyTargetOrder({
+  jobId: "0x21eae51ceb84e2154b7d3ec67ffba7c6c001560f881d917888d5fb8d45bf66fd",
+  creationTxHash: "0x7c735ea92c3a1aee821e27f4d428e0571ae7d06f4ba1218cfd78b0b34fc6c313",
+  acceptanceTxHash: "0xcefec73ae88694b757a031a7d2e8be54ee476cf9b07053b86678c018d654e4b6",
+  buyer: "0x8d295ff5d86f39e1a46eed220641f6151b520b8f",
+  policy: findPublishedPolicy("GlassDesk#3465"),
+  allowedStatuses: [6],
+});
+
+assert.equal(proof.agentId, "3465");
+assert.equal(proof.provider.toLowerCase(), "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7");
+assert.equal(proof.buyer.toLowerCase(), "0x8d295ff5d86f39e1a46eed220641f6151b520b8f");
+assert.equal(proof.asset.toLowerCase(), PAYMENT.asset.toLowerCase());
+assert.equal(proof.amountAtomic, "1000000");
+assert.equal(proof.status, 6);
+assert.equal(proof.acceptanceBlock, "64898927");
+assert.equal(proof.creationBlock, "64898853");
+
+console.log("PolicyPool OKX task proof passed: creation/acceptance bind buyer, job, provider, agent id, asset, amount, and status.");

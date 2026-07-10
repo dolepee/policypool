@@ -178,52 +178,35 @@ def extract_deadline(content: str) -> str:
     return "2026-07-17T00:00:00Z"
 
 
-def classify(content: str) -> tuple[str, str, str]:
+def classify(content: str) -> tuple[str, str]:
     text = content.lower()
     if any(term in text for term in INJECTION_TERMS):
-        return "DECLINED", "instruction_override_attempt", "BLOCK"
+        return "BLOCK", "instruction_override_attempt"
     if any(term in text for term in ("unpaid", "unfunded", "before payment", "no escrow", "without escrow")):
-        return "DECLINED", "covered_work_requires_funded_order_or_payment_status", "NEEDS_ESCROW"
-    if any(term in text for term in ("deadline missed", "no delivery", "missing delivery", "listing mismatch", "breach")):
-        return "PAYOUT", "objective_breach_detected_payout_due", "ALLOW"
-    return "ISSUED", "guard_allowed_and_no_objective_breach_detected", "ALLOW"
+        return "NEEDS_PAYMENT", "paid_api_call_required"
+    return "NEEDS_EVIDENCE", "verified_target_job_and_acceptance_transaction_required"
 
 
 def build_receipt(content: str, job_id: str) -> str:
-    outcome, reason, guard = classify(content)
+    verdict, reason = classify(content)
     deadline = extract_deadline(content)
     target = "target agent/service supplied in the request"
     url = URL_RE.search(content)
     if url:
         target = url.group(0)
-    receipt_seed = f"{job_id}|{content}|{outcome}|{deadline}|{time.time_ns()}"
-    receipt_id = f"pp-agent-{short_hash(receipt_seed)[:12]}"
+    receipt_seed = f"{job_id}|{content}|{verdict}|{deadline}|{time.time_ns()}"
+    receipt_id = f"pp-preflight-{short_hash(receipt_seed)[:12]}"
     receipt_hash = f"sha256:{hashlib.sha256(receipt_seed.encode('utf-8')).hexdigest()}"
 
-    if outcome == "DECLINED":
-        result = (
-            f"coverage DECLINED. Guard verdict={guard}; reason={reason}. "
-            "No reserve claim is issued because the request does not satisfy the published policy."
-        )
-    elif outcome == "PAYOUT":
-        result = (
-            "breach PAYOUT-DUE record. Guard verdict=ALLOW; objective breach reason="
-            f"{reason}. v0 records payout-due and links reserve details; a payout transaction hash is attached after execution."
-        )
-    else:
-        result = (
-            "covenant ISSUED. Guard verdict=ALLOW; deadline, cap, and objective breach rules are recorded. "
-            "Coverage remains limited by the public reserve."
-        )
-
     return (
-        f"PolicyPool Covered Job Receipt delivered. "
-        f"Receipt {receipt_id}: {result} "
-        f"Target={target}. Deadline={deadline}. Coverage cap=5 USDT sample cap. "
-        f"Objective breach rules=deadline_missed, no_delivery, delivery_hash_absent, listing_mismatch. "
-        f"Reserve wallet={RESERVE_WALLET}. Endpoint={ENDPOINT}. "
+        f"PolicyPool coverage preflight delivered. Receipt {receipt_id}: verdict={verdict}; reason={reason}. "
+        "No covenant was issued, no reserve liability was created, and no payout is due from this chat response. "
+        f"Target={target}. Proposed deadline={deadline}. "
+        "Issuance requires a paid API call carrying the accepted OKX.AI job id plus its X Layer creation and acceptance transactions. "
+        f"The API then verifies the target's registered policy, live job status, service payment, and reserve capacity. "
+        f"Reserve wallet={RESERVE_WALLET}. Paid endpoint={ENDPOINT}. "
         f"Receipt hash={receipt_hash}. "
-        "PolicyPool is a software guarantee layer for objective agent-work rules, not a trading or advisory service."
+        "The only covered breach is an accepted job still undelivered after its stored deadline."
     )
 
 
@@ -238,8 +221,9 @@ def build_reply(content: str, session_key: str, state: dict) -> str:
     if any(term in text for term in MENU_TERMS):
         return (
             f"{AGENT_NAME} offers one API service: {SERVICE_NAME} (1 USDT at {ENDPOINT}). "
-            "Send target agent/service id, job description, deadline, payment or escrow status, and requested coverage cap. "
-            "The response is a receipted DECLINED, ISSUED, or PAYOUT-DUE outcome."
+            "Send the registered target agent/service, accepted OKX.AI job id, X Layer creation and acceptance transactions, "
+            "job description, future deadline, and requested coverage cap. "
+            "Chat returns a non-binding preflight; only the paid endpoint can issue reserve-backed coverage."
         )
 
     prefix = ""

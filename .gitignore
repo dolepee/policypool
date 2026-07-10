@@ -12,3 +12,7 @@ broadcast/
 social-kit/
 .vercel
 .env*
+!.env.example
+node_modules/
+__pycache__/
+*.pyc

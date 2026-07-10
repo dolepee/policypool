@@ -16,8 +16,16 @@
       "dest": "/api/$1.js"
     },
     {
+      "src": "^/$",
+      "dest": "/web/agent.html"
+    },
+    {
       "src": "/agent",
       "dest": "/web/agent.html"
+    },
+    {
+      "src": "/hook",
+      "dest": "/web/index.html"
     },
     {
       "src": "/(.*\\.(?:css|js|svg|png|ico|json))",

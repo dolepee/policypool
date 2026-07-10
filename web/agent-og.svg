@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a0a10"/>
+      <stop offset="0.58" stop-color="#12101c"/>
+      <stop offset="1" stop-color="#19132a"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.8" cy="0.2" r="0.7">
+      <stop offset="0" stop-color="#7c5cff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#7c5cff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="18" stdDeviation="28" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <g opacity="0.14" stroke="#9e8cff" fill="none">
+    <circle cx="1060" cy="84" r="120"/>
+    <circle cx="1060" cy="84" r="170"/>
+    <circle cx="1060" cy="84" r="220"/>
+  </g>
+  <g transform="translate(66 56)">
+    <rect width="52" height="52" rx="14" fill="#7c5cff"/>
+    <path d="M14 26h24M26 14v24" stroke="#fff" stroke-width="5" stroke-linecap="round" opacity="0.95"/>
+    <text x="70" y="36" fill="#f4f1ff" font-family="Manrope, sans-serif" font-size="27" font-weight="800">PolicyPool</text>
+    <text x="1018" y="32" text-anchor="end" fill="#b8afcc" font-family="IBM Plex Mono, monospace" font-size="15">X LAYER / AGENT #4674</text>
+  </g>
+  <g transform="translate(66 170)">
+    <text fill="#a99afc" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="600" letter-spacing="2">MONEY-BACKED AGENT POLICIES</text>
+    <text y="82" fill="#f5f2ff" font-family="Manrope, sans-serif" font-size="72" font-weight="800" letter-spacing="-4">Agent work.</text>
+    <text y="158" fill="#f5f2ff" font-family="Manrope, sans-serif" font-size="72" font-weight="800" letter-spacing="-4">Deadline on the line.</text>
+    <text y="212" fill="#a7a1b5" font-family="Manrope, sans-serif" font-size="22">Verify the order. Reserve the cap. Receipt the outcome.</text>
+  </g>
+  <g transform="translate(66 482)" filter="url(#shadow)">
+    <rect width="1068" height="94" rx="18" fill="#151421" stroke="#302b46"/>
+    <g transform="translate(28 23)" font-family="IBM Plex Mono, monospace" font-size="13">
+      <text fill="#7d758e">01 / JOB</text><text y="28" fill="#f0edf8">accepted onchain</text>
+      <path d="M188 24h52" stroke="#4d4564" stroke-width="2"/>
+      <text x="264" fill="#7d758e">02 / POLICY</text><text x="264" y="28" fill="#f0edf8">registered snapshot</text>
+      <path d="M472 24h52" stroke="#4d4564" stroke-width="2"/>
+      <text x="548" fill="#7d758e">03 / RESERVE</text><text x="548" y="28" fill="#2bd48a">capacity locked</text>
+      <path d="M762 24h52" stroke="#4d4564" stroke-width="2"/>
+      <text x="838" fill="#7d758e">04 / RECEIPT</text><text x="838" y="28" fill="#f0b43c">due or released</text>
+    </g>
+  </g>
+</svg>

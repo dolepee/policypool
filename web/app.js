@@ -92,6 +92,7 @@ const PROOFS = [
 
 const ROUTES = new Map([
   ["/", "home"],
+  ["/hook", "home"],
   ["/simulate", "simulate"],
   ["/console", "console"],
   ["/registry", "registry"],
