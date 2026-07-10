@@ -33,7 +33,7 @@ The caller does not choose the covered deadline. PolicyPool derives it from the 
 - `ISSUED`: the service payment settled, the target order was verified, and the cap was atomically reserved in the durable ledger.
 - `PAYOUT_DUE`: the reconciler observed that the accepted job was still undelivered after the stored deadline.
 - `PAID`: a matching token transfer from the reserve wallet to the stored buyer was independently verified.
-- `RELEASED`: the target job completed, closed, expired, or refunded without a covered payout.
+- `RELEASED`: the target job completed, was administratively stopped, closed, expired, or refunded without a covered payout.
 
 Client-supplied policy objects, payment status, clocks, breach types, delivery hashes, listing-mismatch flags, and payout hashes are ignored.
 

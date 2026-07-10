@@ -288,6 +288,30 @@ assert.equal(failedSettlementResponse.statusCode, 402);
 assert.equal((await failedSettlement.ledger.stats()).pendingAtomic, "0", "failed settlement must release pending liability");
 assert.equal((await failedSettlement.ledger.stats()).recordCount, 0);
 
+const adminStopped = makeRuntime();
+const adminStoppedIssued = await callHandler(adminStopped.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("admin-stopped") },
+  body: { ...sampleBody, targetJobId: `0x${"7".repeat(64)}` },
+});
+assert.equal(adminStoppedIssued.statusCode, 200);
+assert.equal(adminStoppedIssued.json().receipt.outcome.type, "ISSUED");
+const adminStoppedReceiptId = adminStoppedIssued.json().receipt.receiptId;
+const adminStoppedReconcile = await callHandler(createReconcileHandler({
+  ledger: adminStopped.ledger,
+  chain: { async getJobStatus() { return 5; } },
+  authorized: true,
+  now: () => FIXED_NOW,
+}), { method: "POST" });
+assert.equal(adminStoppedReconcile.statusCode, 200);
+assert.deepEqual(adminStoppedReconcile.json().changes, [{
+  receiptId: adminStoppedReceiptId,
+  from: "active",
+  to: "released",
+}]);
+assert.equal((await adminStopped.ledger.stats()).committedAtomic, "0");
+assert.equal((await adminStopped.ledger.get(adminStoppedReceiptId)).release.reason, "platform_job_admin_stopped");
+
 const issuedReceiptId = paidBody.receipt.receiptId;
 const statusBeforeDeadline = await callHandler(createCoverageStatusHandler({
   ledger: primary.ledger,

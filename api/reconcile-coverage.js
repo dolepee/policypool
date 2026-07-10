@@ -3,6 +3,7 @@ import { createLedger } from "./lib/ledger.js";
 import { header, sendJson, sha256 } from "./lib/utils.js";
 
 const RELEASE_STATUSES = new Map([
+  [5, "platform_job_admin_stopped"],
   [6, "platform_job_completed"],
   [7, "platform_job_closed_and_funds_returned"],
   [8, "platform_job_expired"],
