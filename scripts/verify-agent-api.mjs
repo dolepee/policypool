@@ -4,7 +4,7 @@ import { createHandler } from "../api/covered-job-receipt.js";
 import { createCoverageStatusHandler } from "../api/coverage-status.js";
 import { createReconcileHandler } from "../api/reconcile-coverage.js";
 import { createRecordPayoutHandler } from "../api/record-payout.js";
-import { EvidenceError } from "../api/lib/chain.js";
+import { EvidenceError, validateServiceBinding } from "../api/lib/chain.js";
 import { PAYMENT, paymentRequirements } from "../api/lib/config.js";
 import { MemoryLedger } from "../api/lib/ledger.js";
 import { createPaymentService } from "../api/lib/payment.js";
@@ -70,7 +70,10 @@ function makeRuntime({
         agentId: "4348",
         asset: PAYMENT.asset,
         amountAtomic: "5000000",
-        serviceHash: `0x${"c".repeat(64)}`,
+        serviceHash: `0x${"0".repeat(64)}`,
+        serviceType: "A2MCP",
+        serviceTypeVerified: true,
+        listedServiceIdMapping: "manual_external_evidence_required",
         status: 1,
         statusLabel: "accepted",
       };
@@ -138,6 +141,20 @@ assert.ok(challenge.outputSchema.input.body.required.includes("targetAcceptanceT
 assert.ok(challenge.outputSchema.input.body.required.includes("targetCreationTxHash"));
 assert.equal(challenge.outputSchema.input.body.required.includes("deadline"), false);
 
+const discovery = await callHandler(primary.handler, { method: "GET" });
+assert.equal(discovery.statusCode, 402, "anonymous discovery must still return the payment challenge");
+
+const missingTarget = await callHandler(primary.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("missing-target") },
+  body: { jobDescription: "Missing a target agent." },
+});
+assert.equal(missingTarget.statusCode, 400, "a paid replay without a target must fail before payment verification");
+assert.equal(missingTarget.json().error, "target_agent_required");
+assert.equal(missingTarget.json().charged, false);
+assert.equal(primary.calls.verify, 0);
+assert.equal(primary.calls.settle, 0);
+
 const genericAuthorization = await callHandler(primary.handler, {
   method: "POST",
   headers: { authorization: "Bearer not-a-payment" },
@@ -187,6 +204,9 @@ assert.equal(paidBody.receipt.guard.callerSuppliedBreachAndPayoutFieldsIgnored, 
 assert.equal(paidBody.receipt.guard.derivedCoverageDeadline, "2026-07-10T10:03:00.000Z");
 assert.equal(paidBody.receipt.servicePayment.settled, true);
 assert.equal(paidBody.receipt.target.slaSeconds, 300);
+assert.equal(paidBody.receipt.target.serviceType, "A2MCP");
+assert.equal(paidBody.receipt.targetJob.serviceTypeVerified, true);
+assert.equal(paidBody.receipt.targetJob.listedServiceIdMapping, "manual_external_evidence_required");
 assert.equal(paidBody.receipt.covenant.deadline, "2026-07-10T10:03:00.000Z");
 assert.equal(paidBody.receipt.covenant.coverageCapUSDT, "1");
 assert.match(paidBody.receipt.receiptHash, /^sha256:[a-f0-9]{64}$/);
@@ -221,10 +241,31 @@ const unregisteredResponse = await callHandler(unregistered.handler, {
   headers: { "payment-signature": makePaymentHeader("unregistered") },
   body: { ...sampleBody, targetAgent: "Unknown#9999", targetJobId: `0x${"e".repeat(64)}` },
 });
-assert.equal(unregisteredResponse.statusCode, 200);
-assert.equal(unregisteredResponse.json().receipt.outcome.type, "DECLINED");
-assert.equal(unregisteredResponse.json().receipt.outcome.reason, "target_policy_not_registered");
+assert.equal(unregisteredResponse.statusCode, 422);
+assert.equal(unregisteredResponse.json().error, "target_policy_not_registered");
+assert.equal(unregisteredResponse.json().charged, false);
+assert.equal(unregistered.calls.verify, 0, "unknown policy must not reach payment verification");
+assert.equal(unregistered.calls.settle, 0, "unknown policy must not settle payment");
 assert.equal(unregistered.calls.target, 0, "unknown policy must not reach target verifier");
+
+const nonzeroServiceHash = `0x${"c".repeat(64)}`;
+const zeroServiceHash = `0x${"0".repeat(64)}`;
+assert.equal(
+  validateServiceBinding({ serviceType: "A2A" }, nonzeroServiceHash).serviceTypeVerified,
+  true,
+);
+assert.equal(
+  validateServiceBinding({ serviceType: "A2MCP" }, zeroServiceHash).serviceTypeVerified,
+  true,
+);
+assert.throws(
+  () => validateServiceBinding({ serviceType: "A2A" }, zeroServiceHash),
+  (error) => error?.code === "target_service_hash_missing_for_a2a",
+);
+assert.throws(
+  () => validateServiceBinding({ serviceType: "A2MCP" }, nonzeroServiceHash),
+  (error) => error?.code === "target_service_hash_unexpected_for_a2mcp",
+);
 
 const outsideScope = makeRuntime();
 const outsideScopeResponse = await callHandler(outsideScope.handler, {

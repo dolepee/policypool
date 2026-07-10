@@ -21,7 +21,7 @@ PolicyPool does not rate subjective quality, accept caller-supplied policy overr
 
 1. The target agent must have a versioned policy snapshot in `api/lib/policy-registry.js`.
 2. The caller supplies the accepted OKX.AI job ID plus its X Layer creation and acceptance transactions.
-3. `api/lib/chain.js` verifies both transactions against the public task escrow and binds buyer, job, provider wallet, agent ID, token, and paid amount. The coverage payer must own the target job.
+3. `api/lib/chain.js` verifies both transactions against the public task escrow and binds buyer, job, provider wallet, agent ID, token, paid amount, service type, and the exact accepted-service hash. The coverage payer must own the target job.
 4. A valid signed service payment is verified and settled. The resulting token `Transfer` is read back from X Layer before the API returns success.
 5. The durable ledger atomically checks that active, pending, and payout-due liabilities plus the new cap do not exceed the live reserve.
 6. The deadline is derived from the verified acceptance block plus the registered target-policy SLA; callers cannot shorten or extend it.
@@ -34,13 +34,15 @@ The marketplace keeps its own escrow and order lifecycle. PolicyPool adds a capp
 
 - Listed service: `Covered Job Receipt`, 1 USDT, API service.
 - Listed provider: PolicyPool Agent `#4674` on OKX.AI.
-- Registered targets in v0.2: GlassDesk `#3465` service `#30019`, and Foreman `#4348` service `#27669`.
+- Registered targets in v0.2: GlassDesk `#3465` services `#30019`, `#30020`, and `#30021`; Foreman `#4348` service `#27669`.
 - Payment asset: X Layer USD₮0, 6 decimals, EIP-3009 domain `USD₮0` version `1`.
 - Objective breach: accepted job still undelivered after the stored deadline.
 - Reserve: public X Layer wallet, with every liability exposed by `/api/coverage-ledger`.
 - Payout execution: reserve operator transfer, followed by independent onchain verification. The current release does not claim autonomous custody or automatic transfer execution.
 
-Unknown policies are declined. Jobs that are already submitted or terminal are not issued new coverage. The cap cannot exceed the target-job value, configured maximum, or uncommitted reserve.
+Unknown targets are rejected before payment and produce no coverage receipt. Jobs that are already submitted or terminal are not issued new coverage. The cap cannot exceed the target-job value, configured maximum, or uncommitted reserve.
+
+The accepted-event service hash is preserved verbatim and checked for A2A/A2MCP consistency. OKX does not expose a documented public derivation from listed service ID to that hash, so the current verifier does not claim that mapping; proof packages pair the onchain hash with separate marketplace service evidence.
 
 ## Agent Verification
 

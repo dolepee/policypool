@@ -18,6 +18,7 @@ const TRANSFER_EVENT = parseAbiItem("event Transfer(address indexed from, addres
 const JOB_ABI = parseAbi([
   "function getJobStatus(bytes32 jobId) view returns (uint8)",
 ]);
+const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
 
 export class EvidenceError extends Error {
   constructor(code, message) {
@@ -33,6 +34,27 @@ function topicAddress(value) {
 
 function topicUint(value) {
   return BigInt(value);
+}
+
+export function validateServiceBinding(policy, serviceHash) {
+  if (!isBytes32(serviceHash)) throw new EvidenceError("target_service_hash_invalid");
+  const serviceType = String(policy?.serviceType || "").trim().toUpperCase();
+  const normalizedHash = serviceHash.toLowerCase();
+  if (serviceType === "A2A" && normalizedHash === ZERO_BYTES32) {
+    throw new EvidenceError("target_service_hash_missing_for_a2a");
+  }
+  if (serviceType === "A2MCP" && normalizedHash !== ZERO_BYTES32) {
+    throw new EvidenceError("target_service_hash_unexpected_for_a2mcp");
+  }
+  if (serviceType !== "A2A" && serviceType !== "A2MCP") {
+    throw new EvidenceError("target_service_type_unsupported");
+  }
+  return {
+    serviceHash,
+    serviceType,
+    serviceTypeVerified: true,
+    listedServiceIdMapping: "manual_external_evidence_required",
+  };
 }
 
 export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
@@ -122,6 +144,7 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
     }
     if (asset.toLowerCase() !== PAYMENT.asset.toLowerCase()) throw new EvidenceError("target_payment_asset_mismatch");
     if (amount <= 0n) throw new EvidenceError("target_payment_amount_missing");
+    const serviceBinding = validateServiceBinding(policy, serviceHash);
 
     const status = await getJobStatus(jobId);
     if (!allowedStatuses.includes(status)) throw new EvidenceError(`target_job_not_accepted:${status}`);
@@ -142,7 +165,7 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
       agentId: String(agentId),
       asset: getAddress(asset),
       amountAtomic: amount.toString(),
-      serviceHash,
+      ...serviceBinding,
       status,
       statusLabel: status === 1 ? "accepted" : `status_${status}`,
     };

@@ -18,6 +18,10 @@ assert.equal(proof.provider.toLowerCase(), "0x4abbae03afff90f50d4f6b42b3e362f522
 assert.equal(proof.buyer.toLowerCase(), "0x8d295ff5d86f39e1a46eed220641f6151b520b8f");
 assert.equal(proof.asset.toLowerCase(), PAYMENT.asset.toLowerCase());
 assert.equal(proof.amountAtomic, "1000000");
+assert.equal(proof.serviceHash, "0xaf5c67042babb4ef501331231013f82575dab215a7a45794c6ccaf6ce9dd3b63");
+assert.equal(proof.serviceType, "A2A");
+assert.equal(proof.serviceTypeVerified, true);
+assert.equal(proof.listedServiceIdMapping, "manual_external_evidence_required");
 assert.equal(proof.status, 6);
 assert.equal(proof.acceptanceBlock, "64898927");
 assert.equal(proof.creationBlock, "64898853");
@@ -38,4 +42,4 @@ await assert.rejects(
   "a different wallet must not obtain coverage for someone else's job",
 );
 
-console.log("PolicyPool OKX task proof passed: creation/acceptance bind buyer, job, provider, agent id, asset, amount, and status.");
+console.log("PolicyPool OKX task proof passed: creation/acceptance bind buyer, job, provider, agent id, asset, amount, service type/hash, and status.");

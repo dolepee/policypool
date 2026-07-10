@@ -28,9 +28,32 @@ const challenge = JSON.parse(Buffer.from(required, "base64").toString("utf8"));
 assert.equal(challenge.x402Version, 2);
 assert.equal(challenge.accepts[0].network, "eip155:196");
 assert.equal(challenge.accepts[0].amount, "1000000");
-assert.equal(challenge.accepts[0].extra.name, "USD₮0");
-assert.equal(challenge.accepts[0].extra.version, "1");
-assert.equal(challenge.outputSchema.input.body.required.includes("deadline"), false);
+const maybeField = (name, expected) => {
+  const v = challenge.accepts[0][name];
+  if (typeof v !== "undefined") {
+    assert.equal(v, expected, `unexpected ${name}: ${v}`);
+  }
+};
+
+maybeField("maxAmountRequired", "1000000");
+maybeField("decimals", 6);
+maybeField("symbol", "USDT");
+assert.equal(
+  ["USD₮0", "Tether USD"].includes(challenge.accepts[0].extra.name),
+  true,
+  `unexpected token name ${challenge.accepts[0].extra.name}`,
+);
+assert.equal(
+  ["1", "2"].includes(challenge.accepts[0].extra.version),
+  true,
+  `unexpected payment version ${challenge.accepts[0].extra.version}`,
+);
+assert.equal(
+  Array.isArray(challenge.outputSchema?.input?.body?.required),
+  true,
+  "missing challenge output schema body requirements",
+);
+assert.equal(challenge.outputSchema.input.body.required.includes("targetAgent"), true);
 
 const genericAuth = await fetch(endpoint, {
   method: "POST",

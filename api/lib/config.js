@@ -42,7 +42,10 @@ export function paymentRequirements() {
     network: XLAYER.network,
     asset: PAYMENT.asset,
     amount: PAYMENT.amountAtomic,
+    maxAmountRequired: PAYMENT.amountAtomic,
     payTo: PAYMENT.payTo,
+    symbol: "USDT",
+    decimals: PAYMENT.decimals,
     maxTimeoutSeconds: 600,
     extra: {
       name: PAYMENT.name,

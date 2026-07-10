@@ -6,7 +6,7 @@ import {
   PaymentConfigurationError,
   PaymentVerificationError,
 } from "./lib/payment.js";
-import { findPublishedPolicy } from "./lib/policy-registry.js";
+import { findPublishedPolicy, listPublishedPolicies } from "./lib/policy-registry.js";
 import {
   clean,
   encodeBase64Json,
@@ -132,6 +132,21 @@ function readInput(req) {
   };
 }
 
+function readTargetAgent(req) {
+  const source = req.method === "POST" ? req.body : req.query;
+  const body = source && typeof source === "object" && !Array.isArray(source) ? source : {};
+  return clean(body.targetAgent || body.agent || body.agentId || body.serviceId);
+}
+
+function supportedTargets() {
+  return listPublishedPolicies().map((policy) => ({
+    agentId: policy.agentId,
+    agentName: policy.agentName,
+    serviceIds: policy.serviceIds,
+    serviceType: policy.serviceType,
+  }));
+}
+
 function evaluateGuard(input, policy) {
   if (!policy) return { verdict: "BLOCK", reason: "target_policy_not_registered" };
   if (!isBytes32(input.targetJobId)) return { verdict: "BLOCK", reason: "target_job_id_required" };
@@ -206,6 +221,7 @@ function buildReceipt({
       agentName: policy.agentName,
       serviceIds: policy.serviceIds,
       serviceName: policy.serviceName,
+      serviceType: policy.serviceType,
       providerWallet: policy.providerWallet,
       policyHash: policy.policyHash,
       slaSeconds: policy.slaSeconds,
@@ -301,8 +317,27 @@ export function createHandler(dependencies = {}) {
       return sendJson(res, 405, { ok: false, error: "method_not_allowed" });
     }
 
+    const targetAgent = readTargetAgent(req);
+    const policy = targetAgent ? findPublishedPolicy(targetAgent) : null;
+    if (targetAgent && !policy) {
+      return sendJson(res, 422, {
+        ok: false,
+        error: "target_policy_not_registered",
+        charged: false,
+        supportedTargets: supportedTargets(),
+      });
+    }
+
     const paymentSignature = header(req, "payment-signature");
     if (!paymentSignature) return paymentRequired(req, res);
+    if (!targetAgent) {
+      return sendJson(res, 400, {
+        ok: false,
+        error: "target_agent_required",
+        charged: false,
+        supportedTargets: supportedTargets(),
+      });
+    }
 
     let ledger;
     let payment;
@@ -348,7 +383,6 @@ export function createHandler(dependencies = {}) {
     }
 
     const input = readInput(req);
-    const policy = findPublishedPolicy(input.targetAgent);
     let guard = evaluateGuard(input, policy);
     let targetOrder = null;
     let reserveBalanceAtomic;

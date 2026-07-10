@@ -106,7 +106,7 @@
                 </div>
                 <div>
                   <dt>Reserve</dt>
-                  <dd><a id="reserve-link" href="https://www.oklink.com/x-layer/address/0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7" target="_blank" rel="noreferrer">0x4abb...d4c7</a></dd>
+                  <dd><a id="reserve-link" href="https://www.oklink.com/x-layer/address/0xe2f0c858724a9a72310d7264400e04b37423fbbc" target="_blank" rel="noreferrer">0xe2f0...23fbbc</a></dd>
                 </div>
               </dl>
               <p class="fine-print" id="ledger-updated">Reading the public reserve and durable covenant ledger.</p>
@@ -125,7 +125,7 @@
               <li class="data-card">
                 <span class="runway-index">01</span>
                 <h3>Verify the order</h3>
-                <p>The creation and acceptance transactions bind the buyer, job ID, target agent, provider wallet, asset, and paid amount.</p>
+                <p>The creation and acceptance transactions bind the buyer, job ID, target agent, provider wallet, asset, paid amount, service type, and exact accepted-service hash.</p>
               </li>
               <li class="data-card">
                 <span class="runway-index">02</span>
@@ -230,7 +230,7 @@ PAYMENT-SIGNATURE: &lt;signed X Layer payment&gt;
   "requestedCoverageUSDT": "1"
 }</code></pre>
             <p class="fine-print">
-              The covered deadline comes from the registered target-policy SLA plus the verified acceptance block. Caller-supplied deadlines, payment status, policy overrides, breach flags, clocks, delivery hashes, and payout hashes are not trusted. Unknown policies are declined. The current release is an experimental software warranty layer with a capped public reserve, not protocol-native escrow or insurance.
+              The covered deadline comes from the registered target-policy SLA plus the verified acceptance block. Caller-supplied deadlines, payment status, policy overrides, breach flags, clocks, delivery hashes, and payout hashes are not trusted. Unknown targets are rejected before payment. The current release is an experimental software warranty layer with a capped public reserve, not protocol-native escrow or insurance.
             </p>
           </section>
 

@@ -1,4 +1,5 @@
 const EXPLORER_TX = "https://www.oklink.com/x-layer/tx/";
+const EXPLORER_ADDRESS = "https://www.oklink.com/x-layer/address/";
 
 function short(value, left = 8, right = 6) {
   if (!value || value.length <= left + right) return value || "-";
@@ -52,6 +53,9 @@ async function hydrateCoverage() {
     document.querySelector("#reserve-balance").textContent = `${amount(data.reserve.balanceUSDT)} USDT0`;
     document.querySelector("#reserve-committed").textContent = `${amount(data.reserve.committedUSDT)} USDT0`;
     document.querySelector("#coverage-count").textContent = String(data.liabilities.recordCount);
+    const reserveLink = document.querySelector("#reserve-link");
+    reserveLink.href = `${EXPLORER_ADDRESS}${data.reserve.wallet}`;
+    reserveLink.textContent = short(data.reserve.wallet);
     document.querySelector("#ledger-updated").textContent = `Live read ${new Date(data.generatedAt).toLocaleString()}. No cached fallback.`;
     health.textContent = data.reserve.solvent ? "Solvent" : "Overcommitted";
     health.className = `chip ${data.reserve.solvent ? "chip-positive" : "chip-risk"}`;
