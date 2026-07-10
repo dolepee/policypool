@@ -25,6 +25,7 @@ const FOREMAN_POLICY = {
     "deadline",
   ],
   allowedKeywords: ["launch", "listing", "demo", "announcement", "readiness", "proof"],
+  slaSeconds: 300,
   source: {
     kind: "OKX.AI listed service snapshot",
     capturedAt: "2026-07-10T10:45:00.000Z",
@@ -51,6 +52,7 @@ const GLASSDESK_POLICY = {
     "claim or question to verify",
   ],
   allowedKeywords: ["market", "token", "contract", "wallet", "holder", "claim", "evidence", "liquidity", "source"],
+  slaSeconds: 86_400,
   source: {
     kind: "OKX.AI listed service snapshot",
     capturedAt: "2026-07-10T10:45:00.000Z",

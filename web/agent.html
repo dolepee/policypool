@@ -227,11 +227,10 @@ PAYMENT-SIGNATURE: &lt;signed X Layer payment&gt;
   "targetCreationTxHash": "0x...",
   "targetAcceptanceTxHash": "0x...",
   "jobDescription": "Verify a public market-data claim with sources.",
-  "deadline": "2026-07-17T00:00:00.000Z",
   "requestedCoverageUSDT": "1"
 }</code></pre>
             <p class="fine-print">
-              Caller-supplied payment status, policy overrides, breach flags, clocks, delivery hashes, and payout hashes are not trusted. Unknown policies are declined. The current release is an experimental software warranty layer with a capped public reserve, not protocol-native escrow or insurance.
+              The covered deadline comes from the registered target-policy SLA plus the verified acceptance block. Caller-supplied deadlines, payment status, policy overrides, breach flags, clocks, delivery hashes, and payout hashes are not trusted. Unknown policies are declined. The current release is an experimental software warranty layer with a capped public reserve, not protocol-native escrow or insurance.
             </p>
           </section>
 

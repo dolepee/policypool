@@ -125,12 +125,18 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
 
     const status = await getJobStatus(jobId);
     if (!allowedStatuses.includes(status)) throw new EvidenceError(`target_job_not_accepted:${status}`);
+    const [creationBlock, acceptanceBlock] = await Promise.all([
+      publicClient.getBlock({ blockNumber: creationReceipt.blockNumber }),
+      publicClient.getBlock({ blockNumber: receipt.blockNumber }),
+    ]);
     return {
       jobId,
       creationTxHash,
       acceptanceTxHash,
       creationBlock: creationReceipt.blockNumber.toString(),
       acceptanceBlock: receipt.blockNumber.toString(),
+      createdAt: new Date(Number(creationBlock.timestamp) * 1000).toISOString(),
+      acceptedAt: new Date(Number(acceptanceBlock.timestamp) * 1000).toISOString(),
       buyer: targetBuyer,
       provider,
       agentId: String(agentId),

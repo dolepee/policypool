@@ -10,7 +10,6 @@ const sampleBody = {
   targetCreationTxHash: `0x${"3".repeat(64)}`,
   targetAcceptanceTxHash: `0x${"2".repeat(64)}`,
   jobDescription: "Create a scoped readiness pack for a funded launch task.",
-  deadline: "2026-07-17T00:00:00.000Z",
   requestedCoverageUSDT: "1",
 };
 
@@ -31,6 +30,7 @@ assert.equal(challenge.accepts[0].network, "eip155:196");
 assert.equal(challenge.accepts[0].amount, "1000000");
 assert.equal(challenge.accepts[0].extra.name, "USD₮0");
 assert.equal(challenge.accepts[0].extra.version, "1");
+assert.equal(challenge.outputSchema.input.body.required.includes("deadline"), false);
 
 const genericAuth = await fetch(endpoint, {
   method: "POST",

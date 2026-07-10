@@ -58,14 +58,14 @@ const OUTPUT_SCHEMA = {
         },
         deadline: {
           type: "string",
-          description: "Future ISO-8601 delivery deadline, no more than seven days away.",
+          description: "Optional buyer context only. The covenant deadline is derived from the registered policy SLA and verified acceptance block.",
         },
         requestedCoverageUSDT: {
           type: ["string", "number"],
           description: "Requested cap. It cannot exceed target-job value, configured cap, or uncommitted reserve.",
         },
       },
-      required: ["targetAgent", "targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash", "jobDescription", "deadline"],
+      required: ["targetAgent", "targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash", "jobDescription"],
       additionalProperties: false,
     },
   },
@@ -127,12 +127,12 @@ function readInput(req) {
     targetCreationTxHash: clean(body.targetCreationTxHash || body.creationTxHash, 80),
     targetAcceptanceTxHash: clean(body.targetAcceptanceTxHash || body.acceptanceTxHash, 80),
     jobDescription: clean(body.jobDescription || body.job || body.task || body.prompt),
-    deadline: clean(body.deadline || body.dueAt || body.expiresAt, 80),
+    requestedDeadline: clean(body.deadline || body.dueAt || body.expiresAt, 80),
     requestedCoverageAtomic: parseUsdtAtomic(String(requested), PAYMENT.decimals),
   };
 }
 
-function evaluateGuard(input, policy, nowMs) {
+function evaluateGuard(input, policy) {
   if (!policy) return { verdict: "BLOCK", reason: "target_policy_not_registered" };
   if (!isBytes32(input.targetJobId)) return { verdict: "BLOCK", reason: "target_job_id_required" };
   if (!isBytes32(input.targetCreationTxHash)) {
@@ -142,11 +142,10 @@ function evaluateGuard(input, policy, nowMs) {
     return { verdict: "BLOCK", reason: "target_acceptance_transaction_required" };
   }
   if (!input.jobDescription) return { verdict: "BLOCK", reason: "job_description_required" };
-  const deadlineMs = Date.parse(input.deadline);
-  if (!Number.isFinite(deadlineMs)) return { verdict: "BLOCK", reason: "valid_deadline_required" };
-  if (deadlineMs <= nowMs) return { verdict: "BLOCK", reason: "future_deadline_required" };
-  if ((deadlineMs - nowMs) / 1000 > COVERAGE.maxDurationSeconds) {
-    return { verdict: "BLOCK", reason: "deadline_exceeds_maximum_coverage_window" };
+  if (!Number.isSafeInteger(policy.slaSeconds)
+    || policy.slaSeconds <= 0
+    || policy.slaSeconds > COVERAGE.maxDurationSeconds) {
+    return { verdict: "BLOCK", reason: "registered_policy_sla_invalid" };
   }
   if (input.requestedCoverageAtomic < BigInt(COVERAGE.minAtomic)) {
     return { verdict: "BLOCK", reason: "requested_coverage_below_minimum" };
@@ -180,6 +179,7 @@ function buildReceipt({
   reserveBalanceAtomic,
   settlement,
   generatedAt,
+  coverageDeadline,
 }) {
   const issued = guard.verdict === "ALLOW";
   const draft = {
@@ -208,6 +208,7 @@ function buildReceipt({
       serviceName: policy.serviceName,
       providerWallet: policy.providerWallet,
       policyHash: policy.policyHash,
+      slaSeconds: policy.slaSeconds,
       publishedScope: policy.publishedScope,
     } : {
       requestedAgent: input.targetAgent,
@@ -220,7 +221,7 @@ function buildReceipt({
       verified: false,
     },
     covenant: issued ? {
-      deadline: new Date(input.deadline).toISOString(),
+      deadline: coverageDeadline,
       coverageCapAtomic: coverageCapAtomic.toString(),
       coverageCapUSDT: formatUsdtAtomic(coverageCapAtomic, PAYMENT.decimals),
       objectiveBreachRules: OBJECTIVE_BREACH_RULES,
@@ -228,7 +229,9 @@ function buildReceipt({
     guard: {
       ...guard,
       callerSuppliedPolicyIgnored: true,
+      callerSuppliedDeadlineIgnored: true,
       callerSuppliedBreachAndPayoutFieldsIgnored: true,
+      derivedCoverageDeadline: coverageDeadline,
     },
     reserve: {
       chain: XLAYER.name,
@@ -346,10 +349,11 @@ export function createHandler(dependencies = {}) {
 
     const input = readInput(req);
     const policy = findPublishedPolicy(input.targetAgent);
-    let guard = evaluateGuard(input, policy, now());
+    let guard = evaluateGuard(input, policy);
     let targetOrder = null;
     let reserveBalanceAtomic;
     let coverageCapAtomic = 0n;
+    let coverageDeadline = null;
 
     try {
       reserveBalanceAtomic = await getChain().getReserveBalance();
@@ -370,14 +374,26 @@ export function createHandler(dependencies = {}) {
           buyer: verified.payer,
           policy,
         });
-        coverageCapAtomic = minBigInt(
-          input.requestedCoverageAtomic,
-          BigInt(targetOrder.amountAtomic),
-          BigInt(COVERAGE.maxAtomic),
-        );
-        if (coverageCapAtomic < BigInt(COVERAGE.minAtomic)) {
-          guard = { verdict: "BLOCK", reason: "verified_coverage_cap_below_minimum" };
-          coverageCapAtomic = 0n;
+        const acceptedAtMs = Date.parse(targetOrder.acceptedAt);
+        if (!Number.isFinite(acceptedAtMs)) {
+          guard = { verdict: "BLOCK", reason: "target_acceptance_timestamp_invalid" };
+        } else {
+          const coverageDeadlineMs = acceptedAtMs + policy.slaSeconds * 1000;
+          coverageDeadline = new Date(coverageDeadlineMs).toISOString();
+          if (coverageDeadlineMs <= now()) {
+            guard = { verdict: "BLOCK", reason: "registered_policy_sla_already_elapsed" };
+          }
+        }
+        if (guard.verdict === "ALLOW") {
+          coverageCapAtomic = minBigInt(
+            input.requestedCoverageAtomic,
+            BigInt(targetOrder.amountAtomic),
+            BigInt(COVERAGE.maxAtomic),
+          );
+          if (coverageCapAtomic < BigInt(COVERAGE.minAtomic)) {
+            guard = { verdict: "BLOCK", reason: "verified_coverage_cap_below_minimum" };
+            coverageCapAtomic = 0n;
+          }
         }
       } catch (error) {
         if (error instanceof EvidenceError) {
@@ -399,6 +415,10 @@ export function createHandler(dependencies = {}) {
     })}`;
     const receiptId = `ppc-${requestId.slice(7, 23)}`;
     const createdAt = new Date(now()).toISOString();
+    const storedInput = {
+      ...input,
+      requestedCoverageAtomic: input.requestedCoverageAtomic.toString(),
+    };
     let pending = {
       receiptId,
       requestId,
@@ -406,7 +426,7 @@ export function createHandler(dependencies = {}) {
       state: "pending",
       createdAt,
       liabilityAtomic: coverageCapAtomic.toString(),
-      input,
+      input: storedInput,
       guard,
       targetOrder,
       payer: verified.payer,
@@ -462,6 +482,7 @@ export function createHandler(dependencies = {}) {
       reserveBalanceAtomic,
       settlement,
       generatedAt: new Date(now()).toISOString(),
+      coverageDeadline,
     });
     const finalRecord = {
       ...pending,

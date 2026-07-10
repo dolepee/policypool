@@ -21,6 +21,9 @@ assert.equal(proof.amountAtomic, "1000000");
 assert.equal(proof.status, 6);
 assert.equal(proof.acceptanceBlock, "64898927");
 assert.equal(proof.creationBlock, "64898853");
+assert.match(proof.createdAt, /^2026-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/);
+assert.match(proof.acceptedAt, /^2026-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/);
+assert.ok(Date.parse(proof.acceptedAt) >= Date.parse(proof.createdAt));
 
 await assert.rejects(
   chain.verifyTargetOrder({

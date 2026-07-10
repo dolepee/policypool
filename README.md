@@ -24,8 +24,9 @@ PolicyPool does not rate subjective quality, accept caller-supplied policy overr
 3. `api/lib/chain.js` verifies both transactions against the public task escrow and binds buyer, job, provider wallet, agent ID, token, and paid amount. The coverage payer must own the target job.
 4. A valid signed service payment is verified and settled. The resulting token `Transfer` is read back from X Layer before the API returns success.
 5. The durable ledger atomically checks that active, pending, and payout-due liabilities plus the new cap do not exceed the live reserve.
-6. The reconciler reads `getJobStatus(bytes32)`. An accepted job still undelivered after deadline becomes `payout_due`; a completed or refunded job releases capacity.
-7. `record-payout` accepts no caller assertion. It marks a covenant paid only after verifying reserve wallet, buyer, token, and exact amount in the payout transaction.
+6. The deadline is derived from the verified acceptance block plus the registered target-policy SLA; callers cannot shorten or extend it.
+7. The reconciler reads `getJobStatus(bytes32)`. An accepted job still undelivered after that derived deadline becomes `payout_due`; a completed or refunded job releases capacity.
+8. `record-payout` accepts no caller assertion. It marks a covenant paid only after verifying reserve wallet, buyer, token, and exact amount in the payout transaction.
 
 The marketplace keeps its own escrow and order lifecycle. PolicyPool adds a capped warranty credit; it is not protocol-native escrow or insurance.
 

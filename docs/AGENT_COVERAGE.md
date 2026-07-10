@@ -19,16 +19,17 @@ Input:
   "targetCreationTxHash": "0x...",
   "targetAcceptanceTxHash": "0x...",
   "jobDescription": "Create a scoped readiness pack for a funded launch task.",
-  "deadline": "2026-07-17T00:00:00.000Z",
   "requestedCoverageUSDT": "1"
 }
 ```
 
-The target job must still be in accepted state. PolicyPool verifies the creation and acceptance transactions against the public OKX task escrow and binds the buyer wallet, job ID, provider wallet, target agent ID, payment token, and target-job value. The coverage payer must be the target-job buyer.
+The target job must still be in accepted state. PolicyPool verifies the creation and acceptance transactions against the public OKX task escrow and binds the buyer wallet, job ID, provider wallet, target agent ID, payment token, target-job value, and acceptance timestamp. The coverage payer must be the target-job buyer.
+
+The caller does not choose the covered deadline. PolicyPool derives it from the verified acceptance block plus the registered target-policy SLA: five minutes for Foreman and 24 hours for GlassDesk in v0.2. A caller-supplied `deadline`, `dueAt`, or `expiresAt` is retained only as ignored context and cannot shorten or extend liability.
 
 ## Outcomes
 
-- `DECLINED`: no liability is created. Reasons include unknown policy, unverifiable order, invalid deadline, blocked scope, or insufficient uncommitted reserve.
+- `DECLINED`: no liability is created. Reasons include unknown policy, unverifiable order, an already-elapsed registered SLA, blocked scope, or insufficient uncommitted reserve.
 - `ISSUED`: the service payment settled, the target order was verified, and the cap was atomically reserved in the durable ledger.
 - `PAYOUT_DUE`: the reconciler observed that the accepted job was still undelivered after the stored deadline.
 - `PAID`: a matching token transfer from the reserve wallet to the stored buyer was independently verified.
@@ -51,7 +52,7 @@ The cap is also bounded by target-job value and the configured per-covenant maxi
 The current release has one breach rule:
 
 ```text
-current time > stored deadline AND getJobStatus(targetJobId) == accepted
+current time > (verified acceptance time + registered policy SLA) AND getJobStatus(targetJobId) == accepted
 ```
 
 Subjective quality, listing outcomes, arbitrary delivery hashes, and buyer assertions are out of scope. Terminal marketplace refunds release reserve capacity rather than creating a second reimbursement.

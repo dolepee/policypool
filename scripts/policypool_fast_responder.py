@@ -166,16 +166,8 @@ def short_hash(text: str) -> str:
 
 
 URL_RE = re.compile(r"https?://[^\s'\"」]+")
-DATE_RE = re.compile(r"(20\d{2}-\d{2}-\d{2})")
 INJECTION_TERMS = ("disregard", "ignore previous", "ignore your", "bypass", "override", "jailbreak")
 MENU_TERMS = ("what services", "which services", "service list", "what do you offer", "capabilities")
-
-
-def extract_deadline(content: str) -> str:
-    match = DATE_RE.search(content)
-    if match:
-        return f"{match.group(1)}T23:59:59Z"
-    return "2026-07-17T00:00:00Z"
 
 
 def classify(content: str) -> tuple[str, str]:
@@ -189,19 +181,18 @@ def classify(content: str) -> tuple[str, str]:
 
 def build_receipt(content: str, job_id: str) -> str:
     verdict, reason = classify(content)
-    deadline = extract_deadline(content)
     target = "target agent/service supplied in the request"
     url = URL_RE.search(content)
     if url:
         target = url.group(0)
-    receipt_seed = f"{job_id}|{content}|{verdict}|{deadline}|{time.time_ns()}"
+    receipt_seed = f"{job_id}|{content}|{verdict}|{time.time_ns()}"
     receipt_id = f"pp-preflight-{short_hash(receipt_seed)[:12]}"
     receipt_hash = f"sha256:{hashlib.sha256(receipt_seed.encode('utf-8')).hexdigest()}"
 
     return (
         f"PolicyPool coverage preflight delivered. Receipt {receipt_id}: verdict={verdict}; reason={reason}. "
         "No covenant was issued, no reserve liability was created, and no payout is due from this chat response. "
-        f"Target={target}. Proposed deadline={deadline}. "
+        f"Target={target}. The caller cannot choose the covered deadline; the paid endpoint derives it from the target's registered SLA and verified acceptance block. "
         "Issuance requires a paid API call carrying the accepted OKX.AI job id plus its X Layer creation and acceptance transactions. "
         f"The API then verifies the target's registered policy, live job status, service payment, and reserve capacity. "
         f"Reserve wallet={RESERVE_WALLET}. Paid endpoint={ENDPOINT}. "
@@ -222,7 +213,7 @@ def build_reply(content: str, session_key: str, state: dict) -> str:
         return (
             f"{AGENT_NAME} offers one API service: {SERVICE_NAME} (1 USDT at {ENDPOINT}). "
             "Send the registered target agent/service, accepted OKX.AI job id, X Layer creation and acceptance transactions, "
-            "job description, future deadline, and requested coverage cap. "
+            "job description, and requested coverage cap. The deadline comes from the registered target policy. "
             "Chat returns a non-binding preflight; only the paid endpoint can issue reserve-backed coverage."
         )
 
@@ -236,7 +227,7 @@ def build_reply(content: str, session_key: str, state: dict) -> str:
     ts = _dt.datetime.now(_dt.timezone.utc).strftime("%H:%M:%S UTC")
     return (
         f"PolicyPool follow-up at {ts}: the prior receipt remains the deliverable. "
-        f"For a fresh result call {ENDPOINT} with the updated target, job, deadline, payment status, and coverage cap."
+        f"For a fresh result call {ENDPOINT} with the updated target, job proof, job description, and coverage cap."
     )
 
 

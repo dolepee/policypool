@@ -23,7 +23,7 @@ Endpoint: `https://policypool.vercel.app/api/covered-job-receipt`
 Description:
 
 > Verifies an accepted agent job and returns a receipted coverage decision with deadline, cap, reserve state, and objective breach rule.
-> Provide the registered target agent or service, accepted job id, X Layer creation and acceptance transactions, job scope, future deadline, and requested cap.
+> Provide the registered target agent or service, accepted job id, X Layer creation and acceptance transactions, job scope, and requested cap. PolicyPool derives the covered deadline from the registered service SLA and verified acceptance block.
 
 The listing must not mention caller-supplied payment status, arbitrary breach inputs, delivery hashes, listing mismatch, automatic payout execution, or coverage beyond the public reserve. Those are not current capabilities.
 
