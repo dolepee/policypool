@@ -22,4 +22,17 @@ assert.equal(proof.status, 6);
 assert.equal(proof.acceptanceBlock, "64898927");
 assert.equal(proof.creationBlock, "64898853");
 
+await assert.rejects(
+  chain.verifyTargetOrder({
+    jobId: proof.jobId,
+    creationTxHash: proof.creationTxHash,
+    acceptanceTxHash: proof.acceptanceTxHash,
+    buyer: "0x1111111111111111111111111111111111111111",
+    policy: findPublishedPolicy("GlassDesk#3465"),
+    allowedStatuses: [6],
+  }),
+  (error) => error?.code === "coverage_buyer_does_not_own_target_job",
+  "a different wallet must not obtain coverage for someone else's job",
+);
+
 console.log("PolicyPool OKX task proof passed: creation/acceptance bind buyer, job, provider, agent id, asset, amount, and status.");
