@@ -1,8 +1,23 @@
 import assert from "node:assert/strict";
+import {
+  createPublicClient,
+  decodeEventLog,
+  defineChain,
+  getAddress,
+  http,
+  parseAbiItem,
+} from "viem";
+import { PAYMENT, XLAYER } from "../api/lib/config.js";
 
 const baseUrl = process.env.POLICYPOOL_BASE_URL || "https://policypool.vercel.app";
 const endpoint = `${baseUrl}/api/covered-job-receipt`;
 const ledgerEndpoint = `${baseUrl}/api/coverage-ledger`;
+const controlledReceiptId = process.env.POLICYPOOL_PROOF_RECEIPT_ID || "ppc-bd38c81112102af0";
+const controlledStatusEndpoint = `${baseUrl}/api/coverage-status?receiptId=${controlledReceiptId}`;
+const expectedReserve = getAddress("0xE2F0c858724A9a72310D7264400e04B37423FBBC");
+const expectedBuyer = getAddress("0x4ABBAe03affF90F50d4F6B42b3E362f5228aD4C7");
+const expectedPayoutAtomic = 500000n;
+const transferEvent = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
 
 const sampleBody = {
   targetAgent: "Foreman#4348",
@@ -88,5 +103,52 @@ assert.equal(
   "ledger arithmetic must be solvent",
 );
 
+const controlledStatus = await fetch(controlledStatusEndpoint, { cache: "no-store" });
+assert.equal(controlledStatus.status, 200, `controlled payout status expected 200, got ${controlledStatus.status}`);
+const controlled = await controlledStatus.json();
+assert.equal(controlled.ok, true);
+assert.equal(controlled.state, "paid", "controlled breach must end in paid state");
+assert.equal(controlled.receiptId, controlledReceiptId);
+assert.equal(BigInt(controlled.liabilityAtomic), expectedPayoutAtomic);
+assert.equal(BigInt(controlled.payout.amountAtomic), expectedPayoutAtomic);
+assert.equal(getAddress(controlled.payout.recipient), expectedBuyer);
+assert.equal(getAddress(controlled.payout.proof.from), expectedReserve);
+assert.equal(getAddress(controlled.payout.proof.to), expectedBuyer);
+assert.equal(getAddress(controlled.payout.proof.asset), PAYMENT.asset);
+assert.equal(controlled.reconciliation.deadlinePassed, true);
+
+const chain = defineChain({
+  id: XLAYER.id,
+  name: XLAYER.name,
+  nativeCurrency: { name: "OKB", symbol: "OKB", decimals: 18 },
+  rpcUrls: { default: { http: [XLAYER.rpcUrl] } },
+});
+const publicClient = createPublicClient({ chain, transport: http(XLAYER.rpcUrl) });
+const payoutTransaction = controlled.payout.transaction;
+const payoutReceipt = await publicClient.getTransactionReceipt({ hash: payoutTransaction });
+assert.equal(payoutReceipt.status, "success", "controlled payout transaction must succeed");
+assert.equal(payoutReceipt.blockNumber.toString(), controlled.payout.proof.blockNumber);
+const payoutTransfer = payoutReceipt.logs.find((log) => {
+  if (log.address.toLowerCase() !== PAYMENT.asset.toLowerCase()) return false;
+  try {
+    const decoded = decodeEventLog({ abi: [transferEvent], data: log.data, topics: log.topics });
+    return decoded.eventName === "Transfer"
+      && getAddress(decoded.args.from) === expectedReserve
+      && getAddress(decoded.args.to) === expectedBuyer
+      && decoded.args.value === expectedPayoutAtomic;
+  } catch {
+    return false;
+  }
+});
+assert.ok(payoutTransfer, "X Layer receipt must contain the exact reserve-to-buyer USDt0 transfer");
+
+const controlledLedgerRecord = ledgerBody.records.find((record) => record.receiptId === controlledReceiptId);
+assert.ok(controlledLedgerRecord, "controlled payout receipt must appear in the public ledger");
+assert.equal(controlledLedgerRecord.state, "paid");
+assert.equal(controlledLedgerRecord.payoutTx, payoutTransaction);
+assert.equal(ledgerBody.liabilities.payoutDueAtomic, "0");
+assert.equal(ledgerBody.reserve.committedAtomic, "0");
+
 console.log(`PolicyPool live fail-closed verifier passed: ${endpoint}`);
+console.log(`PolicyPool controlled payout verified independently on X Layer: ${payoutTransaction}`);
 console.log("No payment was signed or spent by this no-secret verifier.");

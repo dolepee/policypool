@@ -45,6 +45,18 @@ Unknown targets are rejected before payment and produce no coverage receipt. Job
 
 The accepted-event service hash is preserved verbatim and checked for A2A/A2MCP consistency. OKX does not expose a documented public derivation from listed service ID to that hash, so the current verifier does not claim that mapping; proof packages pair the onchain hash with separate marketplace service evidence.
 
+## Controlled Lifecycle Proof
+
+These are explicitly labeled house proof runs and are excluded from external-usage and qualified-revenue claims.
+
+| Proof | Public evidence |
+| --- | --- |
+| Completed job released its `0.5 USD₮0` liability | [`ppc-d99d7f72895d70ab`](https://policypool.vercel.app/api/coverage-status?receiptId=ppc-d99d7f72895d70ab) |
+| Accepted job remained undelivered past its derived deadline | [`ppc-bd38c81112102af0`](https://policypool.vercel.app/api/coverage-status?receiptId=ppc-bd38c81112102af0) |
+| Coverage purchase settled on X Layer | [`0x48b7…aae8`](https://www.oklink.com/x-layer/tx/0x48b71f1d1de04e9e7138db3d0a8c7aa20c1a5d0364e465210f5dbeb9da03aae8) |
+| Reserve paid the buyer exactly `0.5 USD₮0` | [`0x492a…dffa`](https://www.oklink.com/x-layer/tx/0x492a8e5effbbf9fc2b064c3da0435d797fc2f498967439a970e97439908adffa) |
+| Live reserve and liabilities after payout | [Public coverage ledger](https://policypool.vercel.app/api/coverage-ledger) |
+
 ## Agent Verification
 
 ```bash
@@ -60,7 +72,7 @@ The coverage preflight is free and read-only. It never reserves capacity or sign
 npm run agent:verify-live
 ```
 
-The no-secret live verifier checks `HEAD 200`, unpaid `402`, the exact X Layer payment domain, rejection of generic or malformed payment headers, and reserve solvency. It does not sign or spend a payment.
+The no-secret live verifier checks `HEAD 200`, unpaid `402`, the exact X Layer payment domain, rejection of generic or malformed payment headers, reserve solvency, and the controlled breach payout directly from its X Layer transaction receipt. It does not sign or spend a payment.
 
 Required production configuration is documented in `.env.example`. The paid route fails closed unless both a durable Redis ledger and a real settlement facilitator are configured.
 
