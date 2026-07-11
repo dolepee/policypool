@@ -147,7 +147,7 @@ function supportedTargets() {
   }));
 }
 
-function evaluateGuard(input, policy) {
+export function evaluateGuard(input, policy) {
   if (!policy) return { verdict: "BLOCK", reason: "target_policy_not_registered" };
   if (!isBytes32(input.targetJobId)) return { verdict: "BLOCK", reason: "target_job_id_required" };
   if (!isBytes32(input.targetCreationTxHash)) {

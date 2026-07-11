@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createChainService } from "../api/lib/chain.js";
 import { PAYMENT } from "../api/lib/config.js";
+import { fetchOkxTaskPage } from "../api/lib/okx-task-page.js";
 import { findPublishedPolicy } from "../api/lib/policy-registry.js";
 
 const chain = createChainService();
@@ -42,4 +43,16 @@ await assert.rejects(
   "a different wallet must not obtain coverage for someone else's job",
 );
 
-console.log("PolicyPool OKX task proof passed: creation/acceptance bind buyer, job, provider, agent id, asset, amount, service type/hash, and status.");
+const publicTask = await fetchOkxTaskPage("https://www.okx.ai/tasks/401277");
+const resolved = await chain.resolveTargetOrderEvidence({
+  jobId: publicTask.jobId,
+  createdAt: publicTask.openedAt,
+  acceptedAt: publicTask.acceptedAt,
+});
+assert.equal(publicTask.jobId, "0x567044bcd533567a6d874044accdffd06b8901bc9988e700b29741cd9d1070a1");
+assert.equal(resolved.creationTxHash, "0xb09188606430acf7b8ca1c02b9ff8ad335937aef31b3b93c9c41abeadf750214");
+assert.equal(resolved.acceptanceTxHash, "0x9f2970429e0f57b0ba59173e2ca5d5fb6040f47c5937ff35f560a8be8675a213");
+assert.equal(resolved.creationBlock, "64981670");
+assert.equal(resolved.acceptanceBlock, "64981787");
+
+console.log("PolicyPool OKX task proof passed: public task URL resolves exact creation/acceptance evidence and binds buyer, job, provider, agent id, asset, amount, service type/hash, and status.");

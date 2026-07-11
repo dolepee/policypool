@@ -366,6 +366,7 @@ const statusBeforeDeadline = await callHandler(createCoverageStatusHandler({
 });
 assert.equal(statusBeforeDeadline.statusCode, 200);
 assert.equal(statusBeforeDeadline.json().state, "active");
+assert.equal(statusBeforeDeadline.json().liabilityAtomic, "1000000");
 assert.equal(statusBeforeDeadline.json().reconciliation.payoutDueCandidate, false);
 
 const payoutChain = {

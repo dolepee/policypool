@@ -19,6 +19,166 @@ function stateChip(state) {
   return "chip-neutral";
 }
 
+const PREFLIGHT_REASONS = {
+  insufficient_uncommitted_reserve: "The public reserve does not currently have enough uncommitted capacity.",
+  job_outside_registered_policy: "The task falls outside the target agent's published policy snapshot.",
+  okx_task_reference_required: "Enter an accepted OKX.AI task URL or public task ID.",
+  okx_task_host_not_allowed: "Only public task links from okx.ai can be checked.",
+  okx_task_url_invalid: "This is not a recognized OKX.AI task URL.",
+  registered_policy_sla_already_elapsed: "The registered coverage window has already elapsed.",
+  requested_coverage_below_minimum: "Request at least 0.01 USDT of coverage.",
+  target_policy_not_registered: "PolicyPool does not yet have a published policy snapshot for this target.",
+};
+
+function preflightReason(reason) {
+  if (String(reason).startsWith("target_job_not_accepted:")) {
+    return "The task is no longer in the accepted state, so new coverage cannot be issued.";
+  }
+  return PREFLIGHT_REASONS[reason] || String(reason || "The task did not pass the coverage gate.").replaceAll("_", " ");
+}
+
+function setPreflightStatus(message, state = "neutral") {
+  const status = document.querySelector("#coverage-form-status");
+  if (!status) return;
+  status.textContent = message;
+  status.dataset.state = state;
+}
+
+function createResultValue(value, href) {
+  if (!href) return document.createTextNode(value);
+  const link = document.createElement("a");
+  link.href = href;
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  link.textContent = value;
+  return link;
+}
+
+function renderPreflightValues(entries) {
+  const list = document.querySelector("#preflight-kv");
+  list.replaceChildren();
+  for (const entry of entries) {
+    const row = document.createElement("div");
+    const term = document.createElement("dt");
+    const detail = document.createElement("dd");
+    term.textContent = entry.label;
+    detail.append(createResultValue(entry.value, entry.href));
+    row.append(term, detail);
+    list.append(row);
+  }
+}
+
+function showPreflightResult(data) {
+  document.querySelector("#preflight-empty").hidden = true;
+  document.querySelector("#preflight-output").hidden = false;
+  const verdict = document.querySelector("#preflight-verdict");
+  const chip = document.querySelector("#preflight-chip");
+  const summary = document.querySelector("#preflight-summary");
+  const paid = document.querySelector("#preflight-paid-request");
+
+  if (!data.eligible) {
+    verdict.textContent = "Not coverable";
+    chip.textContent = "Declined free";
+    chip.className = "chip chip-risk";
+    summary.textContent = preflightReason(data.reason);
+    paid.hidden = true;
+    renderPreflightValues([
+      ...(data.task ? [{ label: "Task", value: data.task.title, href: data.task.publicUrl }] : []),
+      { label: "Reason", value: String(data.reason || "coverage_gate_failed") },
+      { label: "Charge", value: "0 USDT" },
+    ]);
+    return;
+  }
+
+  verdict.textContent = "Ready to cover";
+  chip.textContent = "Verified";
+  chip.className = "chip chip-positive";
+  summary.textContent = "The accepted task, target policy, buyer/provider binding, SLA, and current reserve capacity all passed.";
+  paid.hidden = false;
+  renderPreflightValues([
+    { label: "Task", value: data.task.title, href: data.task.publicUrl },
+    { label: "Target", value: `${data.policy.agentName} #${data.policy.agentId}` },
+    { label: "Coverage cap", value: `${data.coverage.capUSDT} USDT` },
+    { label: "Deadline", value: new Date(data.coverage.deadline).toLocaleString() },
+    { label: "Reserve free", value: `${data.coverage.availableUSDT} USDT` },
+    {
+      label: "Creation tx",
+      value: short(data.evidence.creationTxHash),
+      href: `${EXPLORER_TX}${data.evidence.creationTxHash}`,
+    },
+    {
+      label: "Acceptance tx",
+      value: short(data.evidence.acceptanceTxHash),
+      href: `${EXPLORER_TX}${data.evidence.acceptanceTxHash}`,
+    },
+  ]);
+  document.querySelector("#coverage-request-json").textContent = JSON.stringify(data.paidRequest, null, 2);
+}
+
+function bindCoveragePreflight() {
+  const form = document.querySelector("#coverage-preflight-form");
+  if (!form) return;
+  const submit = document.querySelector("#coverage-submit");
+  const taskInput = document.querySelector("#coverage-task");
+  const capInput = document.querySelector("#coverage-cap");
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    taskInput.removeAttribute("aria-invalid");
+    capInput.removeAttribute("aria-invalid");
+    if (!form.checkValidity()) {
+      form.querySelector(":invalid")?.setAttribute("aria-invalid", "true");
+      form.reportValidity();
+      setPreflightStatus("Complete the required fields before checking coverage.", "error");
+      return;
+    }
+
+    const values = new FormData(form);
+    form.setAttribute("aria-busy", "true");
+    submit.disabled = true;
+    submit.textContent = "Verifying...";
+    setPreflightStatus("Reading the OKX task and verifying its X Layer events.");
+
+    try {
+      const response = await fetch("/api/coverage-preflight", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetAgent: values.get("targetAgent"),
+          taskReference: values.get("taskReference"),
+          requestedCoverageUSDT: values.get("requestedCoverageUSDT"),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        if (String(data.error || "").startsWith("okx_task_")) taskInput.setAttribute("aria-invalid", "true");
+        throw new Error(preflightReason(data.error));
+      }
+      showPreflightResult(data);
+      setPreflightStatus(
+        data.eligible ? "Preflight passed. Review the verified paid request below." : "Preflight completed without charge.",
+        data.eligible ? "success" : "error",
+      );
+    } catch (error) {
+      setPreflightStatus(error instanceof Error ? error.message : "Coverage preflight failed.", "error");
+    } finally {
+      form.removeAttribute("aria-busy");
+      submit.disabled = false;
+      submit.textContent = "Check coverage";
+    }
+  });
+
+  document.querySelector("#copy-coverage-request")?.addEventListener("click", async () => {
+    const content = document.querySelector("#coverage-request-json")?.textContent || "";
+    try {
+      await navigator.clipboard.writeText(content);
+      setPreflightStatus("Verified request JSON copied.", "success");
+    } catch {
+      setPreflightStatus("Copy failed. Select the request JSON manually.", "error");
+    }
+  });
+}
+
 function renderRows(records) {
   const host = document.querySelector("#coverage-rows");
   if (!host) return;
@@ -70,3 +230,4 @@ async function hydrateCoverage() {
 }
 
 hydrateCoverage();
+bindCoveragePreflight();

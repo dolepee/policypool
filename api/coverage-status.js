@@ -25,6 +25,7 @@ export function createCoverageStatusHandler(dependencies = {}) {
         receiptId,
         state: record.state,
         receipt: record.receipt,
+        liabilityAtomic: record.liabilityAtomic,
         targetJobStatus: jobStatus,
         reconciliation: {
           deadlinePassed: Number.isFinite(deadlineMs) && now() > deadlineMs,

@@ -7,6 +7,7 @@ import {
   http,
   parseAbi,
   parseAbiItem,
+  toHex,
 } from "viem";
 import { COVERAGE, OKX_TASK, PAYMENT, XLAYER } from "./config.js";
 import { isBytes32 } from "./utils.js";
@@ -86,6 +87,130 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
     } catch (error) {
       throw new EvidenceError("target_job_status_unavailable", error instanceof Error ? error.message : String(error));
     }
+  }
+
+  async function firstBlockAtOrAfter(timestampSeconds) {
+    if (!Number.isSafeInteger(timestampSeconds) || timestampSeconds <= 0) {
+      throw new EvidenceError("target_event_timestamp_invalid");
+    }
+    let low = 0n;
+    let high;
+    try {
+      high = await publicClient.getBlockNumber();
+    } catch (error) {
+      throw new EvidenceError("target_chain_head_unavailable", error instanceof Error ? error.message : String(error));
+    }
+    while (low < high) {
+      const middle = (low + high) / 2n;
+      let block;
+      try {
+        block = await publicClient.getBlock({ blockNumber: middle });
+      } catch (error) {
+        throw new EvidenceError("target_block_lookup_failed", error instanceof Error ? error.message : String(error));
+      }
+      if (block.timestamp < BigInt(timestampSeconds)) low = middle + 1n;
+      else high = middle;
+    }
+    return low;
+  }
+
+  async function estimateBlocksAtTimestamps(timestamps) {
+    const latestBlock = await publicClient.getBlock();
+    if (latestBlock.number === null) throw new EvidenceError("target_block_calibration_failed");
+    const latestNumber = latestBlock.number;
+    return {
+      latestNumber,
+      estimates: timestamps.map((timestampSeconds) => {
+        const ageSeconds = Number(latestBlock.timestamp) - timestampSeconds;
+        // X Layer currently advances one sequencer block per second. A bounded
+        // event scan verifies the estimate; the binary-search fallback preserves
+        // correctness if that cadence changes.
+        const offset = BigInt(Math.max(0, ageSeconds));
+        return offset < latestNumber ? latestNumber - offset : 0n;
+      }),
+    };
+  }
+
+  async function findEventNearBlock({ eventTopic, jobId, centerBlock, latest, radius = 8n }) {
+    const start = centerBlock > radius ? centerBlock - radius : 0n;
+    const end = centerBlock + radius < latest ? centerBlock + radius : latest;
+    const requests = [];
+    for (let fromBlock = start; fromBlock <= end; fromBlock += 100n) {
+      const toBlock = fromBlock + 99n < end ? fromBlock + 99n : end;
+      requests.push(publicClient.request({
+        method: "eth_getLogs",
+        params: [{
+          address: OKX_TASK.escrow,
+          fromBlock: toHex(fromBlock),
+          toBlock: toHex(toBlock),
+          topics: [eventTopic, jobId],
+        }],
+      }));
+    }
+    let matches;
+    try {
+      matches = (await Promise.all(requests)).flat();
+    } catch (error) {
+      throw new EvidenceError("target_event_lookup_failed", error instanceof Error ? error.message : String(error));
+    }
+    if (matches.length !== 1) {
+      throw new EvidenceError(matches.length ? "target_event_ambiguous" : "target_event_not_found");
+    }
+    return matches[0];
+  }
+
+  async function resolveTargetOrderEvidence({ jobId, createdAt, acceptedAt }) {
+    if (!isBytes32(jobId)) throw new EvidenceError("invalid_target_job_id");
+    const createdAtSeconds = Math.floor(Date.parse(createdAt) / 1000);
+    const acceptedAtSeconds = Math.floor(Date.parse(acceptedAt) / 1000);
+    if (!Number.isSafeInteger(createdAtSeconds) || !Number.isSafeInteger(acceptedAtSeconds)) {
+      throw new EvidenceError("target_event_timestamp_invalid");
+    }
+    if (acceptedAtSeconds < createdAtSeconds) {
+      throw new EvidenceError("target_event_timeline_invalid");
+    }
+
+    let calibration;
+    try {
+      calibration = await estimateBlocksAtTimestamps([createdAtSeconds, acceptedAtSeconds]);
+    } catch (error) {
+      if (error instanceof EvidenceError) throw error;
+      throw new EvidenceError("target_block_calibration_failed", error instanceof Error ? error.message : String(error));
+    }
+
+    async function resolveEvent(eventTopic, estimatedBlock, timestampSeconds) {
+      try {
+        return await findEventNearBlock({
+          eventTopic,
+          jobId,
+          centerBlock: estimatedBlock,
+          latest: calibration.latestNumber,
+        });
+      } catch (error) {
+        if (!(error instanceof EvidenceError) || error.code !== "target_event_not_found") throw error;
+        const exactBlock = await firstBlockAtOrAfter(timestampSeconds);
+        return findEventNearBlock({
+          eventTopic,
+          jobId,
+          centerBlock: exactBlock,
+          latest: calibration.latestNumber,
+        });
+      }
+    }
+
+    const [createdLog, acceptedLog] = await Promise.all([
+      resolveEvent(OKX_TASK.createdTopic, calibration.estimates[0], createdAtSeconds),
+      resolveEvent(OKX_TASK.acceptedTopic, calibration.estimates[1], acceptedAtSeconds),
+    ]);
+    if (createdLog.topics.length < 3) throw new EvidenceError("target_creation_evidence_missing");
+    return {
+      jobId,
+      buyer: topicAddress(createdLog.topics[2]),
+      creationTxHash: createdLog.transactionHash,
+      acceptanceTxHash: acceptedLog.transactionHash,
+      creationBlock: BigInt(createdLog.blockNumber).toString(),
+      acceptanceBlock: BigInt(acceptedLog.blockNumber).toString(),
+    };
   }
 
   async function verifyTargetOrder({
@@ -210,6 +335,7 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
   return {
     getJobStatus,
     getReserveBalance,
+    resolveTargetOrderEvidence,
     verifySettlement: ({ txHash, payer, amountAtomic }) => verifyTransfer({
       txHash,
       from: payer,

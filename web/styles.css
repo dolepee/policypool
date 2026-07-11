@@ -882,6 +882,194 @@ td.mono {
   pointer-events: none;
 }
 
+.cover-section {
+  scroll-margin-top: 88px;
+}
+
+.coverage-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+.coverage-form,
+.preflight-result {
+  min-height: 520px;
+}
+
+.coverage-form {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.coverage-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 0.55fr);
+  gap: var(--space-3) var(--space-4);
+}
+
+.coverage-form-grid .field-wide {
+  grid-column: 1 / -1;
+}
+
+.coverage-form-grid label {
+  align-content: start;
+  color: var(--text-primary);
+  font-size: var(--type-data-size);
+  font-weight: 600;
+}
+
+.coverage-form-grid input,
+.coverage-form-grid select {
+  min-height: 48px;
+}
+
+.coverage-form-grid [aria-invalid="true"] {
+  border-color: var(--risk);
+  box-shadow: 0 0 0 2px var(--risk-soft);
+}
+
+.field-help {
+  align-self: end;
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: var(--type-label-size);
+  line-height: 1.5;
+}
+
+.coverage-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  margin-top: var(--space-6);
+}
+
+.coverage-form-actions .fine-print {
+  max-width: 320px;
+}
+
+.coverage-form button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.form-status {
+  min-height: 24px;
+  margin: var(--space-3) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--type-data-size);
+}
+
+.form-status[data-state="success"] { color: var(--positive); }
+.form-status[data-state="error"] { color: var(--risk); }
+
+.preflight-result {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(145deg, rgba(124, 92, 255, 0.1), transparent 58%),
+    var(--card-fill);
+}
+
+.preflight-result::before {
+  content: "";
+  position: absolute;
+  inset: auto -120px -150px auto;
+  width: 320px;
+  height: 320px;
+  border: 1px solid rgba(124, 92, 255, 0.13);
+  border-radius: 50%;
+  box-shadow: 0 0 0 42px rgba(124, 92, 255, 0.025), 0 0 0 84px rgba(124, 92, 255, 0.015);
+  pointer-events: none;
+}
+
+.preflight-result > * {
+  position: relative;
+  z-index: 1;
+}
+
+.preflight-empty {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.preflight-empty h3 {
+  max-width: 520px;
+  margin-top: var(--space-3);
+  font-size: clamp(28px, 4vw, 48px);
+  line-height: 1.06;
+  letter-spacing: -0.035em;
+}
+
+.preflight-empty p,
+#preflight-summary {
+  max-width: 620px;
+  color: var(--text-secondary);
+}
+
+.preflight-checklist {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  padding: 0;
+  margin: var(--space-6) 0 0;
+  list-style: none;
+}
+
+.preflight-checklist li {
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-button);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-secondary);
+  font-size: var(--type-data-size);
+}
+
+.preflight-checklist li::before {
+  content: "+";
+  margin-right: var(--space-2);
+  color: var(--positive);
+}
+
+.preflight-kv {
+  margin: var(--space-5) 0;
+}
+
+.preflight-kv div {
+  grid-template-columns: 116px minmax(0, 1fr);
+}
+
+.preflight-kv dd {
+  overflow-wrap: anywhere;
+}
+
+.preflight-request-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.preflight-code {
+  max-height: 220px;
+  overflow: auto;
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-button);
+  background: var(--code-fill);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .reserve-total {
   display: grid;
   gap: var(--space-1);
@@ -978,6 +1166,15 @@ td.mono {
 }
 
 @media (max-width: 900px) {
+  .coverage-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .coverage-form,
+  .preflight-result {
+    min-height: 0;
+  }
+
   .coverage-runway,
   .proof-grid-four {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -993,6 +1190,19 @@ td.mono {
   .proof-grid-four,
   .foundation-band {
     grid-template-columns: 1fr;
+  }
+
+  .coverage-form-grid,
+  .preflight-checklist {
+    grid-template-columns: 1fr;
+  }
+
+  .coverage-form-grid .field-wide {
+    grid-column: auto;
+  }
+
+  .field-help {
+    margin-top: calc(var(--space-2) * -1);
   }
 
   .coverage-runway li {

@@ -45,6 +45,7 @@
           <span>PolicyPool</span>
         </a>
         <nav class="nav-links" aria-label="Primary">
+          <a href="#cover">Cover a job</a>
           <a href="#how">How it works</a>
           <a href="#ledger">Coverage ledger</a>
           <a href="#proof">Proof model</a>
@@ -52,7 +53,7 @@
         </nav>
         <div class="header-actions">
           <span class="chip chip-risk">X Layer</span>
-          <a class="button button-primary" href="/api/covered-job-receipt">Open API</a>
+          <a class="button button-primary" href="#cover">Check a job</a>
         </div>
       </div>
     </header>
@@ -71,7 +72,7 @@
                 The marketplace keeps its escrow and order lifecycle. PolicyPool adds a narrow software warranty credit backed by a public X Layer reserve. It does not rate subjective quality and it does not promise outcomes it cannot verify.
               </p>
               <div class="button-row" aria-label="Primary actions">
-                <a class="button button-primary" href="#how">Follow the money</a>
+                <a class="button button-primary" href="#cover">Cover a job</a>
                 <a class="button button-ghost" href="/api/coverage-ledger">Verify the ledger</a>
               </div>
               <div class="hero-rail" aria-label="Product facts">
@@ -112,6 +113,100 @@
               <p class="fine-print" id="ledger-updated">Reading the public reserve and durable covenant ledger.</p>
             </aside>
           </div>
+
+          <section class="section cover-section" id="cover" aria-labelledby="cover-title">
+            <div class="section-head section-head-row">
+              <div>
+                <span class="eyebrow">FREE COVERAGE PREFLIGHT</span>
+                <h2 id="cover-title">Paste the accepted job. PolicyPool finds the proof.</h2>
+              </div>
+              <span class="chip chip-positive">No charge to check</span>
+            </div>
+            <div class="coverage-workbench">
+              <form class="data-card coverage-form" id="coverage-preflight-form" novalidate>
+                <div class="coverage-form-grid">
+                  <label for="coverage-target">
+                    Target agent
+                    <select id="coverage-target" name="targetAgent" required aria-describedby="coverage-target-help">
+                      <option value="GlassDesk#3465">GlassDesk #3465</option>
+                      <option value="Foreman#4348">Foreman #4348</option>
+                    </select>
+                  </label>
+                  <p class="field-help" id="coverage-target-help">Coverage currently follows these published policy snapshots.</p>
+
+                  <label class="field-wide" for="coverage-task">
+                    Accepted OKX.AI task URL or public task ID
+                    <input
+                      id="coverage-task"
+                      name="taskReference"
+                      type="text"
+                      inputmode="url"
+                      autocomplete="off"
+                      placeholder="https://www.okx.ai/tasks/401277"
+                      required
+                      aria-describedby="coverage-task-help coverage-form-status"
+                    />
+                  </label>
+                  <p class="field-help field-wide" id="coverage-task-help">PolicyPool reads the public task page, then verifies its creation and acceptance events on X Layer.</p>
+
+                  <label for="coverage-cap">
+                    Requested cap in USDT
+                    <input
+                      id="coverage-cap"
+                      name="requestedCoverageUSDT"
+                      type="number"
+                      min="0.01"
+                      max="5"
+                      step="0.01"
+                      value="0.5"
+                      required
+                      aria-describedby="coverage-cap-help coverage-form-status"
+                    />
+                  </label>
+                  <p class="field-help" id="coverage-cap-help">The final cap cannot exceed the job value, registered maximum, or uncommitted reserve.</p>
+                </div>
+                <div class="coverage-form-actions">
+                  <button class="button button-primary" type="submit" id="coverage-submit">Check coverage</button>
+                  <span class="fine-print">No wallet signature. No reserve is committed at this stage.</span>
+                </div>
+                <p class="form-status" id="coverage-form-status" role="status" aria-live="polite"></p>
+              </form>
+
+              <aside class="data-card preflight-result" id="coverage-preflight-result" aria-label="Coverage preflight result">
+                <div class="preflight-empty" id="preflight-empty">
+                  <span class="eyebrow">WHAT GETS CHECKED</span>
+                  <h3>Task, policy, clock, and reserve.</h3>
+                  <p>PolicyPool will recover the onchain job ID and transaction hashes, bind the target provider and buyer, check the registered SLA, and calculate the currently supportable cap.</p>
+                  <ul class="preflight-checklist">
+                    <li>Accepted task state</li>
+                    <li>Published target policy</li>
+                    <li>Buyer and provider binding</li>
+                    <li>Uncommitted reserve capacity</li>
+                  </ul>
+                </div>
+                <div id="preflight-output" hidden>
+                  <div class="card-head">
+                    <div>
+                      <span class="eyebrow">PREFLIGHT VERDICT</span>
+                      <h3 id="preflight-verdict">--</h3>
+                    </div>
+                    <span class="chip chip-neutral" id="preflight-chip">Checked</span>
+                  </div>
+                  <p id="preflight-summary"></p>
+                  <dl class="proof-kv preflight-kv" id="preflight-kv"></dl>
+                  <div id="preflight-paid-request" hidden>
+                    <div class="preflight-request-head">
+                      <span class="eyebrow">VERIFIED PAID REQUEST</span>
+                      <button class="button button-ghost button-small" type="button" id="copy-coverage-request">Copy JSON</button>
+                    </div>
+                    <pre class="preflight-code"><code id="coverage-request-json"></code></pre>
+                    <p class="fine-print">Purchase through the listed PolicyPool service using the target job's buyer wallet. Settlement rechecks reserve capacity atomically.</p>
+                    <a class="button button-primary" href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">Open PolicyPool on OKX.AI</a>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </section>
 
           <section class="section" id="how" aria-labelledby="how-title">
             <div class="section-head section-head-row">

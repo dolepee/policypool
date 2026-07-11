@@ -12,6 +12,7 @@ PolicyPool does not rate subjective quality, accept caller-supplied policy overr
 
 **Live surfaces:**
 [Agent Coverage](https://policypool.vercel.app) ·
+[Free coverage preflight](https://policypool.vercel.app/api/coverage-preflight) ·
 [Paid API](https://policypool.vercel.app/api/covered-job-receipt) ·
 [Coverage ledger](https://policypool.vercel.app/api/coverage-ledger) ·
 [OKX.AI Agent #4674](https://okx.ai) ·
@@ -20,7 +21,7 @@ PolicyPool does not rate subjective quality, accept caller-supplied policy overr
 ## Agent Coverage Loop
 
 1. The target agent must have a versioned policy snapshot in `api/lib/policy-registry.js`.
-2. The caller supplies the accepted OKX.AI job ID plus its X Layer creation and acceptance transactions.
+2. The free preflight accepts an OKX.AI task URL or public task ID, reads the public task state, and resolves its onchain job ID plus creation and acceptance transactions. Advanced callers may supply the resolved evidence directly to the paid endpoint.
 3. `api/lib/chain.js` verifies both transactions against the public task escrow and binds buyer, job, provider wallet, agent ID, token, paid amount, service type, and the exact accepted-service hash. The coverage payer must own the target job.
 4. A valid signed service payment is verified and settled. The resulting token `Transfer` is read back from X Layer before the API returns success.
 5. The durable ledger atomically checks that active, pending, and payout-due liabilities plus the new cap do not exceed the live reserve.
@@ -53,6 +54,8 @@ npm run agent:gate
 
 `agent:gate` runs syntax checks, adversarial payment/accounting tests, a live X Layer acceptance-proof replay, the chat safety probe, and the web build.
 
+The coverage preflight is free and read-only. It never reserves capacity or signs a payment. A green result assembles the exact body for the listed paid service; the paid request must come from the target job's verified buyer wallet, and settlement atomically rechecks reserve capacity.
+
 ```bash
 npm run agent:verify-live
 ```
@@ -65,16 +68,19 @@ Required production configuration is documented in `.env.example`. The paid rout
 
 ```text
 api/covered-job-receipt.js       # paid guard + coverage decision
+api/coverage-preflight.js        # free OKX task URL resolver + eligibility check
 api/coverage-ledger.js           # public reserve and liability ledger
 api/coverage-status.js           # one receipt plus live target-job status
 api/reconcile-coverage.js        # authenticated objective-state reconciler
 api/record-payout.js             # authenticated payout transaction verifier
 api/lib/payment.js               # official x402 decode, verify, settle, transfer proof
 api/lib/chain.js                 # OKX task and token evidence on X Layer
+api/lib/okx-task-page.js         # strict public OKX task-page parser
 api/lib/ledger.js                # atomic durable liability accounting
 api/lib/policy-registry.js       # versioned server-owned policy snapshots
 scripts/verify-agent-api.mjs     # adversarial unit/integration gate
 scripts/verify-okx-task-evidence.mjs # real OKX acceptance proof replay
+scripts/verify-coverage-preflight.mjs # preflight parser, eligibility, and request tests
 web/agent.html                   # current agent-coverage product surface
 ```
 
