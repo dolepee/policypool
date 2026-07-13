@@ -1,47 +1,59 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0a0a10"/>
-      <stop offset="0.58" stop-color="#12101c"/>
-      <stop offset="1" stop-color="#19132a"/>
+      <stop offset="0" stop-color="#090a0d"/>
+      <stop offset="0.62" stop-color="#111318"/>
+      <stop offset="1" stop-color="#18142a"/>
     </linearGradient>
-    <radialGradient id="glow" cx="0.8" cy="0.2" r="0.7">
-      <stop offset="0" stop-color="#7c5cff" stop-opacity="0.35"/>
-      <stop offset="1" stop-color="#7c5cff" stop-opacity="0"/>
+    <radialGradient id="glow" cx="0.84" cy="0.12" r="0.72">
+      <stop offset="0" stop-color="#8b6bff" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#8b6bff" stop-opacity="0"/>
     </radialGradient>
-    <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
-      <feDropShadow dx="0" dy="18" stdDeviation="28" flood-color="#000" flood-opacity="0.35"/>
-    </filter>
+    <pattern id="grid" width="52" height="52" patternUnits="userSpaceOnUse">
+      <path d="M52 0H0V52" fill="none" stroke="#f1f3ee" stroke-opacity="0.035"/>
+    </pattern>
   </defs>
+
   <rect width="1200" height="630" fill="url(#bg)"/>
   <rect width="1200" height="630" fill="url(#glow)"/>
-  <g opacity="0.14" stroke="#9e8cff" fill="none">
-    <circle cx="1060" cy="84" r="120"/>
-    <circle cx="1060" cy="84" r="170"/>
-    <circle cx="1060" cy="84" r="220"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+
+  <g opacity="0.15" stroke="#c7ff62" fill="none">
+    <circle cx="1080" cy="48" r="120"/>
+    <circle cx="1080" cy="48" r="178"/>
+    <circle cx="1080" cy="48" r="236"/>
   </g>
-  <g transform="translate(66 56)">
-    <rect width="52" height="52" rx="14" fill="#7c5cff"/>
-    <path d="M14 26h24M26 14v24" stroke="#fff" stroke-width="5" stroke-linecap="round" opacity="0.95"/>
-    <text x="70" y="36" fill="#f4f1ff" font-family="Manrope, sans-serif" font-size="27" font-weight="800">PolicyPool</text>
-    <text x="1018" y="32" text-anchor="end" fill="#b8afcc" font-family="IBM Plex Mono, monospace" font-size="15">X LAYER / AGENT #4674</text>
+
+  <g transform="translate(66 54)">
+    <rect width="48" height="48" rx="12" fill="#171321" stroke="#c7ff62" stroke-opacity="0.22"/>
+    <path d="M24 8 37 13v11c0 9-5 16-13 21-8-5-13-12-13-21V13L24 8Z" fill="#8b6bff"/>
+    <path d="M15 25h18" stroke="#c7ff62" stroke-width="4"/>
+    <circle cx="24" cy="25" r="7" fill="#171321" stroke="#c7ff62" stroke-width="4"/>
+    <text x="66" y="33" fill="#f1f3ee" font-family="Manrope, sans-serif" font-size="26" font-weight="800">PolicyPool</text>
+    <circle cx="879" cy="23" r="4" fill="#59e3a2"/>
+    <text x="1068" y="29" text-anchor="end" fill="#a4aaa2" font-family="IBM Plex Mono, monospace" font-size="14">LIVE / OKX.AI #4674 / X LAYER</text>
   </g>
-  <g transform="translate(66 170)">
-    <text fill="#a99afc" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="600" letter-spacing="2">MONEY-BACKED AGENT POLICIES</text>
-    <text y="82" fill="#f5f2ff" font-family="Manrope, sans-serif" font-size="72" font-weight="800" letter-spacing="-4">Agent work.</text>
-    <text y="158" fill="#f5f2ff" font-family="Manrope, sans-serif" font-size="72" font-weight="800" letter-spacing="-4">Deadline on the line.</text>
-    <text y="212" fill="#a7a1b5" font-family="Manrope, sans-serif" font-size="22">Verify the order. Reserve the cap. Receipt the outcome.</text>
+
+  <g transform="translate(66 162)">
+    <text fill="#c7ff62" font-family="IBM Plex Mono, monospace" font-size="14" font-weight="600" letter-spacing="2">FUNDED COVERAGE FOR AGENT WORK</text>
+    <text y="91" fill="#f1f3ee" font-family="Manrope, sans-serif" font-size="86" font-weight="800" letter-spacing="-5">Agent work,</text>
+    <text y="177" fill="#c7ff62" font-family="Manrope, sans-serif" font-size="86" font-weight="800" letter-spacing="-5">now coverable.</text>
+    <text y="229" fill="#a4aaa2" font-family="Manrope, sans-serif" font-size="21">Accepted order. Bounded cap. Public reserve. Receipted outcome.</text>
   </g>
-  <g transform="translate(66 482)" filter="url(#shadow)">
-    <rect width="1068" height="94" rx="18" fill="#151421" stroke="#302b46"/>
-    <g transform="translate(28 23)" font-family="IBM Plex Mono, monospace" font-size="13">
-      <text fill="#7d758e">01 / JOB</text><text y="28" fill="#f0edf8">accepted onchain</text>
-      <path d="M188 24h52" stroke="#4d4564" stroke-width="2"/>
-      <text x="264" fill="#7d758e">02 / POLICY</text><text x="264" y="28" fill="#f0edf8">registered snapshot</text>
-      <path d="M472 24h52" stroke="#4d4564" stroke-width="2"/>
-      <text x="548" fill="#7d758e">03 / RESERVE</text><text x="548" y="28" fill="#2bd48a">capacity locked</text>
-      <path d="M762 24h52" stroke="#4d4564" stroke-width="2"/>
-      <text x="838" fill="#7d758e">04 / RECEIPT</text><text x="838" y="28" fill="#f0b43c">due or released</text>
+
+  <g transform="translate(66 478)">
+    <rect width="522" height="96" rx="18" fill="#101513" stroke="#59e3a2" stroke-opacity="0.24"/>
+    <circle cx="42" cy="48" r="18" fill="#59e3a2" fill-opacity="0.12"/>
+    <path d="m35 51 6 6 10-16" fill="none" stroke="#59e3a2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="76" y="39" fill="#737a72" font-family="IBM Plex Mono, monospace" font-size="12">DELIVERED ON TIME</text>
+    <text x="76" y="66" fill="#f1f3ee" font-family="Manrope, sans-serif" font-size="20" font-weight="700">Capacity returns to the pool.</text>
+
+    <g transform="translate(546)">
+      <rect width="522" height="96" rx="18" fill="#17130f" stroke="#ffbd6b" stroke-opacity="0.24"/>
+      <circle cx="42" cy="48" r="18" fill="#ffbd6b" fill-opacity="0.12"/>
+      <path d="M42 36v18m-6-6 6 6 6-6" fill="none" stroke="#ffbd6b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="76" y="39" fill="#737a72" font-family="IBM Plex Mono, monospace" font-size="12">DEADLINE MISSED</text>
+      <text x="76" y="66" fill="#f1f3ee" font-family="Manrope, sans-serif" font-size="20" font-weight="700">The reserve pays the buyer.</text>
     </g>
   </g>
 </svg>

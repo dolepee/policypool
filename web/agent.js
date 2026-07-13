@@ -14,7 +14,7 @@ function amount(value) {
 }
 
 function stateChip(state) {
-  if (state === "active" || state === "paid") return "chip-positive";
+  if (state === "active" || state === "paid" || state === "released") return "chip-positive";
   if (state === "payout_due" || state === "pending") return "chip-risk";
   return "chip-neutral";
 }
@@ -99,6 +99,7 @@ function showPreflightResult(data) {
     { label: "Task", value: data.task.title, href: data.task.publicUrl },
     { label: "Target", value: `${data.policy.agentName} #${data.policy.agentId}` },
     { label: "Coverage cap", value: `${data.coverage.capUSDT} USDT` },
+    { label: "Service fee", value: "1 USDT" },
     { label: "Deadline", value: new Date(data.coverage.deadline).toLocaleString() },
     { label: "Reserve free", value: `${data.coverage.availableUSDT} USDT` },
     {
@@ -179,6 +180,50 @@ function bindCoveragePreflight() {
   });
 }
 
+function bindMobileNavigation() {
+  const menu = document.querySelector(".mobile-nav");
+  if (!menu) return;
+  menu.querySelectorAll("a").forEach((link) => {
+    link.addEventListener("click", () => {
+      menu.open = false;
+    });
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") menu.open = false;
+  });
+}
+
+function renderOutcomeProofs(records) {
+  const released = records.find((record) => record.state === "released");
+  const paid = records.find((record) => record.state === "paid" && record.payoutTx);
+
+  if (released) {
+    document.querySelector("#success-state").textContent = "Released";
+    document.querySelector("#success-amount").textContent = `${amount(released.liabilityUSDT)} USDT0`;
+    const receipt = document.querySelector("#success-receipt-link");
+    receipt.href = `/api/coverage-status?receiptId=${encodeURIComponent(released.receiptId)}`;
+    receipt.textContent = short(released.receiptId, 10, 5);
+  } else {
+    document.querySelector("#success-state").textContent = "Awaiting proof";
+    document.querySelector("#success-amount").textContent = "--";
+    document.querySelector("#success-receipt-link").textContent = "No released receipt";
+  }
+
+  if (paid) {
+    document.querySelector("#breach-state").textContent = "Paid";
+    document.querySelector("#breach-amount").textContent = `${amount(paid.liabilityUSDT)} USDT0`;
+    const payout = document.querySelector("#breach-payout-link");
+    payout.href = `${EXPLORER_TX}${paid.payoutTx}`;
+    payout.target = "_blank";
+    payout.rel = "noreferrer";
+    payout.textContent = short(paid.payoutTx);
+  } else {
+    document.querySelector("#breach-state").textContent = "No payout yet";
+    document.querySelector("#breach-amount").textContent = "--";
+    document.querySelector("#breach-payout-link").textContent = "No paid receipt";
+  }
+}
+
 function renderRows(records) {
   const host = document.querySelector("#coverage-rows");
   if (!host) return;
@@ -210,6 +255,11 @@ async function hydrateCoverage() {
     document.querySelector("#reserve-available").textContent = amount(
       Number(data.reserve.availableAtomic) / 10 ** data.asset.decimals,
     );
+    const balanceAtomic = Number(data.reserve.balanceAtomic || 0);
+    const availableAtomic = Number(data.reserve.availableAtomic || 0);
+    const availablePercent = balanceAtomic > 0 ? Math.max(0, Math.min(100, (availableAtomic / balanceAtomic) * 100)) : 0;
+    document.querySelector("#reserve-meter-bar").style.width = `${availablePercent}%`;
+    document.querySelector("#reserve-meter-label").textContent = `${amount(availablePercent)}% free`;
     document.querySelector("#reserve-balance").textContent = `${amount(data.reserve.balanceUSDT)} USDT0`;
     document.querySelector("#reserve-committed").textContent = `${amount(data.reserve.committedUSDT)} USDT0`;
     document.querySelector("#coverage-count").textContent = String(data.liabilities.recordCount);
@@ -219,11 +269,19 @@ async function hydrateCoverage() {
     document.querySelector("#ledger-updated").textContent = `Live read ${new Date(data.generatedAt).toLocaleString()}. No cached fallback.`;
     health.textContent = data.reserve.solvent ? "Solvent" : "Overcommitted";
     health.className = `chip ${data.reserve.solvent ? "chip-positive" : "chip-risk"}`;
-    renderRows(data.records || []);
+    const records = data.records || [];
+    renderRows(records);
+    renderOutcomeProofs(records);
   } catch (error) {
     health.textContent = "Unavailable";
     health.className = "chip chip-risk";
+    document.querySelector("#reserve-meter-bar").style.width = "0%";
+    document.querySelector("#reserve-meter-label").textContent = "Unavailable";
     document.querySelector("#ledger-updated").textContent = "Live ledger unavailable. No fallback numbers are being shown.";
+    document.querySelector("#success-state").textContent = "Unavailable";
+    document.querySelector("#success-receipt-link").textContent = "Live proof unavailable";
+    document.querySelector("#breach-state").textContent = "Unavailable";
+    document.querySelector("#breach-payout-link").textContent = "Live proof unavailable";
     const rows = document.querySelector("#coverage-rows");
     if (rows) rows.innerHTML = `<tr><td colspan="5">Live proof unavailable: ${error.message}</td></tr>`;
   }
@@ -231,3 +289,4 @@ async function hydrateCoverage() {
 
 hydrateCoverage();
 bindCoveragePreflight();
+bindMobileNavigation();
