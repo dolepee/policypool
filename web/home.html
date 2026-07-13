@@ -57,7 +57,7 @@
     </header>
 
     <div class="system-strip" aria-label="Live PolicyPool operating status">
-      <div class="site-shell system-strip-track" aria-live="polite">
+      <div class="site-shell system-strip-track" aria-live="polite" aria-busy="true">
         <div class="system-strip-state"><i aria-hidden="true"></i><span data-solvency>Reading</span><small>system</small></div>
         <div class="system-strip-item"><span>Network</span><b>X Layer</b></div>
         <div class="system-strip-item"><span>Available reserve</span><b><span data-reserve-available>—</span> USD₮0</b></div>
@@ -97,7 +97,8 @@
             <div class="waterline" aria-hidden="true"><span data-reserve-waterline></span></div>
             <dl class="poster-ledger">
               <div><dt>Committed now</dt><dd><span data-reserve-committed>—</span> USD₮0</dd></div>
-              <div><dt>Closed receipts</dt><dd data-record-count>—</dd></div>
+              <div><dt>Public receipts</dt><dd data-record-count>—</dd></div>
+              <div><dt>Latest close</dt><dd><a data-latest-outcome href="/proof">Reading…</a></dd></div>
               <div><dt>Reserve wallet</dt><dd><a data-reserve-link href="https://www.oklink.com/x-layer/address/0xe2f0c858724a9a72310d7264400e04b37423fbbc" target="_blank" rel="noreferrer">0xE2F0…FBBC</a></dd></div>
             </dl>
             <p data-ledger-updated>Reading directly from the public ledger.</p>
@@ -114,12 +115,17 @@
             </div>
             <p>No vague score and no UI-only badge. Capacity returns when the provider delivers, or bounded funds move when the covered deadline is missed.</p>
           </div>
-          <div class="outcome-grid" data-home-outcomes>
+          <div class="outcome-grid" data-home-outcomes aria-live="polite">
             <article class="outcome-ticket outcome-released">
               <div class="ticket-edge" aria-hidden="true"></div>
               <span class="ticket-state">Released</span>
               <h3>Work delivered.<br />Capacity returns.</h3>
               <p>The covenant closes without a payout and the reserved cap becomes available again.</p>
+              <dl class="outcome-proof" aria-label="Latest released covenant details">
+                <div><dt>Provider</dt><dd data-outcome-provider="released">—</dd></div>
+                <div><dt>Cap</dt><dd data-outcome-cap="released">—</dd></div>
+                <div><dt>Finalized</dt><dd data-outcome-finalized="released">—</dd></div>
+              </dl>
               <a data-outcome-link="released" href="/ledger">Reading released receipt…</a>
             </article>
             <article class="outcome-ticket outcome-paid">
@@ -127,6 +133,11 @@
               <span class="ticket-state">Paid</span>
               <h3>Deadline missed.<br />Buyer gets paid.</h3>
               <p>The reserve transfer must match the buyer, asset, and bounded amount before the receipt says paid.</p>
+              <dl class="outcome-proof" aria-label="Latest paid covenant details">
+                <div><dt>Provider</dt><dd data-outcome-provider="paid">—</dd></div>
+                <div><dt>Cap</dt><dd data-outcome-cap="paid">—</dd></div>
+                <div><dt>Finalized</dt><dd data-outcome-finalized="paid">—</dd></div>
+              </dl>
               <a data-outcome-link="paid" href="/proof">Reading payout receipt…</a>
             </article>
           </div>

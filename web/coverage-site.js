@@ -47,6 +47,20 @@ function setLink(node, href, text, external = false) {
   }
 }
 
+function setLiveBusy(busy) {
+  document.querySelectorAll(".system-strip-track").forEach((node) => {
+    node.setAttribute("aria-busy", String(busy));
+  });
+}
+
+function disableLink(node, text) {
+  if (!node) return;
+  node.removeAttribute("href");
+  node.removeAttribute("target");
+  node.removeAttribute("rel");
+  if (text) node.textContent = text;
+}
+
 function bindMobileNavigation() {
   const menu = document.querySelector(".mobile-nav");
   if (!menu) return;
@@ -83,6 +97,7 @@ function updateReserveSurface(data) {
   document.querySelectorAll("[data-reserve-link]").forEach((node) => {
     setLink(node, `${EXPLORER_ADDRESS}${data.reserve.wallet}`, short(data.reserve.wallet), true);
   });
+  setLiveBusy(false);
 }
 
 function setLedgerUnavailable(message) {
@@ -90,6 +105,12 @@ function setLedgerUnavailable(message) {
   setText("[data-reserve-balance]", "—");
   setText("[data-reserve-committed]", "—");
   setText("[data-record-count]", "—");
+  setText("[data-latest-outcome]", "Unavailable");
+  setText("[data-outcome-provider]", "—");
+  setText("[data-outcome-cap]", "—");
+  setText("[data-outcome-finalized]", "—");
+  disableLink(document.querySelector("[data-latest-outcome]"), "Unavailable");
+  document.querySelectorAll("[data-outcome-link]").forEach((node) => disableLink(node, "Live receipt unavailable"));
   setText("[data-ledger-updated]", `Live ledger unavailable. ${message}`);
   document.querySelectorAll("[data-solvency]").forEach((node) => {
     node.textContent = "Unavailable";
@@ -99,6 +120,7 @@ function setLedgerUnavailable(message) {
     stripState?.classList.remove("is-positive");
     stripState?.classList.add("is-risk");
   });
+  setLiveBusy(false);
 }
 
 function initScrollReveals() {
@@ -137,17 +159,39 @@ function initScrollReveals() {
 }
 
 function renderHomeOutcomes(records) {
+  const finalized = [...records]
+    .filter((record) => record.finalizedAt)
+    .sort((left, right) => new Date(right.finalizedAt).getTime() - new Date(left.finalizedAt).getTime());
+  const latest = finalized[0];
+  const latestLink = document.querySelector("[data-latest-outcome]");
+  if (latest && latestLink) {
+    const label = latest.state.charAt(0).toUpperCase() + latest.state.slice(1);
+    setLink(latestLink, `/proof?state=${latest.state}`, `${label} · ${amount(latest.liabilityUSDT)} USD₮0`);
+  } else if (latestLink) {
+    latestLink.textContent = "No closed receipt";
+    latestLink.removeAttribute("href");
+  }
+
   for (const state of ["released", "paid"]) {
-    const record = records.find((item) => item.state === state && (state !== "paid" || item.payoutTx));
+    const record = finalized.find((item) => item.state === state && (state !== "paid" || item.payoutTx));
     const link = document.querySelector(`[data-outcome-link="${state}"]`);
-    if (!link) continue;
     if (!record) {
-      link.textContent = "No live receipt available";
-      link.removeAttribute("href");
+      if (link) {
+        link.textContent = "No live receipt available";
+        link.removeAttribute("href");
+      }
+      setText(`[data-outcome-provider="${state}"]`, "—");
+      setText(`[data-outcome-cap="${state}"]`, "—");
+      setText(`[data-outcome-finalized="${state}"]`, "—");
       continue;
     }
-    link.href = `/proof?state=${state}`;
-    link.textContent = `${record.receiptId} →`;
+    if (link) {
+      link.href = `/proof?state=${state}`;
+      link.textContent = `${record.receiptId} →`;
+    }
+    setText(`[data-outcome-provider="${state}"]`, `${providerNames.get(String(record.targetAgentId)) || "Agent"} #${record.targetAgentId}`);
+    setText(`[data-outcome-cap="${state}"]`, `${amount(record.liabilityUSDT)} USD₮0`);
+    setText(`[data-outcome-finalized="${state}"]`, dateTime(record.finalizedAt));
   }
 }
 
@@ -254,13 +298,17 @@ async function fetchStatus(record) {
 }
 
 function proofLink(node, transaction, fallbackHref, fallbackText) {
+  if (!node) return;
   const code = node?.querySelector("code");
   if (transaction) {
     setLink(node, `${EXPLORER_TX}${transaction}`, undefined, true);
     if (code) code.textContent = short(transaction, 10, 8);
-  } else {
+  } else if (fallbackHref) {
     setLink(node, fallbackHref, undefined, false);
     if (code) code.textContent = fallbackText;
+  } else {
+    disableLink(node);
+    if (code) code.textContent = "Unavailable";
   }
 }
 
@@ -301,8 +349,18 @@ function renderProof({ status, record }) {
 function setProofUnavailable(message) {
   setText("#proof-receipt-id", "Live proof unavailable");
   setText("#proof-state", "Unavailable");
+  setText("#proof-final-step", "Unavailable");
+  setText("#proof-target", "—");
+  setText("#proof-service", "—");
+  setText("#proof-cap", "—");
+  setText("#proof-accepted", "—");
+  setText("#proof-deadline", "—");
+  setText("#proof-receipt-hash", "—");
   setText("#proof-outcome", "No fallback proof shown");
   setText("#proof-outcome-note", message);
+  for (const selector of ["#proof-creation-link", "#proof-acceptance-link", "#proof-service-link", "#proof-outcome-link"]) {
+    proofLink(document.querySelector(selector));
+  }
 }
 
 async function hydrateProof(records) {
@@ -424,6 +482,15 @@ function showPreflightResult(data) {
   document.querySelector("#coverage-request-json").textContent = JSON.stringify(data.paidRequest, null, 2);
 }
 
+function revealPreflightResult() {
+  if (!window.matchMedia("(max-width: 1040px)").matches) return;
+  const result = document.querySelector("#coverage-preflight-result");
+  if (!result) return;
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  result.focus({ preventScroll: true });
+  result.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+}
+
 function bindCoveragePreflight() {
   const form = document.querySelector("#coverage-preflight-form");
   if (!form) return;
@@ -462,6 +529,7 @@ function bindCoveragePreflight() {
       }
       showPreflightResult(data);
       setPreflightStatus(data.eligible ? "Preflight passed. Review the verified paid request." : "Preflight completed without charge.", data.eligible ? "success" : "error");
+      revealPreflightResult();
     } catch (error) {
       setPreflightStatus(error instanceof Error ? error.message : "Coverage preflight failed.", "error");
     } finally {
