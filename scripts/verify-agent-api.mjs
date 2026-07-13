@@ -134,7 +134,7 @@ assert.equal(unpaid.statusCode, 402, "unpaid request must return 402");
 const challenge = decodePaymentRequired(unpaid.headers["payment-required"]);
 assert.equal(challenge.x402Version, 2);
 assert.equal(challenge.accepts[0].network, "eip155:196");
-assert.equal(challenge.accepts[0].amount, "1000000");
+assert.equal(challenge.accepts[0].amount, "100000");
 assert.equal(challenge.accepts[0].extra.name, "USD₮0");
 assert.equal(challenge.accepts[0].extra.version, "1");
 assert.ok(challenge.outputSchema.input.body.required.includes("targetAcceptanceTxHash"));

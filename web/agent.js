@@ -33,7 +33,7 @@ const PREFLIGHT_REASONS = {
   okx_task_host_not_allowed: "Only public task links from okx.ai can be checked.",
   okx_task_url_invalid: "This is not a recognized OKX.AI task URL.",
   registered_policy_sla_already_elapsed: "The registered coverage window has already elapsed.",
-  requested_coverage_below_minimum: "Request at least 0.01 USDT of coverage.",
+  requested_coverage_below_minimum: "Request at least 1 USDT of coverage.",
   target_policy_not_registered: "PolicyPool does not yet have a published policy snapshot for this target.",
 };
 
@@ -106,7 +106,7 @@ function showPreflightResult(data) {
     { label: "Task", value: data.task.title, href: data.task.publicUrl },
     { label: "Target", value: `${data.policy.agentName} #${data.policy.agentId}` },
     { label: "Coverage cap", value: `${data.coverage.capUSDT} USDT` },
-    { label: "Service fee", value: "1 USDT" },
+    { label: "Service fee", value: `${data.coverage.serviceFeeUSDT} USDT` },
     { label: "Deadline", value: new Date(data.coverage.deadline).toLocaleString() },
     { label: "Reserve free", value: `${data.coverage.availableUSDT} USDT` },
     {

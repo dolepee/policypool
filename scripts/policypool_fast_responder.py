@@ -211,7 +211,7 @@ def build_reply(content: str, session_key: str, state: dict) -> str:
     text = content.lower()
     if any(term in text for term in MENU_TERMS):
         return (
-            f"{AGENT_NAME} offers one API service: {SERVICE_NAME} (1 USDT at {ENDPOINT}). "
+            f"{AGENT_NAME} offers one API service: {SERVICE_NAME} (0.1 USDT at {ENDPOINT}). "
             "Send the registered target agent/service, accepted OKX.AI job id, X Layer creation and acceptance transactions, "
             "job description, and requested coverage cap. The deadline comes from the registered target policy. "
             "Chat returns a non-binding preflight; only the paid endpoint can issue reserve-backed coverage."

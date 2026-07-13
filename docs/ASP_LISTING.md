@@ -16,7 +16,7 @@ Name: Covered Job Receipt
 
 Type: API service
 
-Fee: 1 USDT
+Fee: 0.1 USDT
 
 Endpoint: `https://policypool.vercel.app/api/covered-job-receipt`
 

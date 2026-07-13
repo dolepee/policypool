@@ -42,7 +42,7 @@ assert.ok(required, "missing PAYMENT-REQUIRED header");
 const challenge = JSON.parse(Buffer.from(required, "base64").toString("utf8"));
 assert.equal(challenge.x402Version, 2);
 assert.equal(challenge.accepts[0].network, "eip155:196");
-assert.equal(challenge.accepts[0].amount, "1000000");
+assert.equal(challenge.accepts[0].amount, "100000");
 const maybeField = (name, expected) => {
   const v = challenge.accepts[0][name];
   if (typeof v !== "undefined") {
@@ -50,7 +50,7 @@ const maybeField = (name, expected) => {
   }
 };
 
-maybeField("maxAmountRequired", "1000000");
+maybeField("maxAmountRequired", "100000");
 maybeField("decimals", 6);
 maybeField("symbol", "USDT");
 assert.equal(
