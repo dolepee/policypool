@@ -384,6 +384,14 @@ export function createHandler(dependencies = {}) {
 
     const input = readInput(req);
     let guard = evaluateGuard(input, policy);
+    if (guard.verdict === "BLOCK" && guard.reason === "requested_coverage_below_minimum") {
+      return sendJson(res, 400, {
+        ok: false,
+        error: guard.reason,
+        charged: false,
+        minimumCoverageUSDT: formatUsdtAtomic(BigInt(COVERAGE.minAtomic), PAYMENT.decimals),
+      });
+    }
     let targetOrder = null;
     let reserveBalanceAtomic;
     let coverageCapAtomic = 0n;

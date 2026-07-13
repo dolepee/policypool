@@ -33,7 +33,7 @@ const PREFLIGHT_REASONS = {
   okx_task_host_not_allowed: "Only public task links from okx.ai can be checked.",
   okx_task_url_invalid: "This is not a recognized OKX.AI task URL.",
   registered_policy_sla_already_elapsed: "The registered coverage window has already elapsed.",
-  requested_coverage_below_minimum: "Request at least 1 USDT of coverage.",
+  requested_coverage_below_minimum: "Request at least 0.5 USDT of coverage.",
   target_policy_not_registered: "PolicyPool does not yet have a published policy snapshot for this target.",
 };
 

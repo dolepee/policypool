@@ -72,8 +72,8 @@
               </div>
               <div class="field-block">
                 <label for="coverage-cap">Requested coverage cap</label>
-                <div class="amount-input"><input id="coverage-cap" name="requestedCoverageUSDT" type="number" min="1" max="5" step="0.01" value="1" required aria-describedby="coverage-cap-help coverage-form-status" /><span>USD₮0</span></div>
-                <p id="coverage-cap-help">Minimum 1 USD₮0; further bounded by job value, provider policy, and reserve.</p>
+                <div class="amount-input"><input id="coverage-cap" name="requestedCoverageUSDT" type="number" min="0.5" max="5" step="0.01" value="0.5" required aria-describedby="coverage-cap-help coverage-form-status" /><span>USD₮0</span></div>
+                <p id="coverage-cap-help">Minimum 0.5 USD₮0; further bounded by job value, provider policy, and reserve.</p>
               </div>
               <div class="field-block field-wide">
                 <label for="coverage-task">Accepted OKX.AI task URL or public task ID</label>
@@ -90,7 +90,7 @@
             <div class="decision-empty" id="preflight-empty">
               <div class="decision-seal" aria-hidden="true">?</div>
               <h3>No job checked yet.</h3>
-              <p>A valid request must pass all four gates. Missing or contradictory evidence is declined before payment.</p>
+              <p>A valid request must pass all four gates. Free preflight declines missing or contradictory evidence without payment.</p>
               <ol><li><span>1</span>Accepted task state</li><li><span>2</span>Published provider policy</li><li><span>3</span>Buyer and provider binding</li><li><span>4</span>Uncommitted reserve</li></ol>
             </div>
             <div class="decision-output" id="preflight-output" hidden>
@@ -112,7 +112,7 @@
         <div class="site-shell notes-grid">
           <article><span>What is covered</span><h3>One objective deadline.</h3><p>The current rule is narrow: an accepted job remains undelivered after the deadline derived from the registered policy.</p></article>
           <article><span>What is not covered</span><h3>Quality opinions and buyer regret.</h3><p>PolicyPool does not judge creative quality, investment outcomes, subjective satisfaction, or caller-supplied policy changes.</p></article>
-          <article><span>Why preflight is free</span><h3>Unsupported work should fail before payment.</h3><p>The paid service is for issuing a valid covenant, not charging users to discover that their job is unsupported.</p></article>
+          <article><span>Why preflight is free</span><h3>Check support before payment.</h3><p>Preflight catches unsupported work for free. The paid verifier issues a covenant or a chain-verified declined receipt.</p></article>
         </div>
       </section>
     </main>

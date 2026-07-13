@@ -408,7 +408,7 @@ function preflightReason(reason) {
     target_job_target_mismatch: "The accepted task does not match the selected provider.",
     target_job_buyer_mismatch: "Coverage must be purchased by the target-job buyer.",
     target_service_not_verified: "The accepted service could not be bound to the registered policy.",
-    requested_coverage_below_minimum: "Request at least 1 USD₮0 of coverage. No payment was requested.",
+    requested_coverage_below_minimum: "Request at least 0.5 USD₮0 of coverage. No payment was requested.",
     requested_coverage_exceeds_job_value: "The requested cap exceeds the verified target-job value.",
     reserve_capacity_exceeded: "The public reserve cannot support that cap right now.",
     coverage_already_exists: "That target job already has a covenant record.",

@@ -42,6 +42,7 @@ function makeRuntime({
   targetError,
   settlementFails = false,
   jobStatus = 1,
+  targetAmountAtomic = "5000000",
   createdAt = "2026-07-10T09:57:00.000Z",
   acceptedAt = "2026-07-10T09:58:00.000Z",
 } = {}) {
@@ -69,7 +70,7 @@ function makeRuntime({
         provider: "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7",
         agentId: "4348",
         asset: PAYMENT.asset,
-        amountAtomic: "5000000",
+        amountAtomic: targetAmountAtomic,
         serviceHash: `0x${"0".repeat(64)}`,
         serviceType: "A2MCP",
         serviceTypeVerified: true,
@@ -181,6 +182,41 @@ const wrongAmount = await callHandler(primary.handler, {
 });
 assert.equal(wrongAmount.statusCode, 402, "mismatched accepted requirements must return 402");
 assert.equal(wrongAmount.json().error, "payment_amount_mismatch");
+
+const belowMinimumPaid = makeRuntime();
+const belowMinimumPaidResponse = await callHandler(belowMinimumPaid.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("below-minimum-paid") },
+  body: {
+    ...sampleBody,
+    targetJobId: `0x${"8".repeat(64)}`,
+    requestedCoverageUSDT: "0.49",
+  },
+});
+assert.equal(belowMinimumPaidResponse.statusCode, 400);
+assert.equal(belowMinimumPaidResponse.json().error, "requested_coverage_below_minimum");
+assert.equal(belowMinimumPaidResponse.json().charged, false);
+assert.equal(belowMinimumPaidResponse.json().minimumCoverageUSDT, "0.5");
+assert.equal(belowMinimumPaid.calls.verify, 1, "the signed authorization may be verified but must not settle");
+assert.equal(belowMinimumPaid.calls.settle, 0, "below-minimum coverage must not settle payment");
+assert.equal(belowMinimumPaid.calls.target, 0, "below-minimum coverage must not perform target verification");
+assert.equal((await belowMinimumPaid.ledger.stats()).recordCount, 0, "below-minimum coverage must not write a receipt");
+
+const halfDollarTarget = makeRuntime({ targetAmountAtomic: "500000" });
+const halfDollarTargetResponse = await callHandler(halfDollarTarget.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("half-dollar-target") },
+  body: {
+    ...sampleBody,
+    targetJobId: `0x${"5".repeat(64)}`,
+    requestedCoverageUSDT: "0.5",
+  },
+});
+assert.equal(halfDollarTargetResponse.statusCode, 200);
+assert.equal(halfDollarTargetResponse.json().receipt.outcome.type, "ISSUED");
+assert.equal(halfDollarTargetResponse.json().receipt.covenant.coverageCapUSDT, "0.5");
+assert.equal((await halfDollarTarget.ledger.stats()).activeAtomic, "500000");
+assert.equal(halfDollarTarget.calls.settle, 1);
 
 const paidHeader = makePaymentHeader("issued");
 const paid = await callHandler(primary.handler, {

@@ -22,7 +22,7 @@ const task = {
   title: "Market evidence job",
   description: "Verify a public token market claim with evidence and source links.",
   tokenSymbol: "USDT",
-  tokenAmount: "1",
+  tokenAmount: "0.5",
   status: 1,
   displayStatus: 1,
   openedAt: "2026-07-11T10:00:00.000Z",
@@ -55,7 +55,7 @@ const chain = {
       provider: "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7",
       agentId: "3465",
       asset: PAYMENT.asset,
-      amountAtomic: "1000000",
+      amountAtomic: "500000",
       serviceHash: `0x${"4".repeat(64)}`,
       serviceType: "A2A",
       serviceTypeVerified: true,
@@ -98,7 +98,7 @@ const belowMinimum = await callHandler(handler, {
   body: {
     targetAgent: "GlassDesk#3465",
     taskReference: task.publicUrl,
-    requestedCoverageUSDT: "0.5",
+    requestedCoverageUSDT: "0.49",
   },
 });
 assert.equal(belowMinimum.statusCode, 200);
@@ -118,7 +118,7 @@ const eligible = await callHandler(handler, {
 assert.equal(eligible.statusCode, 200);
 assert.equal(eligible.json().eligible, true);
 assert.equal(eligible.json().charged, false);
-assert.equal(eligible.json().coverage.capUSDT, "1", "cap must not exceed target-job value");
+assert.equal(eligible.json().coverage.capUSDT, "0.5", "cap must not exceed target-job value");
 assert.equal(eligible.json().coverage.serviceFeeUSDT, "0.1");
 assert.equal(eligible.json().coverage.availableUSDT, "4.5");
 assert.equal(eligible.json().paidRequest.payerMustEqualTargetBuyer.toLowerCase(), BUYER.toLowerCase());
