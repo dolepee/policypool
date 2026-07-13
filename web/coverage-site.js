@@ -72,6 +72,9 @@ function updateReserveSurface(data) {
     node.textContent = data.reserve.solvent ? "Solvent" : "Overcommitted";
     node.classList.toggle("is-positive", data.reserve.solvent);
     node.classList.toggle("is-risk", !data.reserve.solvent);
+    const stripState = node.closest(".system-strip-state");
+    stripState?.classList.toggle("is-positive", data.reserve.solvent);
+    stripState?.classList.toggle("is-risk", !data.reserve.solvent);
   });
   document.querySelectorAll("[data-reserve-waterline]").forEach((node) => {
     if (node.parentElement?.classList.contains("balance-water")) node.style.height = `${freePercent}%`;
@@ -92,6 +95,44 @@ function setLedgerUnavailable(message) {
     node.textContent = "Unavailable";
     node.classList.remove("is-positive");
     node.classList.add("is-risk");
+    const stripState = node.closest(".system-strip-state");
+    stripState?.classList.remove("is-positive");
+    stripState?.classList.add("is-risk");
+  });
+}
+
+function initScrollReveals() {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || !("IntersectionObserver" in window) || !("animate" in Element.prototype)) return;
+  const items = [...document.querySelectorAll([
+    ".outcome-ticket",
+    ".mechanism-grid li",
+    ".role-grid a",
+    ".coverage-form-card",
+    ".decision-card",
+    ".notes-grid article",
+    ".balance-sheet",
+    ".ledger-table-shell",
+    ".proof-selector-column",
+    ".proof-receipt",
+    ".evidence-grid a",
+    ".provider-card",
+    ".admission-layout li",
+    ".command-card",
+  ].join(", "))];
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const delay = Number(entry.target.dataset.enterDelay || 0);
+      entry.target.animate(
+        [{ opacity: 0, transform: "translateY(18px)" }, { opacity: 1, transform: "translateY(0)" }],
+        { duration: 520, delay, easing: "cubic-bezier(.2,.8,.2,1)" },
+      );
+      observer.unobserve(entry.target);
+    }
+  }, { rootMargin: "0px 0px -8%", threshold: 0.08 });
+  items.forEach((item, index) => {
+    item.dataset.enterDelay = String((index % 4) * 55);
+    observer.observe(item);
   });
 }
 
@@ -462,4 +503,5 @@ async function hydrateLiveData() {
 
 bindMobileNavigation();
 bindCoveragePreflight();
+initScrollReveals();
 hydrateLiveData();

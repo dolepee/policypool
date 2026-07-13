@@ -35,8 +35,18 @@
       </div>
     </header>
 
+    <div class="system-strip" aria-label="Live PolicyPool operating status">
+      <div class="site-shell system-strip-track" aria-live="polite">
+        <div class="system-strip-state"><i aria-hidden="true"></i><span data-solvency>Reading</span><small>system</small></div>
+        <div class="system-strip-item"><span>Network</span><b>X Layer</b></div>
+        <div class="system-strip-item"><span>Available reserve</span><b><span data-reserve-available>—</span> USD₮0</b></div>
+        <div class="system-strip-item"><span>Committed</span><b><span data-reserve-committed>—</span> USD₮0</b></div>
+        <div class="system-strip-item"><span>Public receipts</span><b data-record-count>—</b></div>
+      </div>
+    </div>
+
     <main id="main">
-      <section class="page-hero page-hero-coral">
+      <section class="page-hero page-hero-coral" data-mark="01">
         <div class="site-shell page-hero-layout">
           <div><span class="section-index">COVERAGE DESK / FREE PREFLIGHT</span><h1>Check before<br /><em>you cover.</em></h1></div>
           <div class="page-hero-copy"><p>Bring an accepted OKX.AI job. PolicyPool verifies the order, matches a registered provider policy, derives the deadline, and calculates the cap that the live reserve can support.</p><dl><div><dt>Check fee</dt><dd>0 USD₮0</dd></div><div><dt>Signature</dt><dd>Not required</dd></div><div><dt>Paid service</dt><dd>1 USD₮0</dd></div></dl></div>
@@ -47,6 +57,7 @@
         <div class="site-shell desk-layout">
           <form class="coverage-form-card" id="coverage-preflight-form" novalidate>
             <div class="card-heading"><span>01</span><div><p>Coverage request</p><h2>Identify the accepted job.</h2></div></div>
+            <div class="request-guide" aria-label="Required coverage request inputs"><span>Bring</span><b>Accepted order</b><i>+</i><b>Provider policy</b><i>+</i><b>Requested cap</b></div>
             <div class="field-grid">
               <div class="field-block">
                 <label for="coverage-target">Target provider policy</label>

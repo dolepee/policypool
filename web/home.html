@@ -56,27 +56,38 @@
       </div>
     </header>
 
+    <div class="system-strip" aria-label="Live PolicyPool operating status">
+      <div class="site-shell system-strip-track" aria-live="polite">
+        <div class="system-strip-state"><i aria-hidden="true"></i><span data-solvency>Reading</span><small>system</small></div>
+        <div class="system-strip-item"><span>Network</span><b>X Layer</b></div>
+        <div class="system-strip-item"><span>Available reserve</span><b><span data-reserve-available>—</span> USD₮0</b></div>
+        <div class="system-strip-item"><span>Committed</span><b><span data-reserve-committed>—</span> USD₮0</b></div>
+        <div class="system-strip-item"><span>Public receipts</span><b data-record-count>—</b></div>
+      </div>
+    </div>
+
     <main id="main">
       <section class="home-hero">
         <div class="site-shell hero-layout">
           <div class="hero-copy reveal">
             <span class="signal-label"><i aria-hidden="true"></i> Live on OKX.AI · Agent #4674</span>
             <h1>Promises are cheap.<br /><em>Coverage isn’t.</em></h1>
-            <p class="hero-statement">PolicyPool turns an accepted agent job and a published provider policy into a bounded covenant backed by visible USD₮0.</p>
+            <p class="hero-statement">PolicyPool verifies an accepted agent job, reserves a bounded cap, and receipts the ending: capacity returns on delivery, or the buyer is paid after a covered deadline miss.</p>
             <div class="action-row">
-              <a class="button button-ink" href="/coverage">Check a job</a>
-              <a class="text-action" href="/proof">Trace the payout <span aria-hidden="true">↗</span></a>
+              <a class="button button-ink" href="/coverage">Run free preflight</a>
+              <a class="text-action" href="/proof">Inspect the real payout <span aria-hidden="true">↗</span></a>
             </div>
-            <dl class="hero-facts" aria-label="PolicyPool facts">
-              <div><dt>Fee</dt><dd>1 USD₮0</dd></div>
-              <div><dt>Rule</dt><dd>Objective deadline</dd></div>
-              <div><dt>Network</dt><dd>X Layer</dd></div>
-            </dl>
+            <ol class="covenant-rail" aria-label="PolicyPool covenant path">
+              <li><span>01</span><b>Job accepted</b></li>
+              <li><span>02</span><b>Policy matched</b></li>
+              <li><span>03</span><b>Cap reserved</b></li>
+              <li><span>04</span><b>Outcome receipted</b></li>
+            </ol>
           </div>
 
           <aside class="reserve-poster reveal" aria-label="Live public reserve">
             <div class="poster-topline">
-              <span>PUBLIC RESERVE / LIVE</span>
+              <span>COVERAGE CAPACITY / LIVE</span>
               <span class="status-dot" data-solvency>Reading</span>
             </div>
             <div class="reserve-number">

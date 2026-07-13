@@ -27,8 +27,18 @@
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header"><div class="site-shell header-shell"><a class="brand" href="/" aria-label="PolicyPool home"><img src="/agent-avatar.svg" width="38" height="38" alt="" /><span>PolicyPool</span></a><nav class="desktop-nav" aria-label="Primary navigation"><a href="/coverage">Coverage</a><a href="/ledger">Ledger</a><a href="/proof" aria-current="page">Proof</a><a href="/providers">Providers</a><a class="nav-action" href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">Use on OKX.AI</a></nav><details class="mobile-nav"><summary><span>Menu</span><span aria-hidden="true">＋</span></summary><nav aria-label="Mobile navigation"><a href="/coverage">Coverage</a><a href="/ledger">Ledger</a><a href="/proof" aria-current="page">Proof</a><a href="/providers">Providers</a><a href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">Use on OKX.AI ↗</a></nav></details></div></header>
 
+    <div class="system-strip" aria-label="Live PolicyPool operating status">
+      <div class="site-shell system-strip-track" aria-live="polite">
+        <div class="system-strip-state"><i aria-hidden="true"></i><span data-solvency>Reading</span><small>system</small></div>
+        <div class="system-strip-item"><span>Network</span><b>X Layer</b></div>
+        <div class="system-strip-item"><span>Available reserve</span><b><span data-reserve-available>—</span> USD₮0</b></div>
+        <div class="system-strip-item"><span>Committed</span><b><span data-reserve-committed>—</span> USD₮0</b></div>
+        <div class="system-strip-item"><span>Public receipts</span><b data-record-count>—</b></div>
+      </div>
+    </div>
+
     <main id="main">
-      <section class="page-hero page-hero-blue">
+      <section class="page-hero page-hero-blue" data-mark="03">
         <div class="site-shell page-hero-layout">
           <div><span class="section-index">PROOF ROOM / NO SECRETS</span><h1>Don’t trust the badge.<br /><em>Trace the receipt.</em></h1></div>
           <div class="page-hero-copy"><p>The proof path begins with the accepted OKX.AI order, follows the bounded covenant through the reserve, and ends only when a release or real X Layer transfer is independently verified.</p><div class="raw-link-row"><a class="text-action" href="https://github.com/dolepee/policypool/blob/main/scripts/verify-agent-live.mjs" target="_blank" rel="noreferrer">Open no-secret verifier <span aria-hidden="true">↗</span></a></div></div>

@@ -16,6 +16,8 @@ for (const [file, route] of pages) {
   assert.equal((html.match(/<main\b/g) || []).length, 1, `${file} must have one main landmark`);
   assert.match(html, /class="desktop-nav"/, `${file} must include desktop navigation`);
   assert.match(html, /class="mobile-nav"/, `${file} must include mobile navigation`);
+  assert.match(html, /class="system-strip"/, `${file} must expose live operating status`);
+  assert.equal((html.match(/class="system-strip-item"/g) || []).length, 4, `${file} must show four operating metrics`);
   assert.match(html, /coverage-site\.css/, `${file} must use the PolicyPool product system`);
   assert.match(html, /coverage-site\.js/, `${file} must use the shared live-data layer`);
   for (const destination of navigation) {
