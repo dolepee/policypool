@@ -83,7 +83,7 @@
               </p>
               <div class="button-row hero-actions" aria-label="Primary actions">
                 <a class="button button-primary" href="#cover">Check a job</a>
-                <a class="button button-ghost" href="#outcomes">See the live outcomes</a>
+                <a class="button button-ghost" href="#live-receipt">Inspect a real receipt</a>
               </div>
               <dl class="hero-facts" aria-label="Product facts">
                 <div><dt>Listed agent</dt><dd>#4674</dd></div>
@@ -92,80 +92,87 @@
               </dl>
             </div>
 
-            <aside class="reserve-instrument" aria-label="Live reserve and liability summary">
-              <div class="instrument-head">
-                <div>
-                  <span class="eyebrow">PUBLIC RESERVE</span>
-                  <strong>Coverage capacity</strong>
+            <aside class="coverage-terminal" id="live-receipt" aria-label="Live covenant receipt and reserve summary">
+              <div class="terminal-toolbar">
+                <div class="terminal-live">
+                  <span><i aria-hidden="true"></i> Controlled live proof</span>
+                  <small>Public records · no UI-only state</small>
+                </div>
+                <div class="receipt-tabs" role="tablist" aria-label="Covenant outcome">
+                  <button id="receipt-tab-released" type="button" role="tab" data-outcome="released" aria-controls="terminal-sheet" aria-selected="false" tabindex="-1">Released</button>
+                  <button class="is-active" id="receipt-tab-paid" type="button" role="tab" data-outcome="paid" aria-controls="terminal-sheet" aria-selected="true">Paid</button>
+                </div>
+              </div>
+
+              <div class="terminal-sheet" id="terminal-sheet" role="tabpanel" aria-labelledby="receipt-tab-paid" data-state="loading" aria-live="polite">
+                <div class="terminal-id-row">
+                  <div>
+                    <span class="eyebrow">COVENANT RECEIPT</span>
+                    <strong id="terminal-receipt">Loading live proof</strong>
+                  </div>
+                  <span class="terminal-state" id="terminal-state">Reading</span>
+                </div>
+
+                <div class="terminal-flow" aria-label="Covenant lifecycle">
+                  <div><span>01</span><strong>Accepted</strong><small>Task escrow</small></div>
+                  <i aria-hidden="true"></i>
+                  <div><span>02</span><strong>Covered</strong><small>Cap reserved</small></div>
+                  <i aria-hidden="true"></i>
+                  <div><span>03</span><strong id="terminal-final-step">Outcome</strong><small>X Layer proof</small></div>
+                </div>
+
+                <dl class="terminal-fields">
+                  <div><dt>Target</dt><dd id="terminal-target">--</dd></div>
+                  <div><dt>Service</dt><dd id="terminal-service">--</dd></div>
+                  <div><dt>Coverage cap</dt><dd id="terminal-cap">--</dd></div>
+                  <div><dt>Accepted</dt><dd id="terminal-accepted">--</dd></div>
+                  <div class="terminal-field-wide"><dt>Stored deadline</dt><dd id="terminal-deadline">--</dd></div>
+                </dl>
+
+                <div class="terminal-outcome">
+                  <div>
+                    <span>Verified outcome</span>
+                    <strong id="terminal-outcome-title">Reading public receipt</strong>
+                    <small id="terminal-outcome-note">No fallback proof will be shown.</small>
+                  </div>
+                  <a id="terminal-proof-link" href="/api/coverage-ledger">Open proof ↗</a>
+                </div>
+              </div>
+
+              <div class="terminal-reserve">
+                <div class="terminal-reserve-value">
+                  <span>Public reserve available</span>
+                  <strong><b id="reserve-available">--</b> USD₮0</strong>
+                </div>
+                <div class="terminal-reserve-meter">
+                  <div class="capacity-meter-track"><span id="reserve-meter-bar"></span></div>
+                  <small id="reserve-meter-label">Reading capacity</small>
                 </div>
                 <span class="chip chip-neutral" id="ledger-health">Loading</span>
               </div>
 
-              <div class="reserve-total">
-                <span>Available now</span>
-                <strong id="reserve-available">--</strong>
-                <small>USD₮0 · X Layer</small>
-              </div>
-
-              <div class="capacity-meter" aria-label="Available reserve capacity">
-                <div class="capacity-meter-track"><span id="reserve-meter-bar"></span></div>
-                <div><span>Available</span><strong id="reserve-meter-label">--</strong></div>
-              </div>
-
-              <dl class="instrument-kv">
-                <div><dt>Wallet balance</dt><dd id="reserve-balance">--</dd></div>
+              <dl class="terminal-footnotes">
+                <div><dt>Balance</dt><dd id="reserve-balance">--</dd></div>
                 <div><dt>Committed</dt><dd id="reserve-committed">--</dd></div>
-                <div><dt>Covenant receipts</dt><dd id="coverage-count">--</dd></div>
-                <div><dt>Reserve wallet</dt><dd><a id="reserve-link" href="https://www.oklink.com/x-layer/address/0xe2f0c858724a9a72310d7264400e04b37423fbbc" target="_blank" rel="noreferrer">0xe2f0...23fbbc</a></dd></div>
+                <div><dt>Receipts</dt><dd id="coverage-count">--</dd></div>
+                <div><dt>Reserve</dt><dd><a id="reserve-link" href="https://www.oklink.com/x-layer/address/0xe2f0c858724a9a72310d7264400e04b37423fbbc" target="_blank" rel="noreferrer">0xe2f0...23fbbc</a></dd></div>
               </dl>
-              <p class="instrument-foot" id="ledger-updated">Reading the public reserve and durable coverage ledger.</p>
+              <p class="terminal-updated" id="ledger-updated">Reading public reserve and receipt data.</p>
             </aside>
           </div>
         </div>
       </section>
 
-      <section class="outcomes-section" id="outcomes" aria-labelledby="outcomes-title">
+      <section class="proof-rail-section" aria-label="PolicyPool proof path">
         <div class="container">
-          <div class="section-intro outcome-intro">
-            <div>
-              <span class="eyebrow">RECEIPTED OUTCOMES</span>
-              <h2 id="outcomes-title">A covenant ends one of two ways.</h2>
-            </div>
-            <p>Both paths have already run against accepted OKX.AI jobs. The UI points to the same public records the verifier reads.</p>
-          </div>
-
-          <div class="outcome-grid">
-            <article class="outcome-card outcome-released">
-              <div class="outcome-topline">
-                <span class="outcome-icon" aria-hidden="true">↗</span>
-                <span class="chip chip-positive" id="success-state">Released</span>
-              </div>
-              <div>
-                <span class="eyebrow">DELIVERED ON TIME</span>
-                <h3>Capacity returns to the pool.</h3>
-                <p>The provider delivers before the registered deadline. The covenant closes and the reserved cap becomes available again.</p>
-              </div>
-              <dl class="outcome-proof">
-                <div><dt>Released cap</dt><dd id="success-amount">--</dd></div>
-                <div><dt>Receipt</dt><dd><a id="success-receipt-link" href="/api/coverage-ledger">Loading</a></dd></div>
-              </dl>
-            </article>
-
-            <article class="outcome-card outcome-paid">
-              <div class="outcome-topline">
-                <span class="outcome-icon" aria-hidden="true">↓</span>
-                <span class="chip chip-risk" id="breach-state">Paid</span>
-              </div>
-              <div>
-                <span class="eyebrow">DEADLINE MISSED</span>
-                <h3>The reserve pays the buyer.</h3>
-                <p>The accepted job stays undelivered past its stored deadline. A matching reserve-to-buyer transfer closes the liability.</p>
-              </div>
-              <dl class="outcome-proof">
-                <div><dt>Buyer payout</dt><dd id="breach-amount">--</dd></div>
-                <div><dt>Payout tx</dt><dd><a id="breach-payout-link" href="/api/coverage-ledger">Loading</a></dd></div>
-              </dl>
-            </article>
+          <div class="proof-rail">
+            <div><span>01 / ORDER</span><strong>Accepted onchain</strong><small>Task escrow decoded</small></div>
+            <i aria-hidden="true"></i>
+            <div><span>02 / POLICY</span><strong>Snapshot matched</strong><small>Caller overrides ignored</small></div>
+            <i aria-hidden="true"></i>
+            <div><span>03 / RESERVE</span><strong>Cap bounded</strong><small>Solvency checked</small></div>
+            <i aria-hidden="true"></i>
+            <div><span>04 / OUTCOME</span><strong>Released or paid</strong><small>Receipt independently verifiable</small></div>
           </div>
         </div>
       </section>

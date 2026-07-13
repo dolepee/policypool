@@ -1,5 +1,6 @@
 const EXPLORER_TX = "https://www.oklink.com/x-layer/tx/";
 const EXPLORER_ADDRESS = "https://www.oklink.com/x-layer/address/";
+const outcomeProofs = new Map();
 
 function short(value, left = 8, right = 6) {
   if (!value || value.length <= left + right) return value || "-";
@@ -11,6 +12,12 @@ function amount(value) {
   return Number.isFinite(parsed)
     ? parsed.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 6 })
     : "0";
+}
+
+function dateTime(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "--";
+  return parsed.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
 function stateChip(state) {
@@ -193,35 +200,101 @@ function bindMobileNavigation() {
   });
 }
 
-function renderOutcomeProofs(records) {
-  const released = records.find((record) => record.state === "released");
-  const paid = records.find((record) => record.state === "paid" && record.payoutTx);
+function renderReceiptConsole(data) {
+  const receipt = data.receipt;
+  const state = data.state;
+  const paid = state === "paid";
+  const sheet = document.querySelector("#terminal-sheet");
+  sheet.dataset.state = state;
+  document.querySelector("#terminal-state").textContent = paid ? "Paid" : "Released";
+  document.querySelector("#terminal-receipt").textContent = receipt.receiptId;
+  document.querySelector("#terminal-final-step").textContent = paid ? "Paid" : "Released";
+  document.querySelector("#terminal-target").textContent = `${receipt.target.agentName} #${receipt.target.agentId}`;
+  document.querySelector("#terminal-service").textContent = receipt.target.serviceName;
+  document.querySelector("#terminal-cap").textContent = `${amount(receipt.covenant.coverageCapUSDT)} USD₮0`;
+  document.querySelector("#terminal-accepted").textContent = dateTime(receipt.targetJob.acceptedAt);
+  document.querySelector("#terminal-deadline").textContent = dateTime(receipt.covenant.deadline);
 
-  if (released) {
-    document.querySelector("#success-state").textContent = "Released";
-    document.querySelector("#success-amount").textContent = `${amount(released.liabilityUSDT)} USDT0`;
-    const receipt = document.querySelector("#success-receipt-link");
-    receipt.href = `/api/coverage-status?receiptId=${encodeURIComponent(released.receiptId)}`;
-    receipt.textContent = short(released.receiptId, 10, 5);
-  } else {
-    document.querySelector("#success-state").textContent = "Awaiting proof";
-    document.querySelector("#success-amount").textContent = "--";
-    document.querySelector("#success-receipt-link").textContent = "No released receipt";
-  }
-
+  const proofLink = document.querySelector("#terminal-proof-link");
   if (paid) {
-    document.querySelector("#breach-state").textContent = "Paid";
-    document.querySelector("#breach-amount").textContent = `${amount(paid.liabilityUSDT)} USDT0`;
-    const payout = document.querySelector("#breach-payout-link");
-    payout.href = `${EXPLORER_TX}${paid.payoutTx}`;
-    payout.target = "_blank";
-    payout.rel = "noreferrer";
-    payout.textContent = short(paid.payoutTx);
+    document.querySelector("#terminal-outcome-title").textContent = `Buyer paid ${amount(receipt.covenant.coverageCapUSDT)} USD₮0`;
+    document.querySelector("#terminal-outcome-note").textContent = "Reserve transfer matched the buyer, asset, and bounded amount.";
+    proofLink.href = `${EXPLORER_TX}${data.payout.transaction}`;
+    proofLink.target = "_blank";
+    proofLink.rel = "noreferrer";
+    proofLink.textContent = "View payout tx ↗";
   } else {
-    document.querySelector("#breach-state").textContent = "No payout yet";
-    document.querySelector("#breach-amount").textContent = "--";
-    document.querySelector("#breach-payout-link").textContent = "No paid receipt";
+    document.querySelector("#terminal-outcome-title").textContent = "Capacity returned to the pool";
+    document.querySelector("#terminal-outcome-note").textContent = "The job completed and the reserved cap was released.";
+    proofLink.href = `/api/coverage-status?receiptId=${encodeURIComponent(receipt.receiptId)}`;
+    proofLink.removeAttribute("target");
+    proofLink.removeAttribute("rel");
+    proofLink.textContent = "Open receipt ↗";
   }
+
+  document.querySelectorAll(".receipt-tabs button").forEach((button) => {
+    const selected = button.dataset.outcome === state;
+    button.classList.toggle("is-active", selected);
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+    if (selected) sheet.setAttribute("aria-labelledby", button.id);
+  });
+}
+
+function setReceiptConsoleUnavailable() {
+  const sheet = document.querySelector("#terminal-sheet");
+  sheet.dataset.state = "unavailable";
+  document.querySelector("#terminal-state").textContent = "Unavailable";
+  document.querySelector("#terminal-receipt").textContent = "Live receipt unavailable";
+  document.querySelector("#terminal-outcome-title").textContent = "No fallback proof shown";
+  document.querySelector("#terminal-outcome-note").textContent = "Retry the public ledger before relying on this surface.";
+}
+
+async function hydrateReceiptConsole(records) {
+  const candidates = new Map([
+    ["released", records.find((record) => record.state === "released")],
+    ["paid", records.find((record) => record.state === "paid" && record.payoutTx)],
+  ]);
+
+  outcomeProofs.clear();
+  await Promise.all([...candidates.entries()].map(async ([state, record]) => {
+    if (!record) return;
+    try {
+      const response = await fetch(`/api/coverage-status?receiptId=${encodeURIComponent(record.receiptId)}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data.ok && data.state === state) outcomeProofs.set(state, data);
+    } catch {
+      // Each tab fails closed independently; a missing receipt is never replaced with static proof.
+    }
+  }));
+
+  document.querySelectorAll(".receipt-tabs button").forEach((button) => {
+    button.disabled = !outcomeProofs.has(button.dataset.outcome);
+  });
+  const preferred = outcomeProofs.get("paid") || outcomeProofs.get("released");
+  if (preferred) renderReceiptConsole(preferred);
+  else setReceiptConsoleUnavailable();
+}
+
+function bindReceiptTabs() {
+  const tabs = [...document.querySelectorAll(".receipt-tabs button")];
+  tabs.forEach((button, index) => {
+    button.addEventListener("click", () => {
+      const data = outcomeProofs.get(button.dataset.outcome);
+      if (data) renderReceiptConsole(data);
+    });
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const direction = event.key === "ArrowRight" ? 1 : -1;
+      const next = tabs[(index + direction + tabs.length) % tabs.length];
+      if (!next.disabled) {
+        next.focus();
+        next.click();
+      }
+    });
+  });
 }
 
 function renderRows(records) {
@@ -271,17 +344,14 @@ async function hydrateCoverage() {
     health.className = `chip ${data.reserve.solvent ? "chip-positive" : "chip-risk"}`;
     const records = data.records || [];
     renderRows(records);
-    renderOutcomeProofs(records);
+    await hydrateReceiptConsole(records);
   } catch (error) {
     health.textContent = "Unavailable";
     health.className = "chip chip-risk";
     document.querySelector("#reserve-meter-bar").style.width = "0%";
     document.querySelector("#reserve-meter-label").textContent = "Unavailable";
     document.querySelector("#ledger-updated").textContent = "Live ledger unavailable. No fallback numbers are being shown.";
-    document.querySelector("#success-state").textContent = "Unavailable";
-    document.querySelector("#success-receipt-link").textContent = "Live proof unavailable";
-    document.querySelector("#breach-state").textContent = "Unavailable";
-    document.querySelector("#breach-payout-link").textContent = "Live proof unavailable";
+    setReceiptConsoleUnavailable();
     const rows = document.querySelector("#coverage-rows");
     if (rows) rows.innerHTML = `<tr><td colspan="5">Live proof unavailable: ${error.message}</td></tr>`;
   }
@@ -290,3 +360,4 @@ async function hydrateCoverage() {
 hydrateCoverage();
 bindCoveragePreflight();
 bindMobileNavigation();
+bindReceiptTabs();
