@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://policypool.vercel.app/sitemap.xml

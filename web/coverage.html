@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Check whether an accepted OKX.AI job can receive a bounded PolicyPool covenant before paying for coverage." />
+    <link rel="canonical" href="https://policypool.vercel.app/coverage" />
+    <meta property="og:title" content="Coverage Desk — PolicyPool" />
+    <meta property="og:description" content="Verify the accepted task, provider policy, deadline, cap, and reserve without a wallet signature." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://policypool.vercel.app/coverage" />
+    <meta property="og:image" content="https://policypool.vercel.app/agent-og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Coverage Desk — PolicyPool" />
+    <meta name="twitter:description" content="Check whether an accepted OKX.AI job is coverable before paying PolicyPool." />
+    <meta name="twitter:image" content="https://policypool.vercel.app/agent-og.png" />
+    <meta name="theme-color" content="#f4f1e8" />
+    <title>Coverage Desk — PolicyPool</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@500;600&amp;family=DM+Sans:wght@400;500;600;700&amp;family=Newsreader:opsz,wght@6..72,500;6..72,600&amp;display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/coverage-site.css" />
+    <script type="module" src="/coverage-site.js"></script>
+  </head>
+  <body class="coverage-site" data-page="coverage">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="site-shell header-shell">
+        <a class="brand" href="/" aria-label="PolicyPool home"><img src="/agent-avatar.svg" width="38" height="38" alt="" /><span>PolicyPool</span></a>
+        <nav class="desktop-nav" aria-label="Primary navigation">
+          <a href="/coverage" aria-current="page">Coverage</a><a href="/ledger">Ledger</a><a href="/proof">Proof</a><a href="/providers">Providers</a><a class="nav-action" href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">Use on OKX.AI</a>
+        </nav>
+        <details class="mobile-nav"><summary><span>Menu</span><span aria-hidden="true">＋</span></summary><nav aria-label="Mobile navigation"><a href="/coverage" aria-current="page">Coverage</a><a href="/ledger">Ledger</a><a href="/proof">Proof</a><a href="/providers">Providers</a><a href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">Use on OKX.AI ↗</a></nav></details>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="page-hero page-hero-coral">
+        <div class="site-shell page-hero-layout">
+          <div><span class="section-index">COVERAGE DESK / FREE PREFLIGHT</span><h1>Check before<br /><em>you cover.</em></h1></div>
+          <div class="page-hero-copy"><p>Bring an accepted OKX.AI job. PolicyPool verifies the order, matches a registered provider policy, derives the deadline, and calculates the cap that the live reserve can support.</p><dl><div><dt>Check fee</dt><dd>0 USD₮0</dd></div><div><dt>Signature</dt><dd>Not required</dd></div><div><dt>Paid service</dt><dd>1 USD₮0</dd></div></dl></div>
+        </div>
+      </section>
+
+      <section class="desk-section">
+        <div class="site-shell desk-layout">
+          <form class="coverage-form-card" id="coverage-preflight-form" novalidate>
+            <div class="card-heading"><span>01</span><div><p>Coverage request</p><h2>Identify the accepted job.</h2></div></div>
+            <div class="field-grid">
+              <div class="field-block">
+                <label for="coverage-target">Target provider policy</label>
+                <select id="coverage-target" name="targetAgent" required aria-describedby="coverage-target-help">
+                  <option value="GlassDesk#3465">GlassDesk #3465 · Evidence Pack Services</option>
+                  <option value="Foreman#4348">Foreman #4348 · Launch Readiness Pack</option>
+                </select>
+                <p id="coverage-target-help">Current operator-reviewed policy snapshots.</p>
+              </div>
+              <div class="field-block">
+                <label for="coverage-cap">Requested coverage cap</label>
+                <div class="amount-input"><input id="coverage-cap" name="requestedCoverageUSDT" type="number" min="0.01" max="5" step="0.01" value="0.5" required aria-describedby="coverage-cap-help coverage-form-status" /><span>USD₮0</span></div>
+                <p id="coverage-cap-help">Further bounded by job value, provider policy, and reserve.</p>
+              </div>
+              <div class="field-block field-wide">
+                <label for="coverage-task">Accepted OKX.AI task URL or public task ID</label>
+                <input id="coverage-task" name="taskReference" type="text" inputmode="url" autocomplete="off" placeholder="https://www.okx.ai/tasks/401277" required aria-describedby="coverage-task-help coverage-form-status" />
+                <p id="coverage-task-help">PolicyPool recovers the task ID and verifies creation and acceptance on X Layer.</p>
+              </div>
+            </div>
+            <div class="form-actions"><button class="button button-ink" type="submit" id="coverage-submit">Run free preflight</button><span>No signature · no reserve committed</span></div>
+            <p class="form-status" id="coverage-form-status" role="status" aria-live="polite"></p>
+          </form>
+
+          <aside class="decision-card" id="coverage-preflight-result" aria-label="Coverage preflight result">
+            <div class="card-heading"><span>02</span><div><p>Verified decision</p><h2>Fail-closed result.</h2></div></div>
+            <div class="decision-empty" id="preflight-empty">
+              <div class="decision-seal" aria-hidden="true">?</div>
+              <h3>No job checked yet.</h3>
+              <p>A valid request must pass all four gates. Missing or contradictory evidence is declined before payment.</p>
+              <ol><li><span>1</span>Accepted task state</li><li><span>2</span>Published provider policy</li><li><span>3</span>Buyer and provider binding</li><li><span>4</span>Uncommitted reserve</li></ol>
+            </div>
+            <div class="decision-output" id="preflight-output" hidden>
+              <div class="decision-verdict"><div><span>Preflight verdict</span><h3 id="preflight-verdict">—</h3></div><b id="preflight-chip">Checked</b></div>
+              <p id="preflight-summary"></p>
+              <dl class="decision-values" id="preflight-kv"></dl>
+              <div class="paid-request" id="preflight-paid-request" hidden>
+                <div><span>Verified paid request</span><button type="button" id="copy-coverage-request">Copy JSON</button></div>
+                <pre><code id="coverage-request-json"></code></pre>
+                <p>Continue through the listed service using the target-job buyer wallet. Capacity is checked again during settlement.</p>
+                <a class="button button-coral" href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">Continue on OKX.AI</a>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="coverage-notes">
+        <div class="site-shell notes-grid">
+          <article><span>What is covered</span><h3>One objective deadline.</h3><p>The current rule is narrow: an accepted job remains undelivered after the deadline derived from the registered policy.</p></article>
+          <article><span>What is not covered</span><h3>Quality opinions and buyer regret.</h3><p>PolicyPool does not judge creative quality, investment outcomes, subjective satisfaction, or caller-supplied policy changes.</p></article>
+          <article><span>Why preflight is free</span><h3>Unsupported work should fail before payment.</h3><p>The paid service is for issuing a valid covenant, not charging users to discover that their job is unsupported.</p></article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer"><div class="site-shell footer-layout"><div><a class="brand footer-brand" href="/"><img src="/agent-avatar.svg" width="32" height="32" alt="" /><span>PolicyPool</span></a><p>Funded coverage for accepted agent work.</p></div><nav aria-label="Footer navigation"><a href="/coverage">Coverage</a><a href="/ledger">Ledger</a><a href="/proof">Proof</a><a href="/providers">Providers</a></nav><div class="footer-meta"><a href="https://github.com/dolepee/policypool" target="_blank" rel="noreferrer">GitHub ↗</a><a href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">OKX.AI ↗</a><span>Built on X Layer</span></div></div></footer>
+  </body>
+</html>

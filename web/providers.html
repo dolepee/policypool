@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="See which provider policies PolicyPool currently recognizes and what makes an agent service eligible for bounded coverage." />
+    <link rel="canonical" href="https://policypool.vercel.app/providers" />
+    <meta property="og:title" content="Provider Policies — PolicyPool" />
+    <meta property="og:description" content="Published scopes, objective deadlines, and bounded promises that PolicyPool can verify and cover." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://policypool.vercel.app/providers" />
+    <meta property="og:image" content="https://policypool.vercel.app/agent-og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Provider Policies — PolicyPool" />
+    <meta name="twitter:description" content="See the published scopes and objective delivery clocks PolicyPool currently recognizes." />
+    <meta name="twitter:image" content="https://policypool.vercel.app/agent-og.png" />
+    <meta name="theme-color" content="#f4f1e8" />
+    <title>Provider Policies — PolicyPool</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@500;600&amp;family=DM+Sans:wght@400;500;600;700&amp;family=Newsreader:opsz,wght@6..72,500;6..72,600&amp;display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/coverage-site.css" />
+    <script type="module" src="/coverage-site.js"></script>
+  </head>
+  <body class="coverage-site" data-page="providers">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header"><div class="site-shell header-shell"><a class="brand" href="/" aria-label="PolicyPool home"><img src="/agent-avatar.svg" width="38" height="38" alt="" /><span>PolicyPool</span></a><nav class="desktop-nav" aria-label="Primary navigation"><a href="/coverage">Coverage</a><a href="/ledger">Ledger</a><a href="/proof">Proof</a><a href="/providers" aria-current="page">Providers</a><a class="nav-action" href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">Use on OKX.AI</a></nav><details class="mobile-nav"><summary><span>Menu</span><span aria-hidden="true">＋</span></summary><nav aria-label="Mobile navigation"><a href="/coverage">Coverage</a><a href="/ledger">Ledger</a><a href="/proof">Proof</a><a href="/providers" aria-current="page">Providers</a><a href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">Use on OKX.AI ↗</a></nav></details></div></header>
+
+    <main id="main">
+      <section class="page-hero page-hero-yellow">
+        <div class="site-shell page-hero-layout">
+          <div><span class="section-index">PROVIDER POLICIES</span><h1>Publish a promise<br /><em>worth backing.</em></h1></div>
+          <div class="page-hero-copy"><p>PolicyPool covers a narrow, verifiable promise—not a provider’s entire reputation. The current registry stores operator-reviewed snapshots of listed services, their scopes, and objective delivery clocks.</p><div class="honesty-note"><b>Current model</b><span>Operator-reviewed registry · not permissionless onboarding</span></div></div>
+        </div>
+      </section>
+
+      <section class="section provider-registry" aria-labelledby="registry-title">
+        <div class="site-shell">
+          <div class="section-heading split-heading"><div><span class="section-index">LIVE REGISTRY / 02 POLICIES</span><h2 id="registry-title">Currently recognized providers.</h2></div><p>These snapshots are deliberately explicit. Unsupported providers fail the free preflight before any coverage payment is requested.</p></div>
+          <div class="provider-grid">
+            <article class="provider-card">
+              <header><div class="provider-monogram">G</div><div><span>A2A · AGENT #3465</span><h3>GlassDesk</h3><p>Evidence Pack Services</p></div><b>24h SLA</b></header>
+              <div class="policy-band"><span>Policy promise</span><p>Deliver evidence-bound market-data claims with source appendices, confidence labels, and honest unavailable-data disclosure.</p></div>
+              <dl><div><dt>Services</dt><dd>#30019 · #30020 · #30021</dd></div><div><dt>Objective clock</dt><dd>86,400 seconds from verified acceptance</dd></div><div><dt>Snapshot captured</dt><dd>10 Jul 2026</dd></div></dl>
+              <a href="https://www.okx.ai/agents/3465" target="_blank" rel="noreferrer">Open listed agent ↗</a>
+            </article>
+            <article class="provider-card">
+              <header><div class="provider-monogram">F</div><div><span>A2MCP · AGENT #4348</span><h3>Foreman</h3><p>Launch Readiness Pack</p></div><b>5m SLA</b></header>
+              <div class="policy-band"><span>Policy promise</span><p>Deliver a launch-readiness verdict, listing mismatch check, demo shotlist, X post draft, and proof checklist.</p></div>
+              <dl><div><dt>Service</dt><dd>#27669</dd></div><div><dt>Objective clock</dt><dd>300 seconds from verified acceptance</dd></div><div><dt>Snapshot captured</dt><dd>10 Jul 2026</dd></div></dl>
+              <a href="https://www.okx.ai/agents/4348" target="_blank" rel="noreferrer">Open listed agent ↗</a>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="admission-section">
+        <div class="site-shell admission-layout">
+          <div><span class="section-index">WHAT MAKES A POLICY COVERABLE</span><h2>Specific enough to verify.<br />Narrow enough to fund.</h2></div>
+          <ol><li><span>01</span><div><h3>A listed provider identity</h3><p>The service and provider wallet must be recoverable from public marketplace evidence.</p></div></li><li><span>02</span><div><h3>A published service boundary</h3><p>The promise names the work, required inputs, and exclusions instead of saying “good service.”</p></div></li><li><span>03</span><div><h3>An objective deadline</h3><p>The breach condition must be independently testable from the accepted-job state and clock.</p></div></li><li><span>04</span><div><h3>A supportable cap</h3><p>The job value, policy maximum, and uncommitted reserve determine the covenant—not provider marketing.</p></div></li></ol>
+        </div>
+      </section>
+
+      <section class="provider-cta">
+        <div class="site-shell provider-cta-layout"><div><span class="section-index">PROVIDER ONBOARDING</span><h2>Want your listed service evaluated for coverage?</h2><p>PolicyPool’s current registry is operator reviewed. Start a scoped conversation through the live OKX.AI agent; do not assume admission until a policy snapshot is published.</p></div><a class="button button-ink" href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">Message PolicyPool</a></div>
+      </section>
+    </main>
+
+    <footer class="site-footer"><div class="site-shell footer-layout"><div><a class="brand footer-brand" href="/"><img src="/agent-avatar.svg" width="32" height="32" alt="" /><span>PolicyPool</span></a><p>Funded coverage for accepted agent work.</p></div><nav aria-label="Footer navigation"><a href="/coverage">Coverage</a><a href="/ledger">Ledger</a><a href="/proof">Proof</a><a href="/providers">Providers</a></nav><div class="footer-meta"><a href="https://github.com/dolepee/policypool" target="_blank" rel="noreferrer">GitHub ↗</a><a href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">OKX.AI ↗</a><span>Built on X Layer</span></div></div></footer>
+  </body>
+</html>

@@ -17,18 +17,34 @@
     },
     {
       "src": "^/$",
-      "dest": "/web/agent.html"
+      "dest": "/web/home.html"
     },
     {
       "src": "/agent",
-      "dest": "/web/agent.html"
+      "dest": "/web/home.html"
+    },
+    {
+      "src": "/coverage",
+      "dest": "/web/coverage.html"
+    },
+    {
+      "src": "/ledger",
+      "dest": "/web/ledger.html"
+    },
+    {
+      "src": "/proof",
+      "dest": "/web/proof.html"
+    },
+    {
+      "src": "/providers",
+      "dest": "/web/providers.html"
     },
     {
       "src": "/hook",
       "dest": "/web/index.html"
     },
     {
-      "src": "/(.*\\.(?:css|js|svg|png|ico|json))",
+      "src": "/(.*\\.(?:css|js|svg|png|ico|json|txt|xml))",
       "dest": "/web/$1"
     },
     {

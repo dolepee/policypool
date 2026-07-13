@@ -12,10 +12,11 @@
     "agent:verify-payout-runner": "node scripts/verify-payout-runner.mjs",
     "agent:verify-chain": "node scripts/verify-okx-task-evidence.mjs",
     "agent:verify-live": "node scripts/verify-agent-live.mjs",
+    "site:verify": "node scripts/verify-product-site.mjs",
     "agent:probe": "node scripts/probe-agent-coverage.mjs",
     "ops:breach:check": "node scripts/settle-controlled-breach.mjs",
     "ops:breach:settle": "node scripts/settle-controlled-breach.mjs --execute",
-    "agent:gate": "npm run typecheck && npm run agent:verify && npm run agent:verify-preflight && npm run agent:verify-payout-runner && npm run agent:verify-chain && npm run agent:probe && npm run build",
+    "agent:gate": "npm run typecheck && npm run agent:verify && npm run agent:verify-preflight && npm run agent:verify-payout-runner && npm run agent:verify-chain && npm run agent:probe && npm run site:verify && npm run build",
     "agent:gate-live": "npm run agent:gate && npm run agent:verify-live"
   },
   "engines": {

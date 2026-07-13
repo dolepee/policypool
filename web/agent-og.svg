@@ -1,59 +1,38 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#090a0d"/>
-      <stop offset="0.62" stop-color="#111318"/>
-      <stop offset="1" stop-color="#18142a"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="0.84" cy="0.12" r="0.72">
-      <stop offset="0" stop-color="#8b6bff" stop-opacity="0.34"/>
-      <stop offset="1" stop-color="#8b6bff" stop-opacity="0"/>
-    </radialGradient>
-    <pattern id="grid" width="52" height="52" patternUnits="userSpaceOnUse">
-      <path d="M52 0H0V52" fill="none" stroke="#f1f3ee" stroke-opacity="0.035"/>
-    </pattern>
-  </defs>
-
-  <rect width="1200" height="630" fill="url(#bg)"/>
-  <rect width="1200" height="630" fill="url(#glow)"/>
-  <rect width="1200" height="630" fill="url(#grid)"/>
-
-  <g opacity="0.15" stroke="#c7ff62" fill="none">
-    <circle cx="1080" cy="48" r="120"/>
-    <circle cx="1080" cy="48" r="178"/>
-    <circle cx="1080" cy="48" r="236"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">PolicyPool — coverable agent work</title>
+  <desc id="desc">Editorial cream social card with the PolicyPool promise and a public reserve covenant ticket.</desc>
+  <rect width="1200" height="630" fill="#F4F1E8"/>
+  <path d="M0 0h1200v630H0z" fill="none" stroke="#122C2C" stroke-opacity=".18"/>
+  <g opacity=".16" stroke="#122C2C">
+    <path d="M0 80h1200M0 160h1200M0 240h1200M0 320h1200M0 400h1200M0 480h1200M0 560h1200"/>
+    <path d="M80 0v630M160 0v630M240 0v630M320 0v630M400 0v630M480 0v630M560 0v630M640 0v630M720 0v630M800 0v630M880 0v630M960 0v630M1040 0v630M1120 0v630"/>
   </g>
-
-  <g transform="translate(66 54)">
-    <rect width="48" height="48" rx="12" fill="#171321" stroke="#c7ff62" stroke-opacity="0.22"/>
-    <path d="M24 8 37 13v11c0 9-5 16-13 21-8-5-13-12-13-21V13L24 8Z" fill="#8b6bff"/>
-    <path d="M15 25h18" stroke="#c7ff62" stroke-width="4"/>
-    <circle cx="24" cy="25" r="7" fill="#171321" stroke="#c7ff62" stroke-width="4"/>
-    <text x="66" y="33" fill="#f1f3ee" font-family="Manrope, sans-serif" font-size="26" font-weight="800">PolicyPool</text>
-    <circle cx="879" cy="23" r="4" fill="#59e3a2"/>
-    <text x="1068" y="29" text-anchor="end" fill="#a4aaa2" font-family="IBM Plex Mono, monospace" font-size="14">LIVE / OKX.AI #4674 / X LAYER</text>
+  <g transform="translate(72 60)">
+    <rect width="48" height="48" rx="13" fill="#141022"/>
+    <path d="M24 8 38 14v12c0 10-6 17-14 22-8-5-14-12-14-22V14L24 8Z" fill="#7C3AED"/>
+    <circle cx="24" cy="25" r="8" fill="none" stroke="#C4FF5E" stroke-width="4"/>
+    <path d="M17 25h14" stroke="#C4FF5E" stroke-width="4"/>
+    <text x="64" y="34" fill="#122C2C" font-family="Arial, sans-serif" font-size="25" font-weight="700">PolicyPool</text>
   </g>
-
-  <g transform="translate(66 162)">
-    <text fill="#c7ff62" font-family="IBM Plex Mono, monospace" font-size="14" font-weight="600" letter-spacing="2">FUNDED COVERAGE FOR AGENT WORK</text>
-    <text y="91" fill="#f1f3ee" font-family="Manrope, sans-serif" font-size="86" font-weight="800" letter-spacing="-5">Agent work,</text>
-    <text y="177" fill="#c7ff62" font-family="Manrope, sans-serif" font-size="86" font-weight="800" letter-spacing="-5">now coverable.</text>
-    <text y="229" fill="#a4aaa2" font-family="Manrope, sans-serif" font-size="21">Accepted order. Bounded cap. Public reserve. Receipted outcome.</text>
+  <text x="72" y="184" fill="#35504E" font-family="monospace" font-size="15" font-weight="700" letter-spacing="2">LIVE ON OKX.AI · X LAYER</text>
+  <text x="72" y="292" fill="#122C2C" font-family="Georgia, serif" font-size="86" font-weight="500" letter-spacing="-4">Promises are cheap.</text>
+  <text x="72" y="390" fill="#E5533C" font-family="Georgia, serif" font-size="92" font-style="italic" letter-spacing="-4">Coverage isn’t.</text>
+  <text x="76" y="456" fill="#35504E" font-family="Arial, sans-serif" font-size="23">Accepted job. Published policy. Public reserve.</text>
+  <g transform="translate(765 86)">
+    <rect x="14" y="14" width="350" height="452" fill="#122C2C"/>
+    <path d="M0 0h350v452H0z" fill="#BFE8D0" stroke="#122C2C" stroke-width="2"/>
+    <text x="28" y="44" fill="#122C2C" font-family="monospace" font-size="12" font-weight="700" letter-spacing="1">FUNDED COVENANT</text>
+    <circle cx="304" cy="39" r="6" fill="#169765"/>
+    <circle cx="350" cy="154" r="14" fill="#F4F1E8" stroke="#122C2C"/>
+    <circle cy="154" r="14" fill="#F4F1E8" stroke="#122C2C"/>
+    <path d="M0 154h350" stroke="#122C2C" stroke-dasharray="5 6" opacity=".55"/>
+    <text x="28" y="212" fill="#122C2C" font-family="monospace" font-size="11">01  ACCEPTED</text>
+    <path d="M28 238h294" stroke="#122C2C" opacity=".4"/>
+    <text x="28" y="281" fill="#122C2C" font-family="monospace" font-size="11">02  CAP BOUNDED</text>
+    <path d="M28 307h294" stroke="#122C2C" opacity=".4"/>
+    <text x="28" y="350" fill="#122C2C" font-family="monospace" font-size="11">03  RELEASED OR PAID</text>
+    <rect x="28" y="382" width="294" height="42" rx="21" fill="#E5533C"/>
+    <text x="175" y="408" text-anchor="middle" fill="#122C2C" font-family="Arial, sans-serif" font-size="14" font-weight="700">EVERY OUTCOME RECEIPTED</text>
   </g>
-
-  <g transform="translate(66 478)">
-    <rect width="522" height="96" rx="18" fill="#101513" stroke="#59e3a2" stroke-opacity="0.24"/>
-    <circle cx="42" cy="48" r="18" fill="#59e3a2" fill-opacity="0.12"/>
-    <path d="m35 51 6 6 10-16" fill="none" stroke="#59e3a2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="76" y="39" fill="#737a72" font-family="IBM Plex Mono, monospace" font-size="12">DELIVERED ON TIME</text>
-    <text x="76" y="66" fill="#f1f3ee" font-family="Manrope, sans-serif" font-size="20" font-weight="700">Capacity returns to the pool.</text>
-
-    <g transform="translate(546)">
-      <rect width="522" height="96" rx="18" fill="#17130f" stroke="#ffbd6b" stroke-opacity="0.24"/>
-      <circle cx="42" cy="48" r="18" fill="#ffbd6b" fill-opacity="0.12"/>
-      <path d="M42 36v18m-6-6 6 6 6-6" fill="none" stroke="#ffbd6b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-      <text x="76" y="39" fill="#737a72" font-family="IBM Plex Mono, monospace" font-size="12">DEADLINE MISSED</text>
-      <text x="76" y="66" fill="#f1f3ee" font-family="Manrope, sans-serif" font-size="20" font-weight="700">The reserve pays the buyer.</text>
-    </g>
-  </g>
+  <text x="72" y="574" fill="#122C2C" font-family="monospace" font-size="14">POLICYPOOL.VERCEL.APP</text>
 </svg>

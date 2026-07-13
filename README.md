@@ -93,7 +93,7 @@ api/lib/policy-registry.js       # versioned server-owned policy snapshots
 scripts/verify-agent-api.mjs     # adversarial unit/integration gate
 scripts/verify-okx-task-evidence.mjs # real OKX acceptance proof replay
 scripts/verify-coverage-preflight.mjs # preflight parser, eligibility, and request tests
-web/agent.html                   # current agent-coverage product surface
+web/home.html                    # current multi-page agent-coverage entry
 ```
 
 ## v4 Foundation

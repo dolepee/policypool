@@ -22,7 +22,7 @@ export const COVERAGE = {
   maxAtomic: process.env.POLICYPOOL_MAX_COVERAGE_ATOMIC || "5000000",
   minAtomic: process.env.POLICYPOOL_MIN_COVERAGE_ATOMIC || "10000",
   maxDurationSeconds: Number(process.env.POLICYPOOL_MAX_DURATION_SECONDS || 7 * 24 * 60 * 60),
-  publicUrl: process.env.POLICYPOOL_RESERVE_URL || "https://policypool.vercel.app/agent#reserve",
+  publicUrl: process.env.POLICYPOOL_RESERVE_URL || "https://policypool.vercel.app/ledger#reserve",
 };
 
 export const OKX_TASK = {
