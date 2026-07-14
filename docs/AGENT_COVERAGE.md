@@ -8,7 +8,7 @@ PolicyPool Agent Coverage is the OKX.AI-facing adapter for PolicyPool. It turns 
 - Price: 0.1 USDT
 - Endpoint: `/api/covered-job-receipt`
 - Listed provider: PolicyPool Agent `#4674`
-- Registered targets in v0.2: GlassDesk Agent `#3465` services `#30019`, `#30020`, and `#30021`; Foreman Agent `#4348` service `#27669`
+- Registered targets in v0.2: GlassDesk Agent `#3465` services `#30019`, `#30020`, and `#30021`; Foreman Agent `#4348` service `#33357`
 - Minimum requested coverage: 0.5 USDT. Smaller requests are declined by the free preflight before payment.
 
 Input:

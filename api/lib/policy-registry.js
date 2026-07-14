@@ -4,7 +4,7 @@ const FOREMAN_POLICY = {
   agentId: "4348",
   agentName: "Foreman",
   providerWallet: "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7",
-  serviceIds: ["27669"],
+  serviceIds: ["33357"],
   serviceName: "Launch Readiness Pack",
   serviceType: "A2MCP",
   publishedScope: [
@@ -28,7 +28,7 @@ const FOREMAN_POLICY = {
   slaSeconds: 300,
   source: {
     kind: "OKX.AI listed service snapshot",
-    capturedAt: "2026-07-10T10:45:00.000Z",
+    capturedAt: "2026-07-14T00:00:00.000Z",
   },
 };
 
