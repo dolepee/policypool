@@ -6,6 +6,13 @@ import { findPublishedPolicy, listPublishedPolicies } from "./lib/policy-registr
 import { evaluateGuard } from "./covered-job-receipt.js";
 import { clean, formatUsdtAtomic, header, parseUsdtAtomic, sendJson } from "./lib/utils.js";
 
+const INPUT_ALIASES = {
+  targetAgent: ["targetAgent", "agent", "agentId", "serviceId", "targetService"],
+  taskReference: ["taskReference", "taskUrl", "okxTask", "publicTaskId", "jobUrl"],
+  requestedCoverageUSDT: ["requestedCoverageUSDT", "coverageCapUSDT", "capUSDT", "coverageAmountUSDT"],
+};
+const CONTAINER_KEYS = new Set(["input", "data", "payload", "request", "parameters", "arguments", "context", "body"]);
+
 function supportedTargets() {
   return listPublishedPolicies().map((policy) => ({
     agentId: policy.agentId,
@@ -20,13 +27,39 @@ function supportedTargets() {
 function readInput(req) {
   const source = req.method === "POST" ? req.body : req.query;
   const body = source && typeof source === "object" && !Array.isArray(source) ? source : {};
+  const records = [body];
+  const queue = [{ value: body, depth: 0 }];
+  const seen = new Set([body]);
+  while (queue.length > 0) {
+    const { value, depth } = queue.shift();
+    if (depth >= 3) continue;
+    for (const [key, child] of Object.entries(value)) {
+      if (!child || typeof child !== "object" || Array.isArray(child) || seen.has(child)) continue;
+      if (CONTAINER_KEYS.has(key) || depth === 0) {
+        records.push(child);
+        queue.push({ value: child, depth: depth + 1 });
+        seen.add(child);
+      }
+    }
+  }
+  const readAlias = (aliases, max = 900) => {
+    for (const alias of aliases) {
+      const wanted = alias.toLowerCase().replace(/[^a-z0-9]/g, "");
+      for (const record of records) {
+        for (const [key, value] of Object.entries(record)) {
+          if (key.toLowerCase().replace(/[^a-z0-9]/g, "") !== wanted || (value && typeof value === "object")) continue;
+          const result = clean(value, max);
+          if (result) return result;
+        }
+      }
+    }
+    return "";
+  };
+  const requested = readAlias(INPUT_ALIASES.requestedCoverageUSDT, 40) || "1";
   return {
-    targetAgent: clean(body.targetAgent || body.agent || body.agentId || body.serviceId),
-    taskReference: clean(body.taskReference || body.taskUrl || body.okxTask || body.publicTaskId, 300),
-    requestedCoverageAtomic: parseUsdtAtomic(
-      String(body.requestedCoverageUSDT ?? body.coverageCapUSDT ?? body.capUSDT ?? "1"),
-      PAYMENT.decimals,
-    ),
+    targetAgent: readAlias(INPUT_ALIASES.targetAgent),
+    taskReference: readAlias(INPUT_ALIASES.taskReference, 300),
+    requestedCoverageAtomic: parseUsdtAtomic(requested, PAYMENT.decimals),
   };
 }
 

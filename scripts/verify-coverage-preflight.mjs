@@ -127,6 +127,22 @@ assert.equal(eligible.json().paidRequest.body.targetAcceptanceTxHash, ACCEPTANCE
 assert.equal(eligible.json().paidRequest.body.jobDescription, task.description);
 assert.equal(eligible.json().paidRequest.endpoint, "https://policypool.test/api/covered-job-receipt");
 
+const nestedEligible = await callHandler(handler, {
+  method: "POST",
+  headers: { host: "policypool.test" },
+  body: {
+    agentId: "4674",
+    input: {
+      targetAgent: "3465",
+      taskUrl: task.publicUrl,
+      coverageAmountUSDT: "0.5",
+    },
+  },
+});
+assert.equal(nestedEligible.statusCode, 200);
+assert.equal(nestedEligible.json().eligible, true, "nested automated-buyer preflight input must be preserved");
+assert.equal(nestedEligible.json().coverage.capUSDT, "0.5");
+
 let fetchedUnknown = false;
 const unknown = await callHandler(createCoveragePreflightHandler({
   taskFetcher: async () => {

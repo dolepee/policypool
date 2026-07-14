@@ -27,6 +27,18 @@ const FORBIDDEN_PATTERNS = [
   [/ignore (all )?(previous|prior) instructions|disregard (your|the) restrictions/i, "instruction_override_attempt"],
 ];
 
+const INPUT_ALIASES = {
+  targetAgent: ["targetAgent", "agent", "agentId", "serviceId", "targetService"],
+  targetJobId: ["targetJobId", "jobId", "taskId"],
+  targetCreationTxHash: ["targetCreationTxHash", "creationTxHash", "jobCreationTxHash"],
+  targetAcceptanceTxHash: ["targetAcceptanceTxHash", "acceptanceTxHash", "jobAcceptanceTxHash"],
+  jobDescription: ["jobDescription", "job", "task", "prompt", "description", "scope"],
+  requestedDeadline: ["deadline", "dueAt", "expiresAt"],
+  requestedCoverageUSDT: ["requestedCoverageUSDT", "coverageCapUSDT", "capUSDT", "coverageAmountUSDT"],
+};
+
+const CONTAINER_KEYS = new Set(["input", "data", "payload", "request", "parameters", "arguments", "context", "body"]);
+
 const OUTPUT_SCHEMA = {
   input: {
     type: "http",
@@ -117,25 +129,57 @@ function paymentRequired(req, res, error = "Payment required") {
   });
 }
 
+function normalizeKey(value) {
+  return String(value).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function collectRecords(body) {
+  const records = [body];
+  const queue = [{ value: body, depth: 0 }];
+  const seen = new Set([body]);
+  while (queue.length > 0) {
+    const { value, depth } = queue.shift();
+    if (depth >= 3) continue;
+    for (const [key, child] of Object.entries(value)) {
+      if (!child || typeof child !== "object" || Array.isArray(child) || seen.has(child)) continue;
+      if (CONTAINER_KEYS.has(key) || depth === 0) {
+        records.push(child);
+        queue.push({ value: child, depth: depth + 1 });
+        seen.add(child);
+      }
+    }
+  }
+  return records;
+}
+
+function readAlias(records, aliases, max = 900) {
+  for (const alias of aliases) {
+    const wanted = normalizeKey(alias);
+    for (const record of records) {
+      for (const [key, value] of Object.entries(record)) {
+        if (normalizeKey(key) !== wanted || (value && typeof value === "object")) continue;
+        const result = clean(value, max);
+        if (result) return result;
+      }
+    }
+  }
+  return "";
+}
+
 function readInput(req) {
   const source = req.method === "POST" ? req.body : req.query;
   const body = source && typeof source === "object" && !Array.isArray(source) ? source : {};
-  const requested = body.requestedCoverageUSDT ?? body.coverageCapUSDT ?? body.capUSDT ?? "1";
+  const records = collectRecords(body);
+  const requested = readAlias(records, INPUT_ALIASES.requestedCoverageUSDT, 40) || "1";
   return {
-    targetAgent: clean(body.targetAgent || body.agent || body.agentId || body.serviceId),
-    targetJobId: clean(body.targetJobId || body.jobId, 80),
-    targetCreationTxHash: clean(body.targetCreationTxHash || body.creationTxHash, 80),
-    targetAcceptanceTxHash: clean(body.targetAcceptanceTxHash || body.acceptanceTxHash, 80),
-    jobDescription: clean(body.jobDescription || body.job || body.task || body.prompt),
-    requestedDeadline: clean(body.deadline || body.dueAt || body.expiresAt, 80),
+    targetAgent: readAlias(records, INPUT_ALIASES.targetAgent),
+    targetJobId: readAlias(records, INPUT_ALIASES.targetJobId, 80),
+    targetCreationTxHash: readAlias(records, INPUT_ALIASES.targetCreationTxHash, 80),
+    targetAcceptanceTxHash: readAlias(records, INPUT_ALIASES.targetAcceptanceTxHash, 80),
+    jobDescription: readAlias(records, INPUT_ALIASES.jobDescription),
+    requestedDeadline: readAlias(records, INPUT_ALIASES.requestedDeadline, 80),
     requestedCoverageAtomic: parseUsdtAtomic(String(requested), PAYMENT.decimals),
   };
-}
-
-function readTargetAgent(req) {
-  const source = req.method === "POST" ? req.body : req.query;
-  const body = source && typeof source === "object" && !Array.isArray(source) ? source : {};
-  return clean(body.targetAgent || body.agent || body.agentId || body.serviceId);
 }
 
 function supportedTargets() {
@@ -294,6 +338,19 @@ function respondWithRecord(res, record) {
   });
 }
 
+function rejectStaticGuard(res, guard) {
+  const payload = {
+    ok: false,
+    error: guard.reason,
+    charged: false,
+  };
+  if (guard.reason === "requested_coverage_below_minimum") {
+    payload.minimumCoverageUSDT = formatUsdtAtomic(BigInt(COVERAGE.minAtomic), PAYMENT.decimals);
+  }
+  const status = guard.reason === "registered_policy_sla_invalid" ? 503 : 400;
+  return sendJson(res, status, payload);
+}
+
 export function createHandler(dependencies = {}) {
   let runtimeChain = dependencies.chain;
   let runtimeLedger = dependencies.ledger;
@@ -317,7 +374,8 @@ export function createHandler(dependencies = {}) {
       return sendJson(res, 405, { ok: false, error: "method_not_allowed" });
     }
 
-    const targetAgent = readTargetAgent(req);
+    const input = readInput(req);
+    const targetAgent = input.targetAgent;
     const policy = targetAgent ? findPublishedPolicy(targetAgent) : null;
     if (targetAgent && !policy) {
       return sendJson(res, 422, {
@@ -329,7 +387,9 @@ export function createHandler(dependencies = {}) {
     }
 
     const paymentSignature = header(req, "payment-signature");
-    if (!paymentSignature) return paymentRequired(req, res);
+    if (!targetAgent && req.method === "GET" && !paymentSignature) {
+      return paymentRequired(req, res);
+    }
     if (!targetAgent) {
       return sendJson(res, 400, {
         ok: false,
@@ -337,6 +397,14 @@ export function createHandler(dependencies = {}) {
         charged: false,
         supportedTargets: supportedTargets(),
       });
+    }
+
+    const staticGuard = evaluateGuard(input, policy);
+    if (!paymentSignature) {
+      if (req.method === "POST" && staticGuard.verdict === "BLOCK") {
+        return rejectStaticGuard(res, staticGuard);
+      }
+      return paymentRequired(req, res);
     }
 
     let ledger;
@@ -368,6 +436,8 @@ export function createHandler(dependencies = {}) {
       });
     }
 
+    if (staticGuard.verdict === "BLOCK") return rejectStaticGuard(res, staticGuard);
+
     const requirements = paymentRequirements();
     let verified;
     try {
@@ -382,16 +452,7 @@ export function createHandler(dependencies = {}) {
       return paymentRequired(req, res, "payment_verification_failed");
     }
 
-    const input = readInput(req);
-    let guard = evaluateGuard(input, policy);
-    if (guard.verdict === "BLOCK" && guard.reason === "requested_coverage_below_minimum") {
-      return sendJson(res, 400, {
-        ok: false,
-        error: guard.reason,
-        charged: false,
-        minimumCoverageUSDT: formatUsdtAtomic(BigInt(COVERAGE.minAtomic), PAYMENT.decimals),
-      });
-    }
+    let guard = staticGuard;
     let targetOrder = null;
     let reserveBalanceAtomic;
     let coverageCapAtomic = 0n;

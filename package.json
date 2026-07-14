@@ -7,7 +7,7 @@
   "scripts": {
     "build": "npm run build --prefix web",
     "typecheck": "node --check api/*.js && node --check api/lib/*.js && node --check scripts/*.mjs && node --check scripts/lib/*.mjs && python3 -m py_compile scripts/policypool_fast_responder.py scripts/policypool_review_watch.py",
-    "agent:verify": "node scripts/verify-agent-api.mjs",
+    "agent:verify": "node scripts/verify-agent-api.mjs && python3 scripts/policypool_fast_responder.py --self-test",
     "agent:verify-preflight": "node scripts/verify-coverage-preflight.mjs",
     "agent:verify-payout-runner": "node scripts/verify-payout-runner.mjs",
     "agent:verify-chain": "node scripts/verify-okx-task-evidence.mjs",

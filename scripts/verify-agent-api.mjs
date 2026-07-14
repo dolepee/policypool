@@ -197,7 +197,7 @@ assert.equal(belowMinimumPaidResponse.statusCode, 400);
 assert.equal(belowMinimumPaidResponse.json().error, "requested_coverage_below_minimum");
 assert.equal(belowMinimumPaidResponse.json().charged, false);
 assert.equal(belowMinimumPaidResponse.json().minimumCoverageUSDT, "0.5");
-assert.equal(belowMinimumPaid.calls.verify, 1, "the signed authorization may be verified but must not settle");
+assert.equal(belowMinimumPaid.calls.verify, 0, "static coverage errors must fail before payment verification");
 assert.equal(belowMinimumPaid.calls.settle, 0, "below-minimum coverage must not settle payment");
 assert.equal(belowMinimumPaid.calls.target, 0, "below-minimum coverage must not perform target verification");
 assert.equal((await belowMinimumPaid.ledger.stats()).recordCount, 0, "below-minimum coverage must not write a receipt");
@@ -217,6 +217,29 @@ assert.equal(halfDollarTargetResponse.json().receipt.outcome.type, "ISSUED");
 assert.equal(halfDollarTargetResponse.json().receipt.covenant.coverageCapUSDT, "0.5");
 assert.equal((await halfDollarTarget.ledger.stats()).activeAtomic, "500000");
 assert.equal(halfDollarTarget.calls.settle, 1);
+
+const nestedBuyer = makeRuntime({ targetAmountAtomic: "500000" });
+const nestedBuyerResponse = await callHandler(nestedBuyer.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("nested-buyer") },
+  body: {
+    agentId: "4674",
+    request: {
+      targetAgent: "4348",
+      taskId: `0x${"6".repeat(64)}`,
+      jobCreationTxHash: CREATION_TX,
+      jobAcceptanceTxHash: ACCEPTANCE_TX,
+      scope: "Create a launch readiness verdict and proof checklist for AgentForge.",
+      coverageAmountUSDT: "0.5",
+    },
+  },
+});
+assert.equal(nestedBuyerResponse.statusCode, 200, "nested automated-buyer input must be preserved");
+assert.equal(nestedBuyerResponse.json().receipt.target.agentName, "Foreman");
+assert.equal(nestedBuyerResponse.json().receipt.targetJob.jobId, `0x${"6".repeat(64)}`);
+assert.equal(nestedBuyerResponse.json().receipt.covenant.coverageCapUSDT, "0.5");
+assert.equal(nestedBuyer.calls.verify, 1);
+assert.equal(nestedBuyer.calls.settle, 1);
 
 const paidHeader = makePaymentHeader("issued");
 const paid = await callHandler(primary.handler, {
@@ -313,9 +336,30 @@ const outsideScopeResponse = await callHandler(outsideScope.handler, {
     jobDescription: "Prepare an unrelated restaurant reservation.",
   },
 });
-assert.equal(outsideScopeResponse.statusCode, 200);
-assert.equal(outsideScopeResponse.json().receipt.outcome.reason, "job_outside_registered_policy");
+assert.equal(outsideScopeResponse.statusCode, 400);
+assert.equal(outsideScopeResponse.json().error, "job_outside_registered_policy");
+assert.equal(outsideScopeResponse.json().charged, false);
+assert.equal(outsideScope.calls.verify, 0, "out-of-policy jobs must fail before payment verification");
+assert.equal(outsideScope.calls.settle, 0, "out-of-policy jobs must never settle");
 assert.equal(outsideScope.calls.target, 0, "out-of-policy jobs must not reach target verifier");
+assert.equal((await outsideScope.ledger.stats()).recordCount, 0, "out-of-policy jobs must not write a receipt");
+
+const missingEvidence = makeRuntime();
+const missingEvidenceResponse = await callHandler(missingEvidence.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("missing-evidence") },
+  body: {
+    targetAgent: "Foreman#4348",
+    jobDescription: "Create a launch readiness verdict and proof checklist.",
+    requestedCoverageUSDT: "0.5",
+  },
+});
+assert.equal(missingEvidenceResponse.statusCode, 400);
+assert.equal(missingEvidenceResponse.json().error, "target_job_id_required");
+assert.equal(missingEvidenceResponse.json().charged, false);
+assert.equal(missingEvidence.calls.verify, 0);
+assert.equal(missingEvidence.calls.settle, 0);
+assert.equal((await missingEvidence.ledger.stats()).recordCount, 0);
 
 const invalidEvidence = makeRuntime({ targetError: "target_job_not_accepted:2" });
 const invalidEvidenceResponse = await callHandler(invalidEvidence.handler, {
