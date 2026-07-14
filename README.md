@@ -67,7 +67,7 @@ npm run agent:gate
 
 `agent:gate` runs syntax checks, adversarial payment/accounting tests, a live X Layer acceptance-proof replay, the chat safety probe, and the web build.
 
-The coverage preflight is free and read-only. It never reserves capacity or signs a payment. A green result assembles the exact body for the listed paid service; the paid request must come from the target job's verified buyer wallet, and settlement atomically rechecks reserve capacity.
+The coverage preflight is free and read-only. It never reserves capacity or signs a payment. A green result assembles the exact body for the listed paid service. Forward `paidRequest.body` verbatim: do not summarize or rewrite `jobDescription`, and do not replace either transaction hash. The paid request must come from the target job's verified buyer wallet, and settlement atomically rechecks reserve capacity.
 
 ```bash
 npm run agent:verify-live
