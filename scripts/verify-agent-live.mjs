@@ -146,8 +146,31 @@ const controlledLedgerRecord = ledgerBody.records.find((record) => record.receip
 assert.ok(controlledLedgerRecord, "controlled payout receipt must appear in the public ledger");
 assert.equal(controlledLedgerRecord.state, "paid");
 assert.equal(controlledLedgerRecord.payoutTx, payoutTransaction);
-assert.equal(ledgerBody.liabilities.payoutDueAtomic, "0");
-assert.equal(ledgerBody.reserve.committedAtomic, "0");
+
+const liabilityForState = (state) => ledgerBody.records
+  .filter((record) => record.state === state)
+  .reduce((total, record) => total + BigInt(record.liabilityAtomic), 0n);
+const activeAtomic = liabilityForState("active");
+const pendingAtomic = liabilityForState("pending");
+const payoutDueAtomic = liabilityForState("payout_due");
+const committedAtomic = activeAtomic + pendingAtomic + payoutDueAtomic;
+
+assert.equal(BigInt(ledgerBody.liabilities.activeAtomic), activeAtomic);
+assert.equal(BigInt(ledgerBody.liabilities.pendingAtomic), pendingAtomic);
+assert.equal(BigInt(ledgerBody.liabilities.payoutDueAtomic), payoutDueAtomic);
+assert.equal(BigInt(ledgerBody.liabilities.committedAtomic), committedAtomic);
+assert.equal(BigInt(ledgerBody.reserve.committedAtomic), committedAtomic);
+assert.equal(
+  BigInt(ledgerBody.reserve.availableAtomic),
+  BigInt(ledgerBody.reserve.balanceAtomic) - committedAtomic,
+  "available reserve must equal live balance minus current commitments",
+);
+assert.equal(ledgerBody.liabilities.recordCount, ledgerBody.records.length);
+assert.equal(
+  ["pending", "active", "payout_due"].includes(controlledLedgerRecord.state),
+  false,
+  "the paid controlled proof must not remain a committed liability",
+);
 
 console.log(`PolicyPool live fail-closed verifier passed: ${endpoint}`);
 console.log(`PolicyPool controlled payout verified independently on X Layer: ${payoutTransaction}`);
