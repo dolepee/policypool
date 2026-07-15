@@ -14,6 +14,7 @@ PolicyPool does not rate subjective quality, accept caller-supplied policy overr
 [Agent Coverage](https://policypool.vercel.app) ·
 [Free coverage preflight](https://policypool.vercel.app/api/coverage-preflight) ·
 [Paid API](https://policypool.vercel.app/api/covered-job-receipt) ·
+[Integration manifest](https://policypool.vercel.app/api/manifest) ·
 [Coverage ledger](https://policypool.vercel.app/api/coverage-ledger) ·
 [OKX.AI Agent #4674](https://okx.ai) ·
 [v4 foundation](https://policypool.vercel.app/hook)
@@ -21,12 +22,12 @@ PolicyPool does not rate subjective quality, accept caller-supplied policy overr
 ## Agent Coverage Loop
 
 1. The target agent must have a versioned policy snapshot in `api/lib/policy-registry.js`.
-2. The free preflight accepts an OKX.AI task URL or public task ID, reads the public task state, and resolves its onchain job ID plus creation and acceptance transactions. Advanced callers may supply the resolved evidence directly to the paid endpoint.
+2. The free preflight accepts an OKX.AI task URL or public task ID, reads the public task state, resolves its onchain evidence, and returns a signed short-lived quote bound to that job and buyer. Advanced callers may still supply the resolved evidence directly to the paid endpoint.
 3. `api/lib/chain.js` verifies both transactions against the public task escrow and binds buyer, job, provider wallet, agent ID, token, paid amount, service type, and the exact accepted-service hash. The coverage payer must own the target job.
-4. A valid signed service payment is verified and settled. The resulting token `Transfer` is read back from X Layer before the API returns success.
+4. The paid endpoint recovers the canonical request from the quote URL, x402 requirements, request body, or exactly one open quote for the verified payer. Zero or multiple payer matches fail without settlement. The full eligibility pass runs again before a valid signed service payment is settled.
 5. The durable ledger atomically checks that active, pending, and payout-due liabilities plus the new cap do not exceed the live reserve.
-6. The deadline is derived from the verified acceptance block plus the registered target-policy SLA; callers cannot shorten or extend it.
-7. The reconciler reads `getJobStatus(bytes32)`. An accepted job still undelivered after that derived deadline becomes `payout_due`; a completed or refunded job releases capacity.
+6. Each provider policy publishes an enrollment window. The deadline is derived from the verified acceptance block plus the registered target-policy SLA; callers cannot shorten or extend either clock.
+7. The scheduled reconciler reads `getJobStatus(bytes32)`. An accepted job still undelivered after that derived deadline becomes `payout_due`; a completed or refunded job releases capacity. State changes and failures alert the operator.
 8. `record-payout` accepts no caller assertion. It marks a covenant paid only after verifying reserve wallet, buyer, token, and exact amount in the payout transaction.
 
 The marketplace keeps its own escrow and order lifecycle. PolicyPool adds a capped warranty credit; it is not protocol-native escrow or insurance.
@@ -35,7 +36,7 @@ The marketplace keeps its own escrow and order lifecycle. PolicyPool adds a capp
 
 - Listed service: `Covered Job Receipt`, 0.1 USDT, API service.
 - Listed provider: PolicyPool Agent `#4674` on OKX.AI.
-- Active registered targets in v0.2: GlassDesk `#3465` services `#30019`, `#30020`, and `#30021`; Foreman `#4348` service `#33357`.
+- Active registered targets in v0.3: GlassDesk `#3465` services `#30019`, `#30020`, and `#30021`; Foreman `#4348` service `#33357`.
 - External provider opt-in: Warden `#3808` service `#33461`, with a 0.5 USD₮0 cap and a 300-second clock from funded endpoint arrival. Coverage remains pre-payment blocked until that provider-side start event can be independently verified.
 - Payment asset: X Layer USD₮0, 6 decimals, EIP-3009 domain `USD₮0` version `1`.
 - Objective breach: accepted job still undelivered after the stored deadline.
@@ -68,7 +69,7 @@ npm run agent:gate
 
 `agent:gate` runs syntax checks, adversarial payment/accounting tests, a live X Layer acceptance-proof replay, the chat safety probe, and the web build.
 
-The coverage preflight is free and read-only. It never reserves capacity or signs a payment. A green result assembles the exact body for the listed paid service. Forward `paidRequest.body` verbatim: do not summarize or rewrite `jobDescription`, and do not replace either transaction hash. The paid request must come from the target job's verified buyer wallet, and settlement atomically rechecks reserve capacity.
+The coverage preflight is free and read-only. It never reserves capacity or signs a payment. A green result returns a signed quote and a backward-compatible canonical body. Use `paidRequest.endpoint` as returned; the paid request must come from the target job's verified buyer wallet. The endpoint rechecks job state, policy version, enrollment window, SLA, target-job value, and reserve capacity before settlement, even when a marketplace drops the replay body.
 
 ```bash
 npm run agent:verify-live
@@ -76,7 +77,7 @@ npm run agent:verify-live
 
 The no-secret live verifier checks `HEAD 200`, unpaid `402`, the exact X Layer payment domain, rejection of generic or malformed payment headers, reserve solvency, and the controlled breach payout directly from its X Layer transaction receipt. It does not sign or spend a payment.
 
-Required production configuration is documented in `.env.example`. The paid route fails closed unless both a durable Redis ledger and a real settlement facilitator are configured.
+Required production configuration is documented in `.env.example`. The paid route fails closed unless a durable Redis ledger, dedicated quote secret, and real settlement facilitator are configured. QStash is an optional primary reconciler; the repository's GitHub schedule remains the backup.
 
 ## Repository Map
 
@@ -86,11 +87,14 @@ api/coverage-preflight.js        # free OKX task URL resolver + eligibility chec
 api/coverage-ledger.js           # public reserve and liability ledger
 api/coverage-status.js           # one receipt plus live target-job status
 api/reconcile-coverage.js        # authenticated objective-state reconciler
+api/manifest.js                  # versioned machine-readable integration contract
 api/record-payout.js             # authenticated payout transaction verifier
 api/lib/payment.js               # official x402 decode, verify, settle, transfer proof
 api/lib/chain.js                 # OKX task and token evidence on X Layer
 api/lib/okx-task-page.js         # strict public OKX task-page parser
 api/lib/ledger.js                # atomic durable liability accounting
+api/lib/quote.js                 # signed quote issue, resolve, and payer recovery
+api/lib/notifier.js              # operator transition and failure alerts
 api/lib/policy-registry.js       # versioned server-owned policy snapshots
 scripts/verify-agent-api.mjs     # adversarial unit/integration gate
 scripts/verify-okx-task-evidence.mjs # real OKX acceptance proof replay

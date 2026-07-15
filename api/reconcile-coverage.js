@@ -1,5 +1,7 @@
+import { Receiver } from "@upstash/qstash";
 import { createChainService } from "./lib/chain.js";
 import { createLedger } from "./lib/ledger.js";
+import { createNotifier, reconciliationMessage } from "./lib/notifier.js";
 import { header, sendJson, sha256 } from "./lib/utils.js";
 
 const RELEASE_STATUSES = new Map([
@@ -10,26 +12,67 @@ const RELEASE_STATUSES = new Map([
   [9, "platform_arbitration_refunded_buyer"],
 ]);
 
-function authorized(req) {
+function rawRequestBody(req) {
+  if (typeof req.rawBody === "string") return req.rawBody;
+  if (typeof req.body === "string") return req.body;
+  if (req.body && typeof req.body === "object") return JSON.stringify(req.body);
+  return "";
+}
+
+function requestUrl(req) {
+  if (req.url?.startsWith("http")) return req.url;
+  const proto = header(req, "x-forwarded-proto") || "https";
+  const host = header(req, "x-forwarded-host") || header(req, "host") || "policypool.vercel.app";
+  return `${proto}://${host}${req.url || "/api/reconcile-coverage"}`;
+}
+
+async function authorized(req, dependencies) {
+  if (dependencies.authorized === true) return true;
+  if (typeof dependencies.authorized === "function") return Boolean(await dependencies.authorized(req));
   const expected = process.env.POLICYPOOL_OPERATOR_TOKEN || process.env.CRON_SECRET;
   if (!expected) return false;
-  return header(req, "authorization") === `Bearer ${expected}`;
+  if (header(req, "authorization") !== `Bearer ${expected}`) return false;
+
+  const signature = header(req, "upstash-signature");
+  if (!signature) return true;
+  const currentSigningKey = dependencies.qstashCurrentSigningKey || process.env.QSTASH_CURRENT_SIGNING_KEY;
+  const nextSigningKey = dependencies.qstashNextSigningKey || process.env.QSTASH_NEXT_SIGNING_KEY;
+  if (!currentSigningKey || !nextSigningKey) return false;
+  const receiver = dependencies.qstashReceiver || new Receiver({ currentSigningKey, nextSigningKey });
+  try {
+    return await receiver.verify({
+      signature,
+      body: rawRequestBody(req),
+      url: requestUrl(req),
+      upstashRegion: header(req, "upstash-region") || undefined,
+    });
+  } catch {
+    return false;
+  }
+}
+
+function requestedDryRun(req) {
+  const value = req.query?.dryRun ?? req.body?.dryRun;
+  return value === true || value === "true" || value === "1";
 }
 
 export function createReconcileHandler(dependencies = {}) {
   let ledger = dependencies.ledger;
   let chain = dependencies.chain;
+  let notifier = dependencies.notifier;
   const now = dependencies.now || (() => Date.now());
   return async function handler(req, res) {
     if (req.method !== "POST" && req.method !== "GET") {
       return sendJson(res, 405, { ok: false, error: "method_not_allowed" });
     }
-    if (!dependencies.authorized && !authorized(req)) {
+    if (!await authorized(req, dependencies)) {
       return sendJson(res, 401, { ok: false, error: "unauthorized" });
     }
     try {
       ledger ||= createLedger();
       chain ||= createChainService();
+      notifier ||= createNotifier();
+      const dryRun = requestedDryRun(req);
       const records = await ledger.list(100);
       const changes = [];
       const failures = [];
@@ -60,7 +103,7 @@ export function createReconcileHandler(dependencies = {}) {
                 { ...transition, transitionHash: `sha256:${sha256(transition)}` },
               ],
             };
-            await ledger.markPayoutDue(updated);
+            if (!dryRun) await ledger.markPayoutDue(updated);
             changes.push({ receiptId: record.receiptId, from: "active", to: "payout_due" });
             continue;
           }
@@ -86,7 +129,7 @@ export function createReconcileHandler(dependencies = {}) {
                 { ...transition, transitionHash: `sha256:${sha256(transition)}` },
               ],
             };
-            await ledger.markReleased(updated);
+            if (!dryRun) await ledger.markReleased(updated);
             changes.push({ receiptId: record.receiptId, from: "active", to: "released" });
           }
         } catch (error) {
@@ -96,7 +139,27 @@ export function createReconcileHandler(dependencies = {}) {
           });
         }
       }
-      return sendJson(res, 200, { ok: failures.length === 0, checked: records.length, changes, failures });
+      const generatedAt = new Date(now()).toISOString();
+      let notification = { sent: false, reason: dryRun ? "dry_run" : "no_changes" };
+      if (!dryRun && (changes.length > 0 || failures.length > 0)) {
+        notification = await notifier.send(reconciliationMessage({
+          dryRun,
+          changes,
+          failures,
+          checked: records.length,
+          generatedAt,
+        }));
+      }
+      return sendJson(res, failures.length > 0 ? 503 : 200, {
+        ok: failures.length === 0,
+        version: "0.3.0",
+        dryRun,
+        generatedAt,
+        checked: records.length,
+        changes,
+        failures,
+        notification,
+      });
     } catch (error) {
       return sendJson(res, 503, {
         ok: false,

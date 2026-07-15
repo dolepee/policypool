@@ -23,6 +23,9 @@ jobs:
         run: |
           test -n "$POLICYPOOL_OPERATOR_TOKEN"
           curl --fail-with-body --silent --show-error \
+            --retry 3 \
+            --retry-all-errors \
+            --retry-delay 5 \
             --request POST \
             --header "Authorization: Bearer $POLICYPOOL_OPERATOR_TOKEN" \
             https://policypool.vercel.app/api/reconcile-coverage

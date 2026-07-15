@@ -9,10 +9,12 @@ import { PAYMENT, paymentRequirements } from "../api/lib/config.js";
 import { MemoryLedger } from "../api/lib/ledger.js";
 import { createPaymentService } from "../api/lib/payment.js";
 import { findPublishedPolicy, policyCoverageCapAtomic } from "../api/lib/policy-registry.js";
+import { createQuoteService } from "../api/lib/quote.js";
 import { sha256 } from "../api/lib/utils.js";
 import { callHandler, decodePaymentRequired } from "./lib/fake-vercel.mjs";
 
 const FIXED_NOW = Date.parse("2026-07-10T10:00:00.000Z");
+const QUOTE_SECRET = "policypool-test-quote-secret-32-bytes-minimum";
 const CREATION_TX = `0x${"9".repeat(64)}`;
 const ACCEPTANCE_TX = `0x${"a".repeat(64)}`;
 const TARGET_JOB = `0x${"b".repeat(64)}`;
@@ -45,7 +47,8 @@ function makeRuntime({
   jobStatus = 1,
   targetAmountAtomic = "5000000",
   createdAt = "2026-07-10T09:57:00.000Z",
-  acceptedAt = "2026-07-10T09:58:00.000Z",
+  acceptedAt = "2026-07-10T09:59:30.000Z",
+  clock = () => FIXED_NOW,
 } = {}) {
   const ledger = new MemoryLedger();
   const calls = { verify: 0, settle: 0, target: 0, transfer: 0 };
@@ -123,8 +126,15 @@ function makeRuntime({
     },
   };
   const payment = createPaymentService({ facilitator, chain });
-  const handler = createHandler({ ledger, chain, payment, now: () => FIXED_NOW });
-  return { calls, handler, ledger };
+  const quoteService = createQuoteService({ ledger, secret: QUOTE_SECRET, now: clock });
+  const handler = createHandler({
+    ledger,
+    chain,
+    payment,
+    quoteService,
+    now: clock,
+  });
+  return { calls, handler, ledger, quoteService };
 }
 
 const primary = makeRuntime();
@@ -142,6 +152,160 @@ assert.equal(challenge.accepts[0].extra.version, "1");
 assert.ok(challenge.outputSchema.input.body.required.includes("targetAcceptanceTxHash"));
 assert.ok(challenge.outputSchema.input.body.required.includes("targetCreationTxHash"));
 assert.equal(challenge.outputSchema.input.body.required.includes("deadline"), false);
+assert.match(challenge.accepts[0].extra.policyPoolQuote, /^ppq_[a-f0-9]{32}\.[a-f0-9]{64}$/);
+assert.equal(new URL(challenge.resource.url).searchParams.get("quote"), challenge.accepts[0].extra.policyPoolQuote);
+
+const explicitBodyless = makeRuntime();
+const explicitUnpaid = await callHandler(explicitBodyless.handler, {
+  method: "POST",
+  body: { ...sampleBody, targetJobId: `0x${"1".repeat(64)}` },
+});
+const explicitChallenge = decodePaymentRequired(explicitUnpaid.headers["payment-required"]);
+const explicitBodylessResponse = await callHandler(explicitBodyless.handler, {
+  method: "POST",
+  headers: {
+    "payment-signature": makePaymentHeader("explicit-bodyless", explicitChallenge.accepts[0]),
+  },
+});
+assert.equal(explicitBodylessResponse.statusCode, 200, "a signed quote must survive an empty paid replay body");
+assert.equal(explicitBodylessResponse.json().receipt.targetJob.jobId, `0x${"1".repeat(64)}`);
+assert.equal(explicitBodylessResponse.json().receipt.coverageQuote.canonicalRequestRecovered, true);
+assert.equal(explicitBodyless.calls.settle, 1);
+
+const payerFallback = makeRuntime();
+const foremanPolicy = findPublishedPolicy("Foreman#4348");
+const fallbackQuote = await payerFallback.quoteService.issue({
+  requestBody: { ...sampleBody, targetJobId: `0x${"2".repeat(64)}` },
+  buyer: "0x1111111111111111111111111111111111111111",
+  policyHash: foremanPolicy.policyHash,
+  source: "verified_preflight",
+});
+const payerFallbackResponse = await callHandler(payerFallback.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("payer-fallback") },
+});
+assert.equal(payerFallbackResponse.statusCode, 200, "one payer-bound quote must recover a bodyless generic replay");
+assert.equal(payerFallbackResponse.json().receipt.targetJob.jobId, `0x${"2".repeat(64)}`);
+assert.equal(payerFallbackResponse.json().receipt.coverageQuote.id, fallbackQuote.id);
+assert.equal(payerFallback.calls.verify, 1, "payer recovery must reuse one verified authorization");
+assert.equal(payerFallback.calls.settle, 1);
+
+const ambiguousFallback = makeRuntime();
+for (const digit of ["3", "4"]) {
+  await ambiguousFallback.quoteService.issue({
+    requestBody: { ...sampleBody, targetJobId: `0x${digit.repeat(64)}` },
+    buyer: "0x1111111111111111111111111111111111111111",
+    policyHash: foremanPolicy.policyHash,
+    source: "verified_preflight",
+  });
+}
+const ambiguousResponse = await callHandler(ambiguousFallback.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("ambiguous-fallback") },
+});
+assert.equal(ambiguousResponse.statusCode, 400);
+assert.equal(ambiguousResponse.json().error, "coverage_quote_ambiguous_for_payer");
+assert.equal(ambiguousResponse.json().charged, false);
+assert.equal(ambiguousFallback.calls.verify, 1);
+assert.equal(ambiguousFallback.calls.settle, 0, "ambiguous payer recovery must never settle");
+assert.equal((await ambiguousFallback.ledger.stats()).recordCount, 0);
+
+let dedupeNow = FIXED_NOW;
+const deduplicatedFallback = makeRuntime({ clock: () => dedupeNow });
+const duplicateRequestBody = { ...sampleBody, targetJobId: `0x${"7".repeat(64)}` };
+await deduplicatedFallback.quoteService.issue({
+  requestBody: duplicateRequestBody,
+  buyer: "0x1111111111111111111111111111111111111111",
+  policyHash: foremanPolicy.policyHash,
+  source: "verified_preflight",
+});
+dedupeNow += 1;
+const latestDuplicateQuote = await deduplicatedFallback.quoteService.issue({
+  requestBody: duplicateRequestBody,
+  buyer: "0x1111111111111111111111111111111111111111",
+  policyHash: foremanPolicy.policyHash,
+  source: "verified_preflight",
+});
+const deduplicatedResponse = await callHandler(deduplicatedFallback.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("deduplicated-fallback") },
+});
+assert.equal(deduplicatedResponse.statusCode, 200, "retried quotes for one canonical request must not become ambiguous");
+assert.equal(deduplicatedResponse.json().receipt.coverageQuote.id, latestDuplicateQuote.id);
+assert.equal(deduplicatedFallback.calls.settle, 1);
+
+const buyerMismatch = makeRuntime();
+const mismatchedQuote = await buyerMismatch.quoteService.issue({
+  requestBody: { ...sampleBody, targetJobId: `0x${"5".repeat(64)}` },
+  buyer: "0x2222222222222222222222222222222222222222",
+  policyHash: foremanPolicy.policyHash,
+  source: "verified_preflight",
+});
+const mismatchRequirements = {
+  ...paymentRequirements(),
+  extra: { ...paymentRequirements().extra, policyPoolQuote: mismatchedQuote.token },
+};
+const buyerMismatchResponse = await callHandler(buyerMismatch.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("buyer-mismatch", mismatchRequirements) },
+});
+assert.equal(buyerMismatchResponse.statusCode, 400);
+assert.equal(buyerMismatchResponse.json().error, "coverage_quote_buyer_mismatch");
+assert.equal(buyerMismatchResponse.json().charged, false);
+assert.equal(buyerMismatch.calls.settle, 0);
+
+const changedPolicy = makeRuntime();
+const stalePolicyQuote = await changedPolicy.quoteService.issue({
+  requestBody: { ...sampleBody, targetJobId: `0x${"8".repeat(64)}` },
+  buyer: "0x1111111111111111111111111111111111111111",
+  policyHash: `sha256:${"0".repeat(64)}`,
+  source: "verified_preflight",
+});
+const changedPolicyRequirements = {
+  ...paymentRequirements(),
+  extra: { ...paymentRequirements().extra, policyPoolQuote: stalePolicyQuote.token },
+};
+const changedPolicyResponse = await callHandler(changedPolicy.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("changed-policy", changedPolicyRequirements) },
+});
+assert.equal(changedPolicyResponse.statusCode, 409);
+assert.equal(changedPolicyResponse.json().error, "coverage_quote_policy_changed");
+assert.equal(changedPolicyResponse.json().charged, false);
+assert.equal(changedPolicy.calls.verify, 0);
+assert.equal(changedPolicy.calls.settle, 0);
+
+let expiringNow = FIXED_NOW;
+const expiredQuoteRuntime = makeRuntime({ clock: () => expiringNow });
+const expiringQuote = await expiredQuoteRuntime.quoteService.issue({
+  requestBody: { ...sampleBody, targetJobId: `0x${"6".repeat(64)}` },
+  buyer: "0x1111111111111111111111111111111111111111",
+  policyHash: foremanPolicy.policyHash,
+  source: "verified_preflight",
+});
+expiringNow += 601_000;
+const expiredRequirements = {
+  ...paymentRequirements(),
+  extra: { ...paymentRequirements().extra, policyPoolQuote: expiringQuote.token },
+};
+const expiredQuoteResponse = await callHandler(expiredQuoteRuntime.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("expired-quote", expiredRequirements) },
+});
+assert.equal(expiredQuoteResponse.statusCode, 400);
+assert.equal(expiredQuoteResponse.json().error, "coverage_quote_expired");
+assert.equal(expiredQuoteRuntime.calls.verify, 0);
+assert.equal(expiredQuoteRuntime.calls.settle, 0);
+
+const originalToken = challenge.accepts[0].extra.policyPoolQuote;
+const tamperedToken = `${originalToken.slice(0, -1)}${originalToken.endsWith("0") ? "1" : "0"}`;
+const tamperedQuote = await callHandler(makeRuntime().handler, {
+  method: "POST",
+  query: { quote: tamperedToken },
+});
+assert.equal(tamperedQuote.statusCode, 400);
+assert.equal(tamperedQuote.json().error, "coverage_quote_invalid");
+assert.equal(tamperedQuote.json().charged, false);
 
 const discovery = await callHandler(primary.handler, { method: "GET" });
 assert.equal(discovery.statusCode, 402, "anonymous discovery must still return the payment challenge");
@@ -261,13 +425,13 @@ assert.equal(paidBody.receipt.outcome.type, "ISSUED");
 assert.equal(paidBody.receipt.guard.callerSuppliedPolicyIgnored, true);
 assert.equal(paidBody.receipt.guard.callerSuppliedDeadlineIgnored, true);
 assert.equal(paidBody.receipt.guard.callerSuppliedBreachAndPayoutFieldsIgnored, true);
-assert.equal(paidBody.receipt.guard.derivedCoverageDeadline, "2026-07-10T10:03:00.000Z");
+assert.equal(paidBody.receipt.guard.derivedCoverageDeadline, "2026-07-10T10:04:30.000Z");
 assert.equal(paidBody.receipt.servicePayment.settled, true);
 assert.equal(paidBody.receipt.target.slaSeconds, 300);
 assert.equal(paidBody.receipt.target.serviceType, "A2MCP");
 assert.equal(paidBody.receipt.targetJob.serviceTypeVerified, true);
 assert.equal(paidBody.receipt.targetJob.listedServiceIdMapping, "manual_external_evidence_required");
-assert.equal(paidBody.receipt.covenant.deadline, "2026-07-10T10:03:00.000Z");
+assert.equal(paidBody.receipt.covenant.deadline, "2026-07-10T10:04:30.000Z");
 assert.equal(paidBody.receipt.covenant.coverageCapUSDT, "1");
 assert.match(paidBody.receipt.receiptHash, /^sha256:[a-f0-9]{64}$/);
 assert.equal(primary.calls.settle, 1);
@@ -392,10 +556,12 @@ const invalidEvidenceResponse = await callHandler(invalidEvidence.handler, {
   headers: { "payment-signature": makePaymentHeader("invalid-evidence") },
   body: { ...sampleBody, targetJobId: `0x${"1".repeat(64)}` },
 });
-assert.equal(invalidEvidenceResponse.statusCode, 200);
-assert.equal(invalidEvidenceResponse.json().receipt.outcome.type, "DECLINED");
-assert.equal(invalidEvidenceResponse.json().receipt.outcome.reason, "target_job_not_accepted:2");
-assert.equal((await invalidEvidence.ledger.stats()).activeAtomic, "0");
+assert.equal(invalidEvidenceResponse.statusCode, 400);
+assert.equal(invalidEvidenceResponse.json().error, "target_job_not_accepted:2");
+assert.equal(invalidEvidenceResponse.json().charged, false);
+assert.equal(invalidEvidence.calls.verify, 1, "chain evidence requires a verified payer but must not settle on failure");
+assert.equal(invalidEvidence.calls.settle, 0);
+assert.equal((await invalidEvidence.ledger.stats()).recordCount, 0);
 
 const elapsedSla = makeRuntime({ acceptedAt: "2026-07-10T09:50:00.000Z" });
 const elapsedSlaResponse = await callHandler(elapsedSla.handler, {
@@ -407,12 +573,23 @@ const elapsedSlaResponse = await callHandler(elapsedSla.handler, {
     deadline: "2099-01-01T00:00:00.000Z",
   },
 });
-assert.equal(elapsedSlaResponse.statusCode, 200);
-assert.equal(elapsedSlaResponse.json().receipt.outcome.type, "DECLINED");
-assert.equal(elapsedSlaResponse.json().receipt.outcome.reason, "registered_policy_sla_already_elapsed");
-assert.equal(elapsedSlaResponse.json().receipt.guard.callerSuppliedDeadlineIgnored, true);
-assert.equal(elapsedSlaResponse.json().receipt.guard.derivedCoverageDeadline, "2026-07-10T09:55:00.000Z");
-assert.equal((await elapsedSla.ledger.stats()).committedAtomic, "0");
+assert.equal(elapsedSlaResponse.statusCode, 400);
+assert.equal(elapsedSlaResponse.json().error, "registered_policy_sla_already_elapsed");
+assert.equal(elapsedSlaResponse.json().charged, false);
+assert.equal(elapsedSla.calls.settle, 0);
+assert.equal((await elapsedSla.ledger.stats()).recordCount, 0);
+
+const closedEnrollment = makeRuntime({ acceptedAt: "2026-07-10T09:58:30.000Z" });
+const closedEnrollmentResponse = await callHandler(closedEnrollment.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("closed-enrollment") },
+  body: { ...sampleBody, targetJobId: `0x${"c".repeat(64)}` },
+});
+assert.equal(closedEnrollmentResponse.statusCode, 400);
+assert.equal(closedEnrollmentResponse.json().error, "coverage_enrollment_window_closed");
+assert.equal(closedEnrollmentResponse.json().charged, false);
+assert.equal(closedEnrollment.calls.settle, 0);
+assert.equal((await closedEnrollment.ledger.stats()).recordCount, 0);
 
 const noReserve = makeRuntime({ reserveAtomic: 0n });
 const noReserveResponse = await callHandler(noReserve.handler, {
@@ -420,9 +597,11 @@ const noReserveResponse = await callHandler(noReserve.handler, {
   headers: { "payment-signature": makePaymentHeader("no-reserve") },
   body: { ...sampleBody, targetJobId: `0x${"2".repeat(64)}` },
 });
-assert.equal(noReserveResponse.statusCode, 200);
-assert.equal(noReserveResponse.json().receipt.outcome.reason, "insufficient_uncommitted_reserve");
-assert.equal((await noReserve.ledger.stats()).committedAtomic, "0");
+assert.equal(noReserveResponse.statusCode, 409);
+assert.equal(noReserveResponse.json().error, "insufficient_uncommitted_reserve");
+assert.equal(noReserveResponse.json().charged, false);
+assert.equal(noReserve.calls.settle, 0);
+assert.equal((await noReserve.ledger.stats()).recordCount, 0);
 
 const failedSettlement = makeRuntime({ settlementFails: true });
 const failedSettlementResponse = await callHandler(failedSettlement.handler, {
@@ -443,11 +622,34 @@ const adminStoppedIssued = await callHandler(adminStopped.handler, {
 assert.equal(adminStoppedIssued.statusCode, 200);
 assert.equal(adminStoppedIssued.json().receipt.outcome.type, "ISSUED");
 const adminStoppedReceiptId = adminStoppedIssued.json().receipt.receiptId;
+const adminStoppedDryRun = await callHandler(createReconcileHandler({
+  ledger: adminStopped.ledger,
+  chain: { async getJobStatus() { return 5; } },
+  authorized: true,
+  now: () => FIXED_NOW,
+}), { method: "POST", body: { dryRun: true } });
+assert.equal(adminStoppedDryRun.statusCode, 200);
+assert.equal(adminStoppedDryRun.json().dryRun, true);
+assert.deepEqual(adminStoppedDryRun.json().changes, [{
+  receiptId: adminStoppedReceiptId,
+  from: "active",
+  to: "released",
+}]);
+assert.equal((await adminStopped.ledger.get(adminStoppedReceiptId)).state, "active", "dry-run must not mutate a receipt");
+assert.equal((await adminStopped.ledger.stats()).committedAtomic, "1000000", "dry-run must not release reserve");
+
+const reconciliationNotifications = [];
 const adminStoppedReconcile = await callHandler(createReconcileHandler({
   ledger: adminStopped.ledger,
   chain: { async getJobStatus() { return 5; } },
   authorized: true,
   now: () => FIXED_NOW,
+  notifier: {
+    async send(message) {
+      reconciliationNotifications.push(message);
+      return { sent: true };
+    },
+  },
 }), { method: "POST" });
 assert.equal(adminStoppedReconcile.statusCode, 200);
 assert.deepEqual(adminStoppedReconcile.json().changes, [{
@@ -457,6 +659,36 @@ assert.deepEqual(adminStoppedReconcile.json().changes, [{
 }]);
 assert.equal((await adminStopped.ledger.stats()).committedAtomic, "0");
 assert.equal((await adminStopped.ledger.get(adminStoppedReceiptId)).release.reason, "platform_job_admin_stopped");
+assert.equal(adminStoppedReconcile.json().notification.sent, true);
+assert.match(reconciliationNotifications[0], /active -> released/);
+
+const previousOperatorToken = process.env.POLICYPOOL_OPERATOR_TOKEN;
+process.env.POLICYPOOL_OPERATOR_TOKEN = "test-reconcile-token";
+let qstashVerified = false;
+const qstashAuthorized = await callHandler(createReconcileHandler({
+  ledger: new MemoryLedger(),
+  chain: { async getJobStatus() { return 1; } },
+  qstashCurrentSigningKey: "current-key",
+  qstashNextSigningKey: "next-key",
+  qstashReceiver: {
+    async verify({ signature, body, url }) {
+      qstashVerified = signature === "valid-signature" && body === "" && url.endsWith("/api/reconcile-coverage");
+      return qstashVerified;
+    },
+  },
+}), {
+  method: "GET",
+  url: "/api/reconcile-coverage",
+  headers: {
+    authorization: "Bearer test-reconcile-token",
+    host: "policypool.test",
+    "upstash-signature": "valid-signature",
+  },
+});
+assert.equal(qstashAuthorized.statusCode, 200);
+assert.equal(qstashVerified, true, "QStash requests must verify their signed body and destination URL");
+if (typeof previousOperatorToken === "undefined") delete process.env.POLICYPOOL_OPERATOR_TOKEN;
+else process.env.POLICYPOOL_OPERATOR_TOKEN = previousOperatorToken;
 
 const issuedReceiptId = paidBody.receipt.receiptId;
 const statusBeforeDeadline = await callHandler(createCoverageStatusHandler({

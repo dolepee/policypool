@@ -23,11 +23,15 @@ for (const [file, route] of pages) {
   for (const destination of navigation) {
     assert.ok(html.includes(`href="${destination}"`), `${file} must link to ${destination}`);
   }
+  assert.ok(html.includes('href="/api/manifest"'), `${file} must link to the machine-readable API manifest`);
   const canonical = route === "/" ? "https://policypool.vercel.app/" : `https://policypool.vercel.app${route}`;
   assert.ok(html.includes(`rel="canonical" href="${canonical}"`), `${file} canonical mismatch`);
 }
-
 const vercel = JSON.parse(await readFile(new URL("../vercel.json", import.meta.url), "utf8"));
+assert.ok(
+  vercel.routes.some((entry) => entry.src === "/.well-known/policypool.json" && entry.dest === "/api/manifest.js"),
+  "well-known PolicyPool manifest route must stay stable",
+);
 for (const [file, route] of pages) {
   const source = route === "/" ? "^/$" : route;
   assert.ok(

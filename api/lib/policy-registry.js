@@ -26,6 +26,7 @@ const FOREMAN_POLICY = {
   ],
   allowedKeywords: ["launch", "listing", "demo", "announcement", "readiness", "proof"],
   slaSeconds: 300,
+  enrollmentWindowSeconds: 60,
   coverageStatus: "active",
   clockSource: "verified_acceptance_block",
   source: {
@@ -55,6 +56,7 @@ const GLASSDESK_POLICY = {
   ],
   allowedKeywords: ["market", "token", "contract", "wallet", "holder", "claim", "evidence", "liquidity", "source"],
   slaSeconds: 86_400,
+  enrollmentWindowSeconds: 14_400,
   coverageStatus: "active",
   clockSource: "verified_acceptance_block",
   source: {
@@ -88,6 +90,7 @@ const WARDEN_POLICY = {
     "exfiltration",
   ],
   slaSeconds: 300,
+  enrollmentWindowSeconds: 60,
   maxCoverageAtomic: "500000",
   coverageStatus: "pending_clock_adapter",
   coverageBlockReason: "provider_clock_evidence_not_supported",

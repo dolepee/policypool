@@ -16,6 +16,10 @@
       "dest": "/api/$1.js"
     },
     {
+      "src": "/.well-known/policypool.json",
+      "dest": "/api/manifest.js"
+    },
+    {
       "src": "^/$",
       "dest": "/web/home.html"
     },

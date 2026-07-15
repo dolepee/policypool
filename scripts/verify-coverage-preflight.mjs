@@ -14,6 +14,7 @@ const JOB_ID = `0x${"1".repeat(64)}`;
 const CREATION_TX = `0x${"2".repeat(64)}`;
 const ACCEPTANCE_TX = `0x${"3".repeat(64)}`;
 const BUYER = "0x1111111111111111111111111111111111111111";
+const QUOTE_SECRET = "policypool-test-quote-secret-32-bytes-minimum";
 
 const task = {
   publicTaskId: "401999",
@@ -69,7 +70,20 @@ const chain = {
   },
 };
 
+const quotes = new Map();
 const ledger = {
+  async saveQuote(record) {
+    quotes.set(record.id, structuredClone(record));
+    return record;
+  },
+  async getQuote(id) {
+    return quotes.has(id) ? structuredClone(quotes.get(id)) : null;
+  },
+  async findOpenQuotesByBuyer(buyer) {
+    return [...quotes.values()]
+      .filter((record) => String(record.buyer).toLowerCase() === String(buyer).toLowerCase())
+      .map((record) => structuredClone(record));
+  },
   async stats() {
     return {
       activeAtomic: "500000",
@@ -86,6 +100,7 @@ const handler = createCoveragePreflightHandler({
   ledger,
   taskFetcher: async () => task,
   now: () => Date.parse("2026-07-11T10:02:00.000Z"),
+  quoteSecret: QUOTE_SECRET,
 });
 
 const discovery = await callHandler(handler, { method: "GET" });
@@ -155,7 +170,13 @@ assert.equal(eligible.json().paidRequest.payerMustEqualTargetBuyer.toLowerCase()
 assert.equal(eligible.json().paidRequest.body.targetCreationTxHash, CREATION_TX);
 assert.equal(eligible.json().paidRequest.body.targetAcceptanceTxHash, ACCEPTANCE_TX);
 assert.equal(eligible.json().paidRequest.body.jobDescription, task.description);
-assert.equal(eligible.json().paidRequest.endpoint, "https://policypool.test/api/covered-job-receipt");
+const paidEndpoint = new URL(eligible.json().paidRequest.endpoint);
+assert.equal(`${paidEndpoint.origin}${paidEndpoint.pathname}`, "https://policypool.test/api/covered-job-receipt");
+assert.equal(paidEndpoint.searchParams.get("quote"), eligible.json().quote.token);
+assert.equal(eligible.json().paidRequest.body.quoteId, eligible.json().quote.token);
+assert.equal(eligible.json().paidRequest.bodyMayBeOmittedOnReplay, true);
+assert.match(eligible.json().quote.token, /^ppq_[a-f0-9]{32}\.[a-f0-9]{64}$/);
+assert.equal(eligible.json().coverage.enrollmentClosesAt, "2026-07-11T14:01:00.000Z");
 
 const nestedEligible = await callHandler(handler, {
   method: "POST",

@@ -1,6 +1,6 @@
 {
   "name": "policypool",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "PolicyPool Agent Coverage adds money-backed policy receipts for agent work.",
@@ -9,6 +9,7 @@
     "typecheck": "node --check api/*.js && node --check api/lib/*.js && node --check scripts/*.mjs && node --check scripts/lib/*.mjs && python3 -m py_compile scripts/policypool_fast_responder.py scripts/policypool_review_watch.py",
     "agent:verify": "node scripts/verify-agent-api.mjs && python3 scripts/policypool_fast_responder.py --self-test",
     "agent:verify-preflight": "node scripts/verify-coverage-preflight.mjs",
+    "agent:verify-manifest": "node scripts/verify-manifest.mjs",
     "agent:verify-payout-runner": "node scripts/verify-payout-runner.mjs",
     "agent:verify-chain": "node scripts/verify-okx-task-evidence.mjs",
     "agent:verify-live": "node scripts/verify-agent-live.mjs",
@@ -16,13 +17,15 @@
     "agent:probe": "node scripts/probe-agent-coverage.mjs",
     "ops:breach:check": "node scripts/settle-controlled-breach.mjs",
     "ops:breach:settle": "node scripts/settle-controlled-breach.mjs --execute",
-    "agent:gate": "npm run typecheck && npm run agent:verify && npm run agent:verify-preflight && npm run agent:verify-payout-runner && npm run agent:verify-chain && npm run agent:probe && npm run site:verify && npm run build",
+    "ops:qstash:setup": "node scripts/setup-qstash-schedule.mjs",
+    "agent:gate": "npm run typecheck && npm run agent:verify && npm run agent:verify-preflight && npm run agent:verify-manifest && npm run agent:verify-payout-runner && npm run agent:verify-chain && npm run agent:probe && npm run site:verify && npm run build",
     "agent:gate-live": "npm run agent:gate && npm run agent:verify-live"
   },
   "engines": {
     "node": "22.x"
   },
   "dependencies": {
+    "@upstash/qstash": "^2.11.2",
     "@upstash/redis": "^1.36.2",
     "@x402/core": "^2.17.0",
     "@x402/evm": "^2.17.0",

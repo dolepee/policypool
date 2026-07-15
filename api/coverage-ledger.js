@@ -44,7 +44,7 @@ export function createCoverageLedgerHandler(dependencies = {}) {
       return sendJson(res, 200, {
         ok: true,
         protocol: "PolicyPool Agent Coverage",
-        version: "0.2.0",
+        version: "0.3.0",
         generatedAt: new Date().toISOString(),
         chain: { id: XLAYER.id, name: XLAYER.name },
         asset: { address: PAYMENT.asset, symbol: PAYMENT.symbol, decimals: PAYMENT.decimals },

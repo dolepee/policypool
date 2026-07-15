@@ -98,6 +98,7 @@ export class MemoryLedger {
     this.pendingAtomic = 0n;
     this.payoutDueAtomic = 0n;
     this.payoutTransactions = new Map();
+    this.quotes = new Map();
   }
 
   async findByPaymentId(paymentId) {
@@ -107,6 +108,24 @@ export class MemoryLedger {
 
   async get(receiptId) {
     return this.records.get(receiptId) || null;
+  }
+
+  async saveQuote(record) {
+    if (this.quotes.has(record.id)) throw new Error("coverage_quote_collision");
+    this.quotes.set(record.id, structuredClone(record));
+    return record;
+  }
+
+  async getQuote(id) {
+    const record = this.quotes.get(id);
+    return record ? structuredClone(record) : null;
+  }
+
+  async findOpenQuotesByBuyer(buyer) {
+    const normalized = String(buyer || "").toLowerCase();
+    return [...this.quotes.values()]
+      .filter((record) => String(record.buyer || "").toLowerCase() === normalized)
+      .map((record) => structuredClone(record));
   }
 
   async reserve(record, reserveBalanceAtomic) {
@@ -209,6 +228,33 @@ export class RedisLedger {
 
   async get(receiptId) {
     return parseRecord(await this.redis.get(this.key("receipt", receiptId)));
+  }
+
+  async saveQuote(record, ttlSeconds) {
+    const result = await this.redis.set(
+      this.key("quote", record.id),
+      JSON.stringify(record),
+      { ex: ttlSeconds, nx: true },
+    );
+    if (result !== "OK") throw new Error("coverage_quote_collision");
+    if (record.buyer) await this.redis.sadd(this.key("buyer-quotes", String(record.buyer).toLowerCase()), record.id);
+    return record;
+  }
+
+  async getQuote(id) {
+    return parseRecord(await this.redis.get(this.key("quote", id)));
+  }
+
+  async findOpenQuotesByBuyer(buyer) {
+    const key = this.key("buyer-quotes", String(buyer || "").toLowerCase());
+    const ids = await this.redis.smembers(key);
+    if (!ids.length) return [];
+    const values = await this.redis.mget(...ids.map((id) => this.key("quote", String(id))));
+    const records = values.map(parseRecord).filter(Boolean);
+    const liveIds = new Set(records.map((record) => record.id));
+    const stale = ids.filter((id) => !liveIds.has(String(id)));
+    if (stale.length) await this.redis.srem(key, ...stale);
+    return records;
   }
 
   async reserve(record, reserveBalanceAtomic) {

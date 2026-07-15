@@ -413,6 +413,8 @@ function preflightReason(reason) {
     requested_coverage_exceeds_job_value: "The requested cap exceeds the verified target-job value.",
     reserve_capacity_exceeded: "The public reserve cannot support that cap right now.",
     coverage_already_exists: "That target job already has a covenant record.",
+    coverage_enrollment_window_closed: "The provider's published enrollment window has closed. No payment was settled.",
+    coverage_quote_window_elapsed: "The verified quote window closed before payment. Run preflight again.",
   };
   return reasons[String(reason || "")] || String(reason || "Coverage could not be verified.").replaceAll("_", " ");
 }
@@ -469,7 +471,7 @@ function showPreflightResult(data) {
   verdict.textContent = "Ready to cover";
   chip.textContent = "Verified";
   chip.className = "state-stamp state-released";
-  summary.textContent = "The accepted task, target policy, buyer/provider binding, SLA, and live reserve capacity all passed.";
+  summary.textContent = "The accepted task, target policy, buyer/provider binding, enrollment window, SLA, and live reserve capacity all passed.";
   paid.hidden = false;
   renderPreflightValues([
     { label: "Task", value: data.task.title, href: data.task.publicUrl },
@@ -477,6 +479,8 @@ function showPreflightResult(data) {
     { label: "Coverage cap", value: `${data.coverage.capUSDT} USD₮0` },
     { label: "Service fee", value: `${data.coverage.serviceFeeUSDT} USD₮0` },
     { label: "Deadline", value: dateTime(data.coverage.deadline) },
+    { label: "Enrollment closes", value: dateTime(data.coverage.enrollmentClosesAt) },
+    { label: "Quote expires", value: dateTime(data.quote.expiresAt) },
     { label: "Reserve free", value: `${data.coverage.availableUSDT} USD₮0` },
     { label: "Creation tx", value: short(data.evidence.creationTxHash), href: `${EXPLORER_TX}${data.evidence.creationTxHash}` },
     { label: "Acceptance tx", value: short(data.evidence.acceptanceTxHash), href: `${EXPLORER_TX}${data.evidence.acceptanceTxHash}` },
@@ -542,7 +546,7 @@ function bindCoveragePreflight() {
   });
   document.querySelector("#copy-coverage-request")?.addEventListener("click", async () => {
     const content = document.querySelector("#coverage-request-json")?.textContent || "";
-    try { await navigator.clipboard.writeText(content); setPreflightStatus("Verified request JSON copied.", "success"); }
+    try { await navigator.clipboard.writeText(content); setPreflightStatus("Signed paid request copied.", "success"); }
     catch { setPreflightStatus("Copy failed. Select the request JSON manually.", "error"); }
   });
 }

@@ -3,6 +3,11 @@ import { createChainService, EvidenceError } from "./lib/chain.js";
 import { createLedger } from "./lib/ledger.js";
 import { fetchOkxTaskPage, OkxTaskPageError } from "./lib/okx-task-page.js";
 import {
+  createQuoteService,
+  QuoteConfigurationError,
+  QuoteValidationError,
+} from "./lib/quote.js";
+import {
   findPublishedPolicy,
   listPublishedPolicies,
   policyCoverageCapAtomic,
@@ -30,6 +35,7 @@ function supportedTargets() {
     coverableNow: !policy.coverageStatus || policy.coverageStatus === "active",
     clockSource: policy.clockSource || "verified_acceptance_block",
     processingStart: policy.processingStart || "verified target-job acceptance",
+    enrollmentWindowSeconds: policy.enrollmentWindowSeconds,
     exclusions: policy.exclusions || [],
   }));
 }
@@ -73,10 +79,12 @@ function readInput(req) {
   };
 }
 
-function paidEndpoint(req) {
+function paidEndpoint(req, quoteToken) {
   const host = header(req, "x-forwarded-host") || header(req, "host") || "policypool.vercel.app";
   const proto = header(req, "x-forwarded-proto") || "https";
-  return `${proto}://${host}/api/covered-job-receipt`;
+  const endpoint = new URL(`${proto}://${host}/api/covered-job-receipt`);
+  if (quoteToken) endpoint.searchParams.set("quote", quoteToken);
+  return endpoint.toString();
 }
 
 function minBigInt(...values) {
@@ -106,10 +114,18 @@ function decline(res, reason, extra = {}) {
 export function createCoveragePreflightHandler(dependencies = {}) {
   let runtimeChain = dependencies.chain;
   let runtimeLedger = dependencies.ledger;
+  let runtimeQuoteService = dependencies.quoteService;
   const taskFetcher = dependencies.taskFetcher || fetchOkxTaskPage;
   const now = dependencies.now || (() => Date.now());
   const getChain = () => (runtimeChain ||= createChainService());
   const getLedger = () => (runtimeLedger ||= createLedger());
+  const getQuoteService = () => (runtimeQuoteService ||= createQuoteService({
+    ledger: getLedger(),
+    secret: dependencies.quoteSecret,
+    now,
+    randomId: dependencies.quoteRandomId,
+    ttlSeconds: dependencies.quoteTtlSeconds,
+  }));
 
   return async function handler(req, res) {
     if (req.method === "OPTIONS") return sendJson(res, 200, { ok: true });
@@ -258,6 +274,10 @@ export function createCoveragePreflightHandler(dependencies = {}) {
     if (!Number.isFinite(deadlineMs) || deadlineMs <= now()) {
       return decline(res, "registered_policy_sla_already_elapsed", { task, targetOrder });
     }
+    const enrollmentDeadlineMs = Date.parse(targetOrder.acceptedAt) + policy.enrollmentWindowSeconds * 1000;
+    if (!Number.isFinite(enrollmentDeadlineMs) || enrollmentDeadlineMs <= now()) {
+      return decline(res, "coverage_enrollment_window_closed", { task, targetOrder });
+    }
 
     const requestBody = {
       targetAgent: `${policy.agentName}#${policy.agentId}`,
@@ -268,8 +288,28 @@ export function createCoveragePreflightHandler(dependencies = {}) {
       requestedCoverageUSDT: formatUsdtAtomic(coverageCapAtomic, PAYMENT.decimals),
     };
 
+    let quote;
+    try {
+      quote = await getQuoteService().issue({
+        requestBody,
+        buyer: targetOrder.buyer,
+        policyHash: policy.policyHash,
+        source: "verified_preflight",
+        deadline: new Date(Math.min(deadlineMs, enrollmentDeadlineMs)).toISOString(),
+      });
+    } catch (error) {
+      if (error instanceof QuoteValidationError) {
+        return decline(res, error.code, { task, targetOrder });
+      }
+      const code = error instanceof QuoteConfigurationError
+        ? "coverage_quote_not_configured"
+        : "coverage_quote_unavailable";
+      return sendJson(res, 503, { ok: false, error: code, charged: false });
+    }
+
     return sendJson(res, 200, {
       ok: true,
+      version: "0.3.0",
       eligible: true,
       charged: false,
       generatedAt: new Date(now()).toISOString(),
@@ -285,6 +325,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
         coverageStatus: policy.coverageStatus || "active",
         clockSource: policy.clockSource || "verified_acceptance_block",
         processingStart: policy.processingStart || "verified target-job acceptance",
+        enrollmentWindowSeconds: policy.enrollmentWindowSeconds,
         exclusions: policy.exclusions || [],
       },
       evidence: {
@@ -294,6 +335,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
       },
       coverage: {
         deadline: new Date(deadlineMs).toISOString(),
+        enrollmentClosesAt: new Date(enrollmentDeadlineMs).toISOString(),
         capAtomic: coverageCapAtomic.toString(),
         capUSDT: formatUsdtAtomic(coverageCapAtomic, PAYMENT.decimals),
         serviceFeeUSDT: formatUsdtAtomic(PAYMENT.amountAtomic, PAYMENT.decimals),
@@ -302,13 +344,26 @@ export function createCoveragePreflightHandler(dependencies = {}) {
         availableUSDT: formatUsdtAtomic(availableAtomic, PAYMENT.decimals),
         finalReservationRecheckedAtSettlement: true,
       },
+      quote: {
+        id: quote.id,
+        token: quote.token,
+        issuedAt: quote.issuedAt,
+        expiresAt: quote.expiresAt,
+        source: quote.source,
+        signed: true,
+        singleJob: true,
+      },
       paidRequest: {
         protocol: "OKX Agent Payments Protocol",
         network: XLAYER.network,
-        endpoint: paidEndpoint(req),
+        endpoint: paidEndpoint(req, quote.token),
         method: "POST",
         payerMustEqualTargetBuyer: targetOrder.buyer,
-        body: requestBody,
+        body: {
+          ...requestBody,
+          quoteId: quote.token,
+        },
+        bodyMayBeOmittedOnReplay: true,
       },
     });
   };
