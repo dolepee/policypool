@@ -6,7 +6,11 @@ import {
   PaymentConfigurationError,
   PaymentVerificationError,
 } from "./lib/payment.js";
-import { findPublishedPolicy, listPublishedPolicies } from "./lib/policy-registry.js";
+import {
+  findPublishedPolicy,
+  listPublishedPolicies,
+  policyCoverageCapAtomic,
+} from "./lib/policy-registry.js";
 import {
   clean,
   encodeBase64Json,
@@ -187,12 +191,22 @@ function supportedTargets() {
     agentId: policy.agentId,
     agentName: policy.agentName,
     serviceIds: policy.serviceIds,
+    serviceName: policy.serviceName,
     serviceType: policy.serviceType,
+    maxCoverageAtomic: policyCoverageCapAtomic(policy, COVERAGE.maxAtomic).toString(),
+    coverageStatus: policy.coverageStatus || "active",
+    coverableNow: !policy.coverageStatus || policy.coverageStatus === "active",
+    clockSource: policy.clockSource || "verified_acceptance_block",
+    processingStart: policy.processingStart || "verified target-job acceptance",
+    exclusions: policy.exclusions || [],
   }));
 }
 
 export function evaluateGuard(input, policy) {
   if (!policy) return { verdict: "BLOCK", reason: "target_policy_not_registered" };
+  if (policy.coverageStatus && policy.coverageStatus !== "active") {
+    return { verdict: "BLOCK", reason: policy.coverageBlockReason || "registered_policy_not_active" };
+  }
   if (!isBytes32(input.targetJobId)) return { verdict: "BLOCK", reason: "target_job_id_required" };
   if (!isBytes32(input.targetCreationTxHash)) {
     return { verdict: "BLOCK", reason: "target_creation_transaction_required" };
@@ -205,6 +219,9 @@ export function evaluateGuard(input, policy) {
     || policy.slaSeconds <= 0
     || policy.slaSeconds > COVERAGE.maxDurationSeconds) {
     return { verdict: "BLOCK", reason: "registered_policy_sla_invalid" };
+  }
+  if (policyCoverageCapAtomic(policy, COVERAGE.maxAtomic) < BigInt(COVERAGE.minAtomic)) {
+    return { verdict: "BLOCK", reason: "registered_policy_cap_invalid" };
   }
   if (input.requestedCoverageAtomic < BigInt(COVERAGE.minAtomic)) {
     return { verdict: "BLOCK", reason: "requested_coverage_below_minimum" };
@@ -270,6 +287,11 @@ function buildReceipt({
       policyHash: policy.policyHash,
       slaSeconds: policy.slaSeconds,
       publishedScope: policy.publishedScope,
+      maxCoverageAtomic: policyCoverageCapAtomic(policy, COVERAGE.maxAtomic).toString(),
+      coverageStatus: policy.coverageStatus || "active",
+      clockSource: policy.clockSource || "verified_acceptance_block",
+      processingStart: policy.processingStart || "verified target-job acceptance",
+      exclusions: policy.exclusions || [],
     } : {
       requestedAgent: input.targetAgent,
       policyHash: null,
@@ -491,6 +513,7 @@ export function createHandler(dependencies = {}) {
           coverageCapAtomic = minBigInt(
             input.requestedCoverageAtomic,
             BigInt(targetOrder.amountAtomic),
+            policyCoverageCapAtomic(policy, COVERAGE.maxAtomic),
             BigInt(COVERAGE.maxAtomic),
           );
           if (coverageCapAtomic < BigInt(COVERAGE.minAtomic)) {

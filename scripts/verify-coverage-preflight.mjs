@@ -91,7 +91,37 @@ const handler = createCoveragePreflightHandler({
 const discovery = await callHandler(handler, { method: "GET" });
 assert.equal(discovery.statusCode, 200);
 assert.equal(discovery.json().charged, false);
-assert.equal(discovery.json().supportedTargets.length, 2);
+assert.equal(discovery.json().supportedTargets.length, 3);
+const wardenTarget = discovery.json().supportedTargets.find((target) => target.agentId === "3808");
+assert.ok(wardenTarget, "Warden opt-in must be published in discovery");
+assert.equal(wardenTarget.serviceIds[0], "33461");
+assert.equal(wardenTarget.maxCoverageAtomic, "500000");
+assert.equal(wardenTarget.coverageStatus, "pending_clock_adapter");
+assert.equal(wardenTarget.coverableNow, false);
+assert.equal(wardenTarget.clockSource, "provider_endpoint_receipt");
+assert.match(wardenTarget.processingStart, /funded request reaches/i);
+assert.equal(wardenTarget.exclusions.length, 4);
+
+let fetchedPendingPolicy = false;
+const pendingWarden = await callHandler(createCoveragePreflightHandler({
+  taskFetcher: async () => {
+    fetchedPendingPolicy = true;
+    return task;
+  },
+}), {
+  method: "POST",
+  body: {
+    targetAgent: "Warden#3808",
+    taskReference: task.publicUrl,
+    requestedCoverageUSDT: "0.5",
+  },
+});
+assert.equal(pendingWarden.statusCode, 200);
+assert.equal(pendingWarden.json().eligible, false);
+assert.equal(pendingWarden.json().charged, false);
+assert.equal(pendingWarden.json().reason, "provider_clock_evidence_not_supported");
+assert.equal(pendingWarden.json().policy.coverageStatus, "pending_clock_adapter");
+assert.equal(fetchedPendingPolicy, false, "inactive policies must decline before task fetching");
 
 const belowMinimum = await callHandler(handler, {
   method: "POST",

@@ -3,6 +3,7 @@ const EXPLORER_ADDRESS = "https://www.oklink.com/x-layer/address/";
 const providerNames = new Map([
   ["3465", "GlassDesk"],
   ["4348", "Foreman"],
+  ["3808", "Warden"],
 ]);
 const statusCache = new Map();
 

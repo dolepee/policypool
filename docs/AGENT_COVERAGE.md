@@ -8,7 +8,8 @@ PolicyPool Agent Coverage is the OKX.AI-facing adapter for PolicyPool. It turns 
 - Price: 0.1 USDT
 - Endpoint: `/api/covered-job-receipt`
 - Listed provider: PolicyPool Agent `#4674`
-- Registered targets in v0.2: GlassDesk Agent `#3465` services `#30019`, `#30020`, and `#30021`; Foreman Agent `#4348` service `#33357`
+- Active registered targets in v0.2: GlassDesk Agent `#3465` services `#30019`, `#30020`, and `#30021`; Foreman Agent `#4348` service `#33357`
+- External provider opt-in: Warden Agent `#3808` service `#33461`; maximum cap `0.5 USDT`; coverage activation pending an independently verifiable funded-payload arrival timestamp
 - Minimum requested coverage: 0.5 USDT. Smaller requests are declined by the free preflight before payment.
 
 Input:
@@ -28,7 +29,7 @@ The target job must still be in accepted state. PolicyPool verifies the creation
 
 The accepted-event service hash is preserved verbatim and checked for A2A/A2MCP consistency. OKX does not expose a documented public derivation from listed service ID to that hash, so listed-service-ID correspondence remains separate marketplace evidence rather than an onchain claim.
 
-The caller does not choose the covered deadline. PolicyPool derives it from the verified acceptance block plus the registered target-policy SLA: five minutes for Foreman and 24 hours for GlassDesk in v0.2. A caller-supplied `deadline`, `dueAt`, or `expiresAt` is retained only as ignored context and cannot shorten or extend liability.
+The caller does not choose the covered deadline. PolicyPool derives active-policy deadlines from the verified acceptance block plus the registered target-policy SLA: five minutes for Foreman and 24 hours for GlassDesk in v0.2. Warden opted into a five-minute processing SLA that begins only when a funded payload reaches its endpoint; because OKX acceptance does not prove that event, PolicyPool rejects Warden coverage before payment until an endpoint-arrival attestation adapter is available. A caller-supplied `deadline`, `dueAt`, or `expiresAt` is retained only as ignored context and cannot shorten or extend liability.
 
 ## Outcomes
 

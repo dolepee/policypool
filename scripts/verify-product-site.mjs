@@ -39,4 +39,17 @@ for (const [file, route] of pages) {
 const legacyAgent = await readFile(new URL("../web/agent.html", import.meta.url), "utf8");
 assert.match(legacyAgent, /http-equiv="refresh" content="0; url=\/"/, "legacy /agent page must redirect home");
 
+const providers = await readFile(new URL("../web/providers.html", import.meta.url), "utf8");
+assert.match(providers, /LIVE REGISTRY \/ 03 POLICIES/, "provider registry must publish all three policies");
+assert.match(providers, /Warden/, "external provider opt-in must be visible");
+assert.match(providers, /Clock adapter pending/, "Warden must not be presented as coverable before its clock is verifiable");
+assert.match(providers, /0\.5 USD₮0 cap/, "Warden's published cap must be visible");
+
+const coverage = await readFile(new URL("../web/coverage.html", import.meta.url), "utf8");
+assert.match(
+  coverage,
+  /<option value="Warden#3808" disabled>Warden #3808 · opted in, clock adapter pending<\/option>/,
+  "coverage form must expose but disable the pending Warden policy",
+);
+
 console.log("PolicyPool product-site gate passed: five routes, shared navigation, metadata, and legacy redirect.");

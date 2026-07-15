@@ -35,7 +35,8 @@ The marketplace keeps its own escrow and order lifecycle. PolicyPool adds a capp
 
 - Listed service: `Covered Job Receipt`, 0.1 USDT, API service.
 - Listed provider: PolicyPool Agent `#4674` on OKX.AI.
-- Registered targets in v0.2: GlassDesk `#3465` services `#30019`, `#30020`, and `#30021`; Foreman `#4348` service `#33357`.
+- Active registered targets in v0.2: GlassDesk `#3465` services `#30019`, `#30020`, and `#30021`; Foreman `#4348` service `#33357`.
+- External provider opt-in: Warden `#3808` service `#33461`, with a 0.5 USD₮0 cap and a 300-second clock from funded endpoint arrival. Coverage remains pre-payment blocked until that provider-side start event can be independently verified.
 - Payment asset: X Layer USD₮0, 6 decimals, EIP-3009 domain `USD₮0` version `1`.
 - Objective breach: accepted job still undelivered after the stored deadline.
 - Reserve: public X Layer wallet, with every liability exposed by `/api/coverage-ledger`.

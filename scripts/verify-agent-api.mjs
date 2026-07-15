@@ -8,6 +8,7 @@ import { EvidenceError, validateServiceBinding } from "../api/lib/chain.js";
 import { PAYMENT, paymentRequirements } from "../api/lib/config.js";
 import { MemoryLedger } from "../api/lib/ledger.js";
 import { createPaymentService } from "../api/lib/payment.js";
+import { findPublishedPolicy, policyCoverageCapAtomic } from "../api/lib/policy-registry.js";
 import { sha256 } from "../api/lib/utils.js";
 import { callHandler, decodePaymentRequired } from "./lib/fake-vercel.mjs";
 
@@ -306,6 +307,30 @@ assert.equal(unregisteredResponse.json().charged, false);
 assert.equal(unregistered.calls.verify, 0, "unknown policy must not reach payment verification");
 assert.equal(unregistered.calls.settle, 0, "unknown policy must not settle payment");
 assert.equal(unregistered.calls.target, 0, "unknown policy must not reach target verifier");
+
+const wardenPolicy = findPublishedPolicy("Warden#3808");
+assert.ok(wardenPolicy, "Warden provider opt-in must be registered");
+assert.equal(wardenPolicy.serviceIds[0], "33461");
+assert.equal(policyCoverageCapAtomic(wardenPolicy, "5000000"), 500000n);
+const pendingWardenRuntime = makeRuntime();
+const pendingWardenResponse = await callHandler(pendingWardenRuntime.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("pending-warden-clock") },
+  body: {
+    ...sampleBody,
+    targetAgent: "Warden#3808",
+    targetJobId: `0x${"d".repeat(64)}`,
+    jobDescription: "Run the standard 20-payload endpoint security audit battery.",
+    requestedCoverageUSDT: "0.5",
+  },
+});
+assert.equal(pendingWardenResponse.statusCode, 400);
+assert.equal(pendingWardenResponse.json().error, "provider_clock_evidence_not_supported");
+assert.equal(pendingWardenResponse.json().charged, false);
+assert.equal(pendingWardenRuntime.calls.verify, 0, "pending clock policies must not verify payment");
+assert.equal(pendingWardenRuntime.calls.settle, 0, "pending clock policies must not settle payment");
+assert.equal(pendingWardenRuntime.calls.target, 0, "pending clock policies must not verify a target job");
+assert.equal((await pendingWardenRuntime.ledger.stats()).recordCount, 0);
 
 const nonzeroServiceHash = `0x${"c".repeat(64)}`;
 const zeroServiceHash = `0x${"0".repeat(64)}`;

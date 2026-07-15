@@ -2,7 +2,11 @@ import { COVERAGE, PAYMENT, XLAYER } from "./lib/config.js";
 import { createChainService, EvidenceError } from "./lib/chain.js";
 import { createLedger } from "./lib/ledger.js";
 import { fetchOkxTaskPage, OkxTaskPageError } from "./lib/okx-task-page.js";
-import { findPublishedPolicy, listPublishedPolicies } from "./lib/policy-registry.js";
+import {
+  findPublishedPolicy,
+  listPublishedPolicies,
+  policyCoverageCapAtomic,
+} from "./lib/policy-registry.js";
 import { evaluateGuard } from "./covered-job-receipt.js";
 import { clean, formatUsdtAtomic, header, parseUsdtAtomic, sendJson } from "./lib/utils.js";
 
@@ -21,6 +25,12 @@ function supportedTargets() {
     serviceName: policy.serviceName,
     serviceType: policy.serviceType,
     slaSeconds: policy.slaSeconds,
+    maxCoverageAtomic: policyCoverageCapAtomic(policy, COVERAGE.maxAtomic).toString(),
+    coverageStatus: policy.coverageStatus || "active",
+    coverableNow: !policy.coverageStatus || policy.coverageStatus === "active",
+    clockSource: policy.clockSource || "verified_acceptance_block",
+    processingStart: policy.processingStart || "verified target-job acceptance",
+    exclusions: policy.exclusions || [],
   }));
 }
 
@@ -149,6 +159,21 @@ export function createCoveragePreflightHandler(dependencies = {}) {
         supportedTargets: supportedTargets(),
       });
     }
+    if (policy.coverageStatus && policy.coverageStatus !== "active") {
+      return decline(res, policy.coverageBlockReason || "registered_policy_not_active", {
+        policy: {
+          agentId: policy.agentId,
+          agentName: policy.agentName,
+          serviceIds: policy.serviceIds,
+          serviceName: policy.serviceName,
+          coverageStatus: policy.coverageStatus,
+          coverableNow: false,
+          clockSource: policy.clockSource,
+          processingStart: policy.processingStart,
+          exclusions: policy.exclusions || [],
+        },
+      });
+    }
 
     let task;
     try {
@@ -214,6 +239,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
     const coverageCapAtomic = minBigInt(
       input.requestedCoverageAtomic,
       BigInt(targetOrder.amountAtomic),
+      policyCoverageCapAtomic(policy, COVERAGE.maxAtomic),
       BigInt(COVERAGE.maxAtomic),
       availableAtomic,
     );
@@ -255,6 +281,11 @@ export function createCoveragePreflightHandler(dependencies = {}) {
         serviceType: policy.serviceType,
         policyHash: policy.policyHash,
         slaSeconds: policy.slaSeconds,
+        maxCoverageAtomic: policyCoverageCapAtomic(policy, COVERAGE.maxAtomic).toString(),
+        coverageStatus: policy.coverageStatus || "active",
+        clockSource: policy.clockSource || "verified_acceptance_block",
+        processingStart: policy.processingStart || "verified target-job acceptance",
+        exclusions: policy.exclusions || [],
       },
       evidence: {
         source: "OKX.AI public task page plus X Layer task escrow events",
