@@ -48,6 +48,21 @@ assert.match(providers, /LIVE REGISTRY \/ 03 POLICIES/, "provider registry must 
 assert.match(providers, /Warden/, "external provider opt-in must be visible");
 assert.match(providers, /Clock adapter pending/, "Warden must not be presented as coverable before its clock is verifiable");
 assert.match(providers, /0\.5 USD₮0 cap/, "Warden's published cap must be visible");
+for (const provider of ["glassdesk", "foreman", "warden"]) {
+  assert.match(providers, new RegExp(`id="provider-${provider}"`), `${provider} policy must have a stable share anchor`);
+  assert.match(providers, new RegExp(`data-copy-link="/providers#provider-${provider}"`), `${provider} policy must expose a copy link`);
+}
+
+const proof = await readFile(new URL("../web/proof.html", import.meta.url), "utf8");
+assert.match(proof, /id="external-usage"/, "proof room must expose external usage separately from controlled proofs");
+assert.match(proof, /Buyer-funded covenants/, "external usage must lead with buyer-funded evidence");
+assert.match(proof, /controlled tests remain excluded/, "external usage must preserve the controlled-proof boundary");
+
+const coverageScript = await readFile(new URL("../web/coverage-site.js", import.meta.url), "utf8");
+for (const receiptId of ["ppc-6c3d1dbe749cca96", "ppc-136a34aee2022a42", "ppc-5e59d4e5300b6fc3"]) {
+  assert.ok(coverageScript.includes(receiptId), `external proof catalog must include ${receiptId}`);
+}
+assert.match(coverageScript, /data-copy-link/, "shared product script must support copyable public proof links");
 
 const coverage = await readFile(new URL("../web/coverage.html", import.meta.url), "utf8");
 assert.match(

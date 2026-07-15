@@ -338,6 +338,26 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
 .evidence-grid span { font-family: var(--mono); font-size: 9px; text-transform: uppercase; }
 .evidence-grid h3 { margin: 84px 0 12px; font-family: var(--serif); font-size: 25px; font-weight: 500; }
 .evidence-grid code { display: block; overflow: hidden; color: var(--ink-soft); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.external-proof-section { background: var(--paper-deep); }
+.external-proof-summary { margin: -20px 0 28px; color: var(--ink-soft); font-family: var(--mono); font-size: 10px; text-transform: uppercase; }
+.external-proof-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.external-proof-card { min-width: 0; display: flex; min-height: 480px; flex-direction: column; padding: 26px; border: 1px solid var(--ink); background: var(--white); box-shadow: 7px 7px 0 var(--mint); }
+.external-proof-card:nth-child(2) { box-shadow-color: var(--yellow); }
+.external-proof-card:nth-child(3) { box-shadow-color: var(--blue-soft); }
+.external-proof-card > span, .external-proof-card header > span { font-family: var(--mono); font-size: 9px; text-transform: uppercase; }
+.external-proof-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.external-proof-card h3 { margin: 54px 0 14px; font-family: var(--serif); font-size: 32px; font-weight: 500; line-height: 1.05; }
+.external-proof-card > p { margin: 0 0 26px; color: var(--ink-soft); line-height: 1.55; }
+.external-proof-card dl { margin: auto 0 0; }
+.external-proof-card dl div { display: grid; grid-template-columns: 0.8fr 1.2fr; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.external-proof-card dt { font-size: 8px; text-transform: uppercase; }
+.external-proof-card dd { min-width: 0; overflow: hidden; margin: 0; font-family: var(--mono); font-size: 9px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.external-proof-actions { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 14px; margin-top: 24px; }
+.external-proof-actions a { font-weight: 700; }
+.external-proof-actions button, .provider-actions button { min-height: 44px; padding: 8px 12px; border: 1px solid var(--ink); background: transparent; color: var(--ink); font-size: 11px; font-weight: 700; cursor: pointer; }
+.external-proof-actions button:hover, .provider-actions button:hover { background: var(--ink); color: var(--white); }
+.external-proof-unavailable { opacity: 0.72; box-shadow-color: var(--coral); }
+.external-proof-loading { grid-column: 1 / -1; min-height: 260px; }
 .verifier-section { padding: 104px 0; background: var(--blue); color: var(--white); }
 .verifier-layout { display: grid; grid-template-columns: 1fr 0.8fr; gap: 100px; align-items: center; }
 .verifier-layout .section-index { color: var(--mint-bright); }
@@ -367,7 +387,8 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
 .provider-card dl div { display: grid; grid-template-columns: 0.65fr 1.35fr; gap: 16px; padding: 15px 0; border-bottom: 1px solid var(--line); }
 .provider-card dt { font-size: 8px; text-transform: uppercase; }
 .provider-card dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 12px; text-align: right; }
-.provider-card > a { display: block; margin-top: auto; padding: 22px 26px; font-weight: 700; }
+.provider-actions { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 14px; margin-top: auto; padding: 16px 20px 16px 26px; }
+.provider-actions a { font-weight: 700; }
 .admission-section { padding: 110px 0; }
 .admission-layout { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 100px; }
 .admission-layout ol { margin: 0; padding: 0; list-style: none; }
@@ -402,6 +423,8 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
   .balance-metrics { grid-column: 1 / -1; border-top: 1px solid var(--ink); }
   .balance-water { border-right: 0; }
   .evidence-grid { grid-template-columns: 1fr 1fr; }
+  .external-proof-grid { grid-template-columns: 1fr 1fr; }
+  .external-proof-card:last-child { grid-column: 1 / -1; }
   .provider-grid { grid-template-columns: 1fr 1fr; }
 }
 
@@ -433,6 +456,8 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
   .proof-selector-column { position: static; }
   .proof-tabs { grid-template-columns: 1fr 1fr; }
   .evidence-grid { grid-template-columns: 1fr 1fr; }
+  .external-proof-grid { grid-template-columns: 1fr; }
+  .external-proof-card:last-child { grid-column: auto; }
   .verifier-layout, .ledger-explainer-grid, .admission-layout { grid-template-columns: 1fr; gap: 50px; }
   .footer-layout { grid-template-columns: 1fr 1fr; }
   .footer-meta { grid-column: 1 / -1; grid-template-columns: repeat(3, auto); }
@@ -515,6 +540,10 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
   .evidence-grid { grid-template-columns: 1fr; border-left: 0; }
   .evidence-grid a { min-height: 180px; border-left: 1px solid var(--line-strong); }
   .evidence-grid h3 { margin-top: 54px; }
+  .external-proof-card { min-height: 0; padding: 22px; }
+  .external-proof-card h3 { margin-top: 38px; font-size: 30px; }
+  .external-proof-actions, .provider-actions { grid-template-columns: 1fr; align-items: stretch; }
+  .external-proof-actions button, .provider-actions button { min-height: 48px; }
   .provider-card header { grid-template-columns: 52px 1fr; }
   .provider-card header > div { min-width: 0; }
   .provider-card header p, .policy-band p { overflow-wrap: anywhere; }

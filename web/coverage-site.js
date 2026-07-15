@@ -5,6 +5,11 @@ const providerNames = new Map([
   ["4348", "Foreman"],
   ["3808", "Warden"],
 ]);
+const externalProofCatalog = Object.freeze([
+  { receiptId: "ppc-6c3d1dbe749cca96", buyer: "0xfc9b58e81BcE27c2f46558D501228D935f93e802" },
+  { receiptId: "ppc-136a34aee2022a42", buyer: "0xfc9b58e81BcE27c2f46558D501228D935f93e802" },
+  { receiptId: "ppc-5e59d4e5300b6fc3", buyer: "0xf4C9FA07f3BB852547fdC4DF7c1d9Fd9991cfA51" },
+]);
 const statusCache = new Map();
 
 function amount(value, digits = 6) {
@@ -69,6 +74,22 @@ function bindMobileNavigation() {
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") menu.open = false; });
   document.addEventListener("click", (event) => {
     if (menu.open && !menu.contains(event.target)) menu.open = false;
+  });
+}
+
+function bindCopyLinks() {
+  document.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-copy-link]");
+    if (!button) return;
+    const original = button.textContent;
+    const url = new URL(button.dataset.copyLink, window.location.origin).href;
+    try {
+      await navigator.clipboard.writeText(url);
+      button.textContent = "Copied";
+    } catch {
+      button.textContent = "Copy failed";
+    }
+    window.setTimeout(() => { button.textContent = original; }, 1800);
   });
 }
 
@@ -287,15 +308,117 @@ function renderLedgerRecords(records) {
   }
 }
 
-async function fetchStatus(record) {
-  if (statusCache.has(record.state)) return statusCache.get(record.state);
-  const response = await fetch(`/api/coverage-status?receiptId=${encodeURIComponent(record.receiptId)}`, { cache: "no-store" });
+async function fetchReceiptStatus(receiptId) {
+  if (statusCache.has(receiptId)) return statusCache.get(receiptId);
+  const response = await fetch(`/api/coverage-status?receiptId=${encodeURIComponent(receiptId)}`, { cache: "no-store" });
   if (!response.ok) throw new Error(`receipt returned ${response.status}`);
   const status = await response.json();
-  if (!status.ok || status.state !== record.state) throw new Error("receipt state mismatch");
+  if (!status.ok || status.receiptId !== receiptId) throw new Error("receipt identity mismatch");
+  statusCache.set(receiptId, status);
+  return status;
+}
+
+async function fetchStatus(record) {
+  const status = await fetchReceiptStatus(record.receiptId);
+  if (status.state !== record.state) throw new Error("receipt state mismatch");
   const proof = { status, record };
-  statusCache.set(record.state, proof);
   return proof;
+}
+
+function externalStateCopy(state) {
+  if (state === "released") return "Target work completed; reserved capacity returned.";
+  if (state === "paid") return "Covered breach paid from the public reserve.";
+  if (state === "payout_due") return "Objective breach recorded; reserve action is due.";
+  return "Coverage remains active while the marketplace job reaches a terminal state.";
+}
+
+function externalProofCard(entry, status, index) {
+  const receipt = status.receipt;
+  const expectedBuyer = entry.buyer.toLowerCase();
+  const buyer = String(receipt?.buyer?.address || "").toLowerCase();
+  const payer = String(receipt?.servicePayment?.payer || "").toLowerCase();
+  const jobBuyer = String(receipt?.targetJob?.buyer || "").toLowerCase();
+  if (!receipt?.servicePayment?.verified || !receipt?.servicePayment?.settled) throw new Error("service payment is not verified");
+  if (buyer !== expectedBuyer || payer !== expectedBuyer || jobBuyer !== expectedBuyer) throw new Error("buyer binding mismatch");
+
+  const card = document.createElement("article");
+  card.className = "external-proof-card";
+  const header = document.createElement("header");
+  const label = document.createElement("span");
+  label.textContent = `EXTERNAL BUYER-FUNDED / 0${index + 1}`;
+  const stamp = document.createElement("b");
+  stamp.className = `state-stamp ${stateClass(status.state)}`;
+  stamp.textContent = status.state.replaceAll("_", " ");
+  header.append(label, stamp);
+
+  const heading = document.createElement("h3");
+  heading.textContent = `${amount(receipt.servicePayment.amountUSDT)} USD₮0 fee covered a ${amount(receipt.covenant.coverageCapUSDT)} USD₮0 job.`;
+  const summary = document.createElement("p");
+  summary.textContent = externalStateCopy(status.state);
+
+  const details = document.createElement("dl");
+  const values = [
+    ["Buyer", short(receipt.buyer.address, 10, 8)],
+    ["Provider", `${receipt.target.agentName} #${receipt.target.agentId}`],
+    ["Target job", short(receipt.targetJob.jobId, 10, 8)],
+    ["Coverage receipt", receipt.receiptId],
+  ];
+  for (const [term, value] of values) {
+    const row = document.createElement("div");
+    const dt = document.createElement("dt");
+    const dd = document.createElement("dd");
+    dt.textContent = term;
+    dd.textContent = value;
+    row.append(dt, dd);
+    details.append(row);
+  }
+
+  const actions = document.createElement("footer");
+  actions.className = "external-proof-actions";
+  const path = `/api/coverage-status?receiptId=${encodeURIComponent(receipt.receiptId)}`;
+  const link = document.createElement("a");
+  setLink(link, path, "Open receipt ↗");
+  link.setAttribute("aria-label", `Open public receipt ${receipt.receiptId}`);
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.dataset.copyLink = path;
+  copy.textContent = "Copy proof link";
+  copy.setAttribute("aria-label", `Copy proof link for ${receipt.receiptId}`);
+  actions.append(link, copy);
+  card.append(header, heading, summary, details, actions);
+  return card;
+}
+
+async function hydrateExternalProofs() {
+  const grid = document.querySelector("#external-proof-grid");
+  const summary = document.querySelector("#external-proof-summary");
+  if (!grid || !summary) return;
+  const results = await Promise.all(externalProofCatalog.map(async (entry, index) => {
+    try {
+      const status = await fetchReceiptStatus(entry.receiptId);
+      return { card: externalProofCard(entry, status, index), state: status.state };
+    } catch (error) {
+      const card = document.createElement("article");
+      card.className = "external-proof-card external-proof-unavailable";
+      const label = document.createElement("span");
+      label.textContent = `EXTERNAL RECEIPT / 0${index + 1}`;
+      const heading = document.createElement("h3");
+      heading.textContent = "Live evidence unavailable.";
+      const note = document.createElement("p");
+      note.textContent = error instanceof Error ? error.message : "Receipt could not be verified.";
+      card.append(label, heading, note);
+      return { card, state: null };
+    }
+  }));
+  grid.replaceChildren(...results.map((result) => result.card));
+  grid.setAttribute("aria-busy", "false");
+  const verified = results.filter((result) => result.state);
+  const states = [...new Set(verified.map((result) => result.state))]
+    .map((state) => `${verified.filter((result) => result.state === state).length} ${state.replaceAll("_", " ")}`)
+    .join(" · ");
+  summary.textContent = verified.length === externalProofCatalog.length
+    ? `${verified.length} external buyer-funded covenants verified live${states ? ` · ${states}` : ""}.`
+    : `${verified.length} of ${externalProofCatalog.length} curated external receipts verified live. Unavailable evidence is not counted.`;
 }
 
 function proofLink(node, transaction, fallbackHref, fallbackText) {
@@ -576,6 +699,8 @@ async function hydrateLiveData() {
 }
 
 bindMobileNavigation();
+bindCopyLinks();
 bindCoveragePreflight();
 initScrollReveals();
 hydrateLiveData();
+hydrateExternalProofs();

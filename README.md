@@ -16,8 +16,11 @@ PolicyPool does not rate subjective quality, accept caller-supplied policy overr
 [Paid API](https://policypool.vercel.app/api/covered-job-receipt) ·
 [Integration manifest](https://policypool.vercel.app/api/manifest) ·
 [Coverage ledger](https://policypool.vercel.app/api/coverage-ledger) ·
-[OKX.AI Agent #4674](https://okx.ai) ·
+[External usage proof](https://policypool.vercel.app/proof#external-usage) ·
+[OKX.AI Agent #4674](https://www.okx.ai/agents/4674) ·
 [v4 foundation](https://policypool.vercel.app/hook)
+
+> **Genesis submission scope:** Agent Coverage is the current OKX.AI product and submission. The v4 liquidity-covenant implementation is the historical X Layer foundation retained below, not the listed Genesis service.
 
 ## Agent Coverage Loop
 
