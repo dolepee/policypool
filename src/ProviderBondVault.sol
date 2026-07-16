@@ -24,6 +24,8 @@ contract ProviderBondVault {
     error TokenTransferFailed();
     error FeeOnTransferUnsupported();
     error Reentrancy();
+    error ManagerAlreadyInitialized();
+    error ManagerNotInitialized();
 
     uint256 public constant MIN_WITHDRAWAL_DELAY = 8 days;
 
@@ -45,6 +47,7 @@ contract ProviderBondVault {
     address public owner;
     address public pendingOwner;
     address public manager;
+    bool public managerInitialized;
 
     mapping(address provider => BondAccount account) private accounts;
     mapping(bytes32 covenantId => CovenantLock covenantLock) public covenantLocks;
@@ -90,10 +93,8 @@ contract ProviderBondVault {
         if (withdrawalDelay_ < MIN_WITHDRAWAL_DELAY) revert WithdrawalDelayTooShort();
         asset = IBondAsset(asset_);
         owner = owner_;
-        manager = owner_;
         withdrawalDelay = withdrawalDelay_;
         emit OwnershipTransferred(address(0), owner_);
-        emit ManagerUpdated(address(0), owner_);
     }
 
     function account(address provider) external view returns (BondAccount memory) {
@@ -119,11 +120,12 @@ contract ProviderBondVault {
         emit OwnershipTransferred(previous, msg.sender);
     }
 
-    function setManager(address nextManager) external onlyOwner {
+    function initializeManager(address nextManager) external onlyOwner {
         if (nextManager == address(0)) revert ZeroAddress();
-        address previous = manager;
+        if (managerInitialized) revert ManagerAlreadyInitialized();
         manager = nextManager;
-        emit ManagerUpdated(previous, nextManager);
+        managerInitialized = true;
+        emit ManagerUpdated(address(0), nextManager);
     }
 
     function deposit(uint256 amount) external {
@@ -131,6 +133,7 @@ contract ProviderBondVault {
     }
 
     function depositFor(address provider, uint256 amount) public nonReentrant {
+        if (!managerInitialized) revert ManagerNotInitialized();
         if (provider == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroAmount();
         uint256 beforeBalance = asset.balanceOf(address(this));

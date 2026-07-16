@@ -31,7 +31,7 @@ contract DeployAgentCoverageV04 is Script {
         CoverageManager manager = new CoverageManager(address(registry), address(vault), owner);
         OkxA2AClockAdapter a2aAdapter = new OkxA2AClockAdapter(taskEscrow);
         RelayReceiptVerifier relayAdapter = new RelayReceiptVerifier(owner, relaySigner);
-        vault.setManager(address(manager));
+        vault.initializeManager(address(manager));
         if (owner != deployer) vault.transferOwnership(owner);
         vm.stopBroadcast();
 

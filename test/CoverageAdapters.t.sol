@@ -32,14 +32,20 @@ contract CoverageAdaptersTest is Test {
         assertEq(uint256(afterDeadline), uint256(OkxA2AClockAdapter.Action.Breach));
     }
 
-    function testA2AClockReleasesDeliveredOrTerminalJob() public {
-        taskStatus.setJobStatus(JOB_ID, 2);
-        (, OkxA2AClockAdapter.Action delivered) = a2aAdapter.observe(JOB_ID, uint64(block.timestamp + 60));
-        assertEq(uint256(delivered), uint256(OkxA2AClockAdapter.Action.Release));
+    function testA2AClockHoldsDeliveryWithoutHistoricalTimingAndReleasesRecovery() public {
+        uint8[4] memory timingAmbiguous = [uint8(2), 3, 4, 6];
+        for (uint256 index; index < timingAmbiguous.length; ++index) {
+            taskStatus.setJobStatus(JOB_ID, timingAmbiguous[index]);
+            (, OkxA2AClockAdapter.Action action) = a2aAdapter.observe(JOB_ID, uint64(block.timestamp - 1));
+            assertEq(uint256(action), uint256(OkxA2AClockAdapter.Action.Hold));
+        }
 
-        taskStatus.setJobStatus(JOB_ID, 9);
-        (, OkxA2AClockAdapter.Action refunded) = a2aAdapter.observe(JOB_ID, uint64(block.timestamp - 1));
-        assertEq(uint256(refunded), uint256(OkxA2AClockAdapter.Action.Release));
+        uint8[4] memory recovery = [uint8(5), 7, 8, 9];
+        for (uint256 index; index < recovery.length; ++index) {
+            taskStatus.setJobStatus(JOB_ID, recovery[index]);
+            (, OkxA2AClockAdapter.Action action) = a2aAdapter.observe(JOB_ID, uint64(block.timestamp - 1));
+            assertEq(uint256(action), uint256(OkxA2AClockAdapter.Action.Release));
+        }
     }
 
     function testRelayReceiptSignatureVerifiesAndTamperingFails() public view {

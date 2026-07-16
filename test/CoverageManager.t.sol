@@ -31,7 +31,7 @@ contract CoverageManagerTest is Test {
         identity = new MockAgentIdentityRegistry();
         registry = new AgentPolicyRegistry(address(identity), address(vault), address(this), 500_000, 7 days);
         manager = new CoverageManager(address(registry), address(vault), address(this));
-        vault.setManager(address(manager));
+        vault.initializeManager(address(manager));
 
         identity.setOwner(3808, provider);
         asset.mint(provider, 5_000_000);
@@ -197,6 +197,30 @@ contract CoverageManagerTest is Test {
         vm.prank(buyer);
         vm.expectRevert(CoverageManager.Unauthorized.selector);
         manager.release(covenantId, keccak256("UNAUTHORIZED"));
+    }
+
+    function testCannotCoverSameJobAcrossPolicyVersions() public {
+        bytes32 firstCovenant = _issue();
+        address secondBuyer = makeAddr("second-buyer");
+
+        AgentPolicyRegistry.PolicyTerms memory replacement = _terms();
+        replacement.serviceFingerprint = keccak256("service-v2");
+        vm.prank(provider);
+        bytes32 replacementPolicyId = registry.registerPolicy(replacement);
+
+        vm.expectRevert(CoverageManager.JobAlreadyCovered.selector);
+        manager.issue(
+            replacementPolicyId,
+            replacement.serviceFingerprint,
+            JOB_ID,
+            provider,
+            secondBuyer,
+            500_000,
+            500_000,
+            uint64(block.timestamp),
+            uint64(block.timestamp + 60)
+        );
+        assertEq(manager.coveredJobCovenant(JOB_ID), firstCovenant);
     }
 
     function testRelayClockRejectsMissingEvidenceAndLateStart() public {

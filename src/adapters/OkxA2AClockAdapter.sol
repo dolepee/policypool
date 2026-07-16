@@ -26,9 +26,11 @@ contract OkxA2AClockAdapter {
         status = taskEscrow.getJobStatus(jobId);
         if (status == 1) {
             action = block.timestamp > deadline ? Action.Breach : Action.Hold;
-        } else if (status >= 2 && status <= 9) {
+        } else if (status == 5 || status == 7 || status == 8 || status == 9) {
             action = Action.Release;
         } else {
+            // Delivery-like states 2, 3, 4, and 6 require historical timing
+            // evidence; current status alone cannot prove an in-SLA delivery.
             action = Action.Hold;
         }
     }

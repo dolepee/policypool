@@ -26,6 +26,7 @@ contract CoverageManager {
     error ZeroAddress();
     error InvalidCovenant();
     error CovenantAlreadyExists();
+    error JobAlreadyCovered();
     error CovenantNotActive();
     error DeadlineNotElapsed();
     error PolicyNotCoverable();
@@ -69,6 +70,7 @@ contract CoverageManager {
     address public operator;
 
     mapping(bytes32 covenantId => Covenant covenant) private covenants;
+    mapping(bytes32 jobId => bytes32 covenantId) public coveredJobCovenant;
 
     event OwnershipTransferStarted(address indexed currentOwner, address indexed pendingOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -150,6 +152,7 @@ contract CoverageManager {
 
         id = covenantId(policyId, jobId, buyer);
         if (covenants[id].state != CovenantState.None) revert CovenantAlreadyExists();
+        _claimJobCoverage(jobId, id);
         bondVault.lock(id, provider, coverageCapAtomic);
         covenants[id] = Covenant({
             id: id,
@@ -173,6 +176,11 @@ contract CoverageManager {
         emit CovenantIssued(
             id, policyId, jobId, provider, buyer, coverageCapAtomic, buyerPaidAtomic, deadline, payoutBasis, clockMode
         );
+    }
+
+    function _claimJobCoverage(bytes32 jobId, bytes32 id) private {
+        if (coveredJobCovenant[jobId] != bytes32(0)) revert JobAlreadyCovered();
+        coveredJobCovenant[jobId] = id;
     }
 
     function _validatePolicyLimits(

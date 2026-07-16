@@ -40,14 +40,28 @@ For the invariant-by-invariant test and live-proof map, see [HOOK_INVARIANTS.md]
 
 ## V0.4 Provider-Funded Coverage
 
-The universal opt-in contracts are deployed flag-off on X Layer. Public enrollment and third-party bonds remain disabled until an independent Solidity review is complete.
+The pre-audit universal opt-in contracts are deployed flag-off on X Layer. Public enrollment and third-party bonds remain disabled. The internal adversarial review found one unresolved High operator-evidence issue and three defects that were fixed only in source. The deployed bytecode is therefore superseded and must not be enabled.
+
+See [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md) for the full findings and release ruling. This internal review does not satisfy the independent Solidity audit gate.
+
+### Blocking trust boundary
+
+The hot operator currently supplies the job, buyer, acceptance time, breach evidence, recovery amounts, and release reason consumed by `CoverageManager`. Those values are not independently authenticated on-chain. A compromised operator can create synthetic covenants and slash an enrolled provider's bond to an operator-controlled buyer; the cold owner can reach the same authority by replacing the operator.
+
+Third-party capital remains blocked until issuance, release, breach, and recovery are bound to authoritative evidence and privileged role changes are delayed or threshold-controlled.
+
+### Audit fixes awaiting redeployment
+
+- One marketplace job can receive only one covenant, across every policy version and buyer.
+- The bond-vault manager is initialized once and cannot be replaced.
+- A2A delivery-like statuses remain on hold until historical delivery timing is proven.
 
 ### Static analysis
 
-Slither `0.11.5` was run against the exact deployed source on July 16, 2026. It found no direct arbitrary-withdrawal or recipient-substitution path. The findings and dispositions are:
+Slither `0.11.5` was run against the hardened source on July 16, 2026. Its v0.4 findings and dispositions are:
 
 - `ProviderBondVault.depositFor` performs an external token call before crediting the bond. The function is protected by its `nonReentrant` guard, requires the exact vault balance delta, and rejects false-return and fee-on-transfer assets. A malicious callback test confirms re-entry fails and the outer deposit rolls back.
-- `CoverageManager.issue` calls the immutable bond vault before writing the covenant. The deployed vault's `lock` path performs no external calls, the vault address is immutable, and issuance is restricted to the dedicated operator. This is a documented trusted-contract assumption, not a substitute for an external audit; a future deployment should use explicit manager reentrancy protection or checks-effects-interactions ordering.
+- `CoverageManager.issue` calls the immutable bond vault before writing the covenant. The vault's `lock` path performs no external calls, the vault address is immutable, and a revert rolls back the job-level uniqueness claim.
 - Event-after-call warnings apply only to the immutable bond vault's `lock`, `release`, and `slash` methods. State transitions occur before release and settlement calls, and a revert rolls back the complete transaction.
 - Timestamp comparisons are intentional inputs to policy expiry, enrollment windows, withdrawal delay, SLA clocks, and objective breach eligibility. X Layer timestamp/sequencer integrity remains an external dependency.
 - Low-level token calls support both boolean-return and no-return ERC-20 implementations. False returns, transfer failure, fee-on-transfer behavior, zero amounts, and outbound-transfer rollback are covered by adversarial tests.
@@ -56,17 +70,17 @@ Slither `0.11.5` was run against the exact deployed source on July 16, 2026. It 
 
 ### Adversarial coverage gate
 
-The v0.4 custody/state-transition suite now contains 63 passing Foundry tests. Core branch coverage is:
+The hardened v0.4 custody/state-transition suite contains 64 passing Foundry tests. Core branch coverage is:
 
 - `AgentPolicyRegistry`: `100%` (`23/23`);
-- `ProviderBondVault`: `100%` (`27/27`);
-- `CoverageManager`: `96.30%` (`26/27`);
+- `ProviderBondVault`: `100%` (`29/29`);
+- `CoverageManager`: `96.43%` (`27/28`);
 - `OkxA2AClockAdapter`: `100%` (`6/6`);
 - `RelayReceiptVerifier`: `100%` (`8/8`).
 
 The remaining uncovered manager branch is unreachable under the enforced policy invariant `enrollmentWindowSeconds <= slaSeconds`: an A2A deadline cannot already be elapsed while its shorter enrollment window is still open.
 
-These results strengthen the controlled-pilot gate. They do not authorize public deposits or replace an independent audit.
+These results verify the implemented fixes. They do not authorize public deposits, validate the pre-audit deployment, close the operator-evidence issue, or replace an independent audit.
 
 ## Future Hardening
 

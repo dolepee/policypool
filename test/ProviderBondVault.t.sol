@@ -26,6 +26,7 @@ contract ProviderBondVaultTest is Test {
         (provider, providerKey) = makeAddrAndKey("provider");
         asset = new MockERC20("USD0", "USD0", 6);
         vault = new ProviderBondVault(address(asset), address(this), 8 days);
+        vault.initializeManager(address(this));
         identity = new MockAgentIdentityRegistry();
         registry = new AgentPolicyRegistry(address(identity), address(vault), address(this), 500_000, 7 days);
         identity.setOwner(3808, provider);

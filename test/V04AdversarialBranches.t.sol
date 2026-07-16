@@ -93,7 +93,7 @@ contract V04AdversarialBranchesTest is Test {
         identity = new MockAgentIdentityRegistry();
         registry = new AgentPolicyRegistry(address(identity), address(vault), address(this), 500_000, 7 days);
         manager = new CoverageManager(address(registry), address(vault), address(this));
-        vault.setManager(address(manager));
+        vault.initializeManager(address(manager));
 
         identity.setOwner(3808, provider);
         asset.mint(provider, 5_000_000);
@@ -111,11 +111,17 @@ contract V04AdversarialBranchesTest is Test {
         vm.expectRevert(ProviderBondVault.WithdrawalDelayTooShort.selector);
         new ProviderBondVault(address(asset), address(this), 8 days - 1);
 
+        ProviderBondVault freshVault = new ProviderBondVault(address(asset), address(this), 8 days);
+        vm.expectRevert(ProviderBondVault.ManagerNotInitialized.selector);
+        freshVault.depositFor(address(this), 1);
         vm.prank(outsider);
         vm.expectRevert(ProviderBondVault.Unauthorized.selector);
-        vault.setManager(outsider);
+        freshVault.initializeManager(outsider);
         vm.expectRevert(ProviderBondVault.ZeroAddress.selector);
-        vault.setManager(address(0));
+        freshVault.initializeManager(address(0));
+        freshVault.initializeManager(outsider);
+        vm.expectRevert(ProviderBondVault.ManagerAlreadyInitialized.selector);
+        freshVault.initializeManager(address(this));
         vm.expectRevert(ProviderBondVault.ZeroAddress.selector);
         vault.transferOwnership(address(0));
         vm.prank(outsider);
@@ -131,6 +137,7 @@ contract V04AdversarialBranchesTest is Test {
 
         ConfigurableBondAsset badAsset = new ConfigurableBondAsset();
         ProviderBondVault badVault = new ProviderBondVault(address(badAsset), address(this), 8 days);
+        badVault.initializeManager(address(this));
         badAsset.mint(address(this), 1_000_000);
         badAsset.approve(address(badVault), type(uint256).max);
 
@@ -179,6 +186,7 @@ contract V04AdversarialBranchesTest is Test {
     function testVaultRollsBackWhenOutboundTokenTransferFails() public {
         ConfigurableBondAsset badAsset = new ConfigurableBondAsset();
         ProviderBondVault badVault = new ProviderBondVault(address(badAsset), address(this), 8 days);
+        badVault.initializeManager(address(this));
         badAsset.mint(provider, 1_000_000);
         vm.startPrank(provider);
         badAsset.approve(address(badVault), type(uint256).max);

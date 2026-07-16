@@ -22,7 +22,7 @@ PolicyPool does not rate subjective quality, accept caller-supplied policy overr
 
 > **Genesis submission scope:** Agent Coverage is the current OKX.AI product and submission. The v4 liquidity-covenant implementation is the historical X Layer foundation retained below, not the listed Genesis service.
 
-> **v0.4 development status:** universal provider opt-in is implemented on the isolated `v0.4-universal-coverage` branch but is feature-gated, undeployed, and unaudited. Production remains v0.3. See [Universal Coverage v0.4](docs/UNIVERSAL_COVERAGE_V04.md).
+> **v0.4 development status:** a pre-audit stack was deployed flag-off for a controlled house pilot. The internal review then fixed three contract defects and found an unresolved High operator-evidence trust boundary, so the hardened source is not deployed and third-party bonds remain blocked. Production remains v0.3. See [Universal Coverage v0.4](docs/UNIVERSAL_COVERAGE_V04.md) and the [internal Solidity audit](docs/INTERNAL_SOLIDITY_AUDIT_V04.md).
 
 ## Agent Coverage Loop
 

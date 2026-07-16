@@ -1,6 +1,6 @@
 # PolicyPool Universal Coverage v0.4
 
-Status: feature branch, not deployed, not externally audited. Production remains v0.3 until every release gate in this document passes.
+Status: the pre-audit v0.4 contracts were deployed flag-off for a controlled house pilot. The hardened source now differs from that bytecode and is not deployed. Production remains v0.3; public enrollment and third-party bonds are blocked by the internal audit verdict.
 
 ## Product Boundary
 
@@ -22,6 +22,7 @@ The listed PolicyPool service continues to charge a fixed `0.1 USD₮0` issuance
 8. A paid relay grant is short-lived, bound to one covenant, job, buyer, agent, and service, and permits at most one paid provider execution.
 9. Settlement failure cannot erase the on-chain lock. A durable `compensation_required` record remains until reconciliation releases it.
 10. Payout settlement remains operator-approved and requires independently verified recovery evidence. The scheduler can mark `payout_due`; it cannot decide or send final compensation.
+11. One marketplace job can receive only one covenant, across all policy versions and buyers.
 
 ## Contracts
 
@@ -50,8 +51,9 @@ The listed PolicyPool service continues to charge a fixed `0.1 USD₮0` issuance
 - Supports A2A acceptance clocks and A2MCP relay clocks.
 - Releases, marks payout due, expires an unstarted relay clock, or settles verified loss.
 - Prevents a full marketplace refund from stacking with a net-loss payout.
+- Rejects a second covenant for a job even if the policy version or buyer changes.
 
-The contracts are intentionally non-upgradeable. They require an independent security audit before mainnet capital is accepted.
+The contracts are intentionally non-upgradeable. The bond-vault manager is initialized once and cannot be replaced. Audit fixes require a complete redeployment, and an independent security audit remains mandatory before third-party capital is accepted.
 
 ## Enrollment Flow
 
@@ -144,7 +146,7 @@ Production deployment `dpl_6h8MXHN5oWfEr8JHdyARLhP1oudm` was aliased to `https:/
 - The v0.4 manifest is available at `/api/universal-manifest` and reports `feature_gated`, with every required public runtime address present.
 - The existing listed endpoint remains `HEAD 200` and fails closed with `charged:false` for an invalid request.
 - A production-ledger dry run inspected seven v0.3 records, selected zero v0.4 records, produced zero changes, and preserved the exact before/after record hash.
-- The full v0.4 gate passed with 63 Foundry tests and zero production dependency vulnerabilities.
+- The pre-audit v0.4 gate passed with 63 Foundry tests and zero production dependency vulnerabilities.
 - No QStash schedule is active, no OKX listing field changed, and public provider enrollment remains closed.
 - The Hobby-plan function limit is met by serving both manifest surfaces through the existing manifest serverless function; both public URLs remain stable.
 
@@ -163,6 +165,21 @@ The two-path house pilot completed on X Layer on 2026-07-16. It used only Policy
 
 Do not rerun or fund this pilot again. The next release gate is independent Solidity review, followed by a separately authorized bounded rollout; the completed house proof does not authorize third-party capital.
 
+## Internal Audit Checkpoint
+
+The July 16 internal adversarial review is recorded in [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md). Its release verdict is `BLOCKED: confirmed unresolved High issue` for third-party bonds and public enrollment.
+
+The hardened source:
+
+- prevents duplicate coverage of one job across policy versions or buyers;
+- initializes the vault manager once and makes it non-replaceable;
+- holds timing-ambiguous A2A delivery states until historical timing is proven;
+- passes 64 Foundry tests, with 96.43% to 100% branch coverage across the five core v0.4 contracts.
+
+The unresolved blocker is operator evidence authority: `CoverageManager` still trusts the hot operator for the job, buyer, acceptance time, release, breach, and recovery facts that control provider bond settlement. Those facts must be authenticated independently before strangers' capital is accepted.
+
+The audit fixes changed contract bytecode. The existing flag-off deployment and house-pilot receipts remain historical evidence for the pre-audit stack only. A remediated stack requires a full redeployment and a new, separately authorized controlled pilot. No audit action changed production, the OKX listing, feature flags, schedulers, funding, or deployed contracts.
+
 ## Release Gates
 
 ```bash
@@ -179,6 +196,7 @@ Required before deployment:
 - dependency audit reports zero known production vulnerabilities;
 - secret scan and `git diff --check` pass;
 - `/coverage`, `/providers`, and `/providers/enroll` pass an interactive 390px browser gate;
+- the High operator-evidence finding in the internal audit is resolved in code and regression tests;
 - an independent Solidity audit is complete;
 - deployment owner, operator, monitor, and relay signer are distinct where appropriate;
 - dry-run reconciliation leaves existing external v0.3 receipts untouched;
@@ -198,10 +216,15 @@ Rollback is the feature flag: set `POLICYPOOL_UNIVERSAL_ENABLED=false`. Producti
 
 ## Known Limitations
 
-- Contract code is not audited and must not custody public provider funds yet.
+- The deployed v0.4 bytecode predates the internal audit fixes and must never be enabled for third-party bonds.
+- The hardened source still has an unresolved High operator-evidence trust boundary and must not custody public provider funds.
+- This internal review is not an independent Solidity audit.
 - The canonical X Layer ERC-8004 identity registry at `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` is an EIP-1967 upgradeable proxy controlled outside PolicyPool. Agent ownership checks inherit that third-party upgrade and availability risk.
 - OKX.AI has no documented stable JSON service-directory API; PolicyPool uses strict, cached, bounded HTML parsing and fails closed on stale evidence.
 - A2A delivery timing requires a public task reference and timeline timestamp. Current status alone never proves historical timing.
 - A2MCP coverage requires the PolicyPool relay; direct provider calls cannot prove the processing-start clock.
 - Relay execution is at-most-once. A lost response after provider execution requires operator investigation rather than an automatic paid retry.
+- Relay receipt signatures are not yet domain-separated by chain ID and verifier address; use a dedicated deployment signer until EIP-712 binding lands.
+- Policy expiry currently means the last time new coverage may be issued, not the deadline by which an already-issued covenant must finish.
+- One-time vault-manager initialization prevents manager migration while funds remain in that vault.
 - Provider-defined premiums, shared-reserve co-coverage, subjective quality claims, ratings, additional chains, and automatic payout discretion are out of v0.4.
