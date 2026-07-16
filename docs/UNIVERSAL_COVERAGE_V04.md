@@ -82,7 +82,7 @@ This is a permissioned oracle model, not trustless marketplace verification. A c
 - Allows permissionless execution only after valid quorum authorization.
 - Prevents duplicate job coverage and double recovery.
 - Stores the attested completion and terminal-recovery observation timestamps on chain.
-- Enforces completion at or before the covenant deadline, 10-minute settlement-evidence freshness, terminal recovery, and a 24-hour challenge period before normal settlement.
+- Enforces completion at or before the covenant deadline, 10-minute settlement-evidence freshness, terminal recovery, and a 24-hour challenge period before either settlement path.
 - Allows a completely disjoint recovery quorum to release or settle after a 30-day delay without giving an owner or relayer a custody bypass.
 - Keeps objective `expireUnstarted` permissionless after the on-chain enrollment deadline.
 
@@ -187,7 +187,7 @@ Production remains v0.3, `/api/manifest` remains the active contract, universal 
 
 ## Internal Audit Checkpoint
 
-The July 16 internal reviews and remediation are recorded in [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md). The original High single-operator finding is remediated in source. The later hostile review's stale-settlement, release-ordering, and quorum-loss findings are also remediated in source with terminal recovery plus 10-minute settlement-evidence freshness, a 24-hour challenge period with signed completion time, and a 30-day delayed recovery quorum. The candidate suite passes 84 Foundry tests.
+The July 16 internal reviews and remediation are recorded in [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md). The original High single-operator finding is remediated in source. The later hostile review's stale-settlement, release-ordering, and quorum-loss findings are also remediated in source with terminal recovery plus 10-minute settlement-evidence freshness, a 24-hour challenge period with signed completion time, and a 30-day delayed recovery quorum. The candidate suite passes 85 Foundry tests.
 
 Core branch coverage:
 

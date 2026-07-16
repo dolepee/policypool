@@ -81,7 +81,7 @@ Third-party capital remains blocked until the remediated source receives indepen
 
 - A stale recovery observation can no longer be held and broadcast after a later marketplace refund. Settlement requires a signed terminal-recovery flag, a nonzero evidence hash, and an observation no more than ten minutes old.
 - Release binds the authoritative completion timestamp and rejects completion after the covenant deadline. The contract stores that timestamp for later inspection.
-- A breach is provisional for 24 hours. During that challenge period, quorum-attested proof of an on-time completion can move `PayoutDue` to `Released`; normal settlement cannot win by transaction ordering alone.
+- A breach is provisional for 24 hours. During that challenge period, quorum-attested proof of an on-time completion can move `PayoutDue` to `Released`; neither the primary nor emergency settlement path can win by transaction ordering alone.
 - Loss of the primary quorum no longer makes resolution impossible by itself. A contract-enforced, signer-disjoint recovery quorum may release, breach, or settle after 30 days.
 - The manager constructor rejects fewer than five signers, thresholds below three, and any signer overlap between the primary and recovery quorums. Deployment scripts repeat these checks and the release gate verifies them.
 
@@ -104,7 +104,7 @@ Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 29 raw re
 
 ### Adversarial coverage gate
 
-The remediated custody/state-transition suite passes 84 Foundry tests and includes executable hostile regressions for stale settlement, terminal recovery, late completion, provisional-breach correction, challenge-period ordering, quorum separation, and delayed recovery.
+The remediated custody/state-transition suite passes 85 Foundry tests and includes executable hostile regressions for stale settlement, terminal recovery, late completion, provisional-breach correction, primary and emergency challenge-period ordering, quorum separation, and delayed recovery.
 
 - `AgentPolicyRegistry`: `100%` (`23/23`);
 - `ProviderBondVault`: `100%` (`29/29`);

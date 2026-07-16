@@ -114,7 +114,7 @@ Source remediation:
 - settlement rejects nonterminal recovery and evidence observed more than ten minutes before execution;
 - the runtime refuses to request settlement signatures unless recovery is explicitly final;
 - settlement stores and emits the terminal recovery observation time and finality;
-- normal settlement cannot execute during the 24-hour provisional-breach challenge period.
+- neither primary nor emergency settlement can execute during the 24-hour provisional-breach challenge period.
 
 Residual: terminal marketplace recovery is verified by the evidence quorum rather than derived directly from an OKX settlement contract. Attesters must independently prove that no later escrow refund can occur.
 
@@ -183,7 +183,7 @@ Source remediation:
 - Active release requires `issuedAt <= completedAt <= deadline`;
 - the manager stores and emits `completedAt`;
 - breach is provisional for 24 hours, and a signed on-time completion can correct `PayoutDue` to `Released` during that period;
-- normal settlement is blocked until the challenge period closes.
+- both primary and emergency settlement are blocked until the challenge period closes.
 
 Residual: the quorum still determines whether the supplied completion timestamp is authoritative. A colluding threshold remains the oracle trust boundary.
 
@@ -196,6 +196,16 @@ Severity: Low
 Status: Fixed in source, not deployed
 
 Relay receipts now use EIP-712 and bind chain ID plus verifier address. Reusing a receipt on another chain or verifier fails. Relay receipts still cannot move bonds without separate threshold evidence.
+
+### L-02: Emergency settlement could skip part of a late breach challenge
+
+Severity: Low
+
+Status: Fixed in source, not deployed
+
+The first recovery-quorum implementation opened emergency settlement 30 days after the covenant deadline, while the normal challenge period ran for 24 hours after `payoutDueAt`. If breach was first reported near day 30, emergency settlement could execute before that later challenge deadline. Settlement now enforces `payoutDueAt + SETTLEMENT_CHALLENGE_PERIOD` unconditionally for both verifiers.
+
+Regression: `testEmergencySettlementCannotSkipLateBreachChallenge` marks breach near day 30, proves recovery settlement still reverts during the remaining challenge window, and settles only after it closes.
 
 ### O-01: Threshold oracle integrity and liveness
 
@@ -258,7 +268,7 @@ No production credential is intentionally tracked. The local dirty `lib/v4-core`
 
 ## Verification Results
 
-- clean `forge test --summary`: 84 tests passed
+- clean `forge test --summary`: 85 tests passed
 - `AgentPolicyRegistry` branch coverage: 100% (`23/23`)
 - `ProviderBondVault` branch coverage: 100% (`29/29`)
 - `CoverageEvidenceVerifier` branch coverage: 100% (`13/13`)

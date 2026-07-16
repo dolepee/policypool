@@ -218,7 +218,38 @@ contract V04FreshnessAndRecoveryTest is CoverageEvidenceTestBase {
         });
         manager.emergencyMarkPayoutDue(breach, _recoverySignatures(manager.emergencyBreachEvidenceDigest(breach)));
 
+        vm.warp(block.timestamp + manager.SETTLEMENT_CHALLENGE_PERIOD() + 1);
         CoverageManager.SettlementEvidence memory settlement = _settlement(id, 0, 0, true, "TERMINAL_ZERO_RECOVERY");
+        uint256 payout = manager.emergencySettleNetLoss(
+            settlement, _recoverySignatures(manager.emergencySettlementEvidenceDigest(settlement))
+        );
+        assertEq(payout, 500_000);
+        assertEq(asset.balanceOf(buyer), 500_000);
+        assertEq(uint256(manager.getCovenant(id).state), uint256(CoverageManager.CovenantState.Paid));
+    }
+
+    function testEmergencySettlementCannotSkipLateBreachChallenge() public {
+        bytes32 id = _issueDefault();
+        uint64 deadline = manager.getCovenant(id).deadline;
+        uint256 challengePeriod = manager.SETTLEMENT_CHALLENGE_PERIOD();
+        uint256 emergencyDelay = manager.EMERGENCY_EVIDENCE_DELAY();
+
+        vm.warp(uint256(deadline) + emergencyDelay - challengePeriod / 2);
+        CoverageManager.BreachEvidence memory breach = CoverageManager.BreachEvidence({
+            covenantId: id, observedAt: uint64(block.timestamp), evidenceHash: keccak256("LATE_REPORTED_BREACH")
+        });
+        _markPayoutDue(manager, breach);
+
+        vm.warp(uint256(deadline) + emergencyDelay + 1);
+        CoverageManager.SettlementEvidence memory settlement =
+            _settlement(id, 0, 0, true, "LATE_BREACH_TERMINAL_RECOVERY");
+        bytes[] memory earlySignatures = _recoverySignatures(manager.emergencySettlementEvidenceDigest(settlement));
+        vm.expectRevert(CoverageManager.SettlementChallengeActive.selector);
+        manager.emergencySettleNetLoss(settlement, earlySignatures);
+
+        uint64 payoutDueAt = manager.getCovenant(id).payoutDueAt;
+        vm.warp(uint256(payoutDueAt) + challengePeriod + 1);
+        settlement.observedAt = uint64(block.timestamp);
         uint256 payout = manager.emergencySettleNetLoss(
             settlement, _recoverySignatures(manager.emergencySettlementEvidenceDigest(settlement))
         );

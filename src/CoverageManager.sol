@@ -493,7 +493,7 @@ contract CoverageManager {
             revert InvalidCovenant();
         }
         if (block.timestamp > uint256(evidence.observedAt) + SETTLEMENT_EVIDENCE_MAX_AGE) revert EvidenceStale();
-        if (!emergency && block.timestamp <= uint256(covenant.payoutDueAt) + SETTLEMENT_CHALLENGE_PERIOD) {
+        if (block.timestamp <= uint256(covenant.payoutDueAt) + SETTLEMENT_CHALLENGE_PERIOD) {
             revert SettlementChallengeActive();
         }
         bytes32 digest = _consumeEvidence(
