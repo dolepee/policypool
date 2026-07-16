@@ -14,9 +14,16 @@ const RELAY_GRANT_RESERVATION_TTL_SECONDS = 15 * 60;
 const RELAY_GRANT_CLAIM_EXPIRY_MARGIN_SECONDS = 60 * 60;
 const RELAY_GRANT_CLAIM_MAX_TTL_SECONDS = 8 * 24 * 60 * 60;
 
+function relayCovenantId(record) {
+  const value = String(record?.covenantId || "").toLowerCase();
+  return /^0x[a-f0-9]{64}$/.test(value) ? value : null;
+}
+
 function startsVerifiedRelayClock(record) {
   return record?.request?.paymentVerified === true
     && record?.clock?.source === "policypool_relay_verified_x402_settlement"
+    && Boolean(record?.relayGrantId)
+    && Boolean(relayCovenantId(record))
     && Boolean(record?.settlement?.transaction);
 }
 
@@ -43,6 +50,7 @@ export class MemoryProviderPolicyStore {
     this.demands = new Map();
     this.relayReceipts = new Map();
     this.latestRelayByJob = new Map();
+    this.relayByCovenant = new Map();
     this.relayGrantClaims = new Map();
     this.relayPaymentClaims = new Map();
   }
@@ -98,8 +106,10 @@ export class MemoryProviderPolicyStore {
     const record = structuredClone({ ...receipt, receiptId });
     this.relayReceipts.set(receiptId, record);
     const targetJobId = String(record.provider?.targetJobId || "").toLowerCase();
+    const covenantId = relayCovenantId(record);
     if (targetJobId && startsVerifiedRelayClock(record)) {
       this.latestRelayByJob.set(targetJobId, receiptId);
+      this.relayByCovenant.set(covenantId, receiptId);
     }
     return structuredClone(record);
   }
@@ -111,6 +121,11 @@ export class MemoryProviderPolicyStore {
 
   async getLatestRelayReceiptForJob(targetJobId) {
     const receiptId = this.latestRelayByJob.get(String(targetJobId || "").toLowerCase());
+    return receiptId ? this.getRelayReceipt(receiptId) : null;
+  }
+
+  async getRelayReceiptForCovenant(covenantId) {
+    const receiptId = this.relayByCovenant.get(String(covenantId || "").toLowerCase());
     return receiptId ? this.getRelayReceipt(receiptId) : null;
   }
 
@@ -152,11 +167,13 @@ export class MemoryProviderPolicyStore {
       || !startsVerifiedRelayClock(record)
     ) return null;
     const targetJobId = String(record.provider?.targetJobId || "").toLowerCase();
-    if (!targetJobId) return null;
+    const covenantId = relayCovenantId(record);
+    if (!targetJobId || !covenantId) return null;
     const current = this.relayReceipts.get(record.receiptId);
     if (current && sha256(current) !== sha256(record)) return null;
     this.relayReceipts.set(record.receiptId, current || record);
     this.latestRelayByJob.set(targetJobId, record.receiptId);
+    this.relayByCovenant.set(covenantId, record.receiptId);
     this.relayGrantClaims.set(grantKey, consumed);
     this.relayPaymentClaims.set(paymentKey, consumed);
     return structuredClone(current || record);
@@ -255,9 +272,11 @@ export class RedisProviderPolicyStore {
     const record = relayReceiptRecord(input);
     const { receiptId } = record;
     const targetJobId = String(record.provider?.targetJobId || "").toLowerCase();
+    const covenantId = relayCovenantId(record);
     const writes = [this.redis.set(this.key("relay", receiptId), JSON.stringify(record), { nx: true })];
     if (targetJobId && startsVerifiedRelayClock(record)) {
       writes.push(this.redis.set(this.key("relay-job", targetJobId), receiptId));
+      writes.push(this.redis.set(this.key("relay-covenant", covenantId), receiptId));
     }
     await Promise.all(writes);
     return this.getRelayReceipt(receiptId);
@@ -271,6 +290,11 @@ export class RedisProviderPolicyStore {
 
   async getLatestRelayReceiptForJob(targetJobId) {
     const receiptId = await this.redis.get(this.key("relay-job", String(targetJobId || "").toLowerCase()));
+    return receiptId ? this.getRelayReceipt(String(receiptId)) : null;
+  }
+
+  async getRelayReceiptForCovenant(covenantId) {
+    const receiptId = await this.redis.get(this.key("relay-covenant", String(covenantId || "").toLowerCase()));
     return receiptId ? this.getRelayReceipt(String(receiptId)) : null;
   }
 
@@ -298,10 +322,17 @@ export class RedisProviderPolicyStore {
     const paymentKey = this.key("relay-payment", String(paymentId));
     const record = relayReceiptRecord(input);
     const targetJobId = String(record.provider?.targetJobId || "").toLowerCase();
+    const covenantId = relayCovenantId(record);
     const grantClaimTtlSeconds = relayGrantClaimTtlSeconds(grantExpiresAt, this.now());
-    if (!targetJobId || !startsVerifiedRelayClock(record) || grantClaimTtlSeconds === null) return null;
+    if (
+      !targetJobId
+      || !covenantId
+      || !startsVerifiedRelayClock(record)
+      || grantClaimTtlSeconds === null
+    ) return null;
     const receiptKey = this.key("relay", record.receiptId);
     const jobKey = this.key("relay-job", targetJobId);
+    const covenantKey = this.key("relay-covenant", covenantId);
     // A paid clock is usable only if its receipt, index, and replay claims become durable together.
     const result = await this.redis.eval(
       `
@@ -311,19 +342,21 @@ export class RedisProviderPolicyStore {
         if grant == ARGV[2] and payment == ARGV[2] then
           if existing ~= ARGV[3] then return 0 end
           redis.call("SET", KEYS[4], ARGV[4])
+          redis.call("SET", KEYS[5], ARGV[4])
           return 2
         end
         if grant == ARGV[1] and payment == ARGV[1] then
           if existing and existing ~= ARGV[3] then return 0 end
           if not existing then redis.call("SET", KEYS[3], ARGV[3]) end
           redis.call("SET", KEYS[4], ARGV[4])
+          redis.call("SET", KEYS[5], ARGV[4])
           redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[5])
           redis.call("SET", KEYS[2], ARGV[2])
           return 1
         end
         return 0
       `,
-      [grantKey, paymentKey, receiptKey, jobKey],
+      [grantKey, paymentKey, receiptKey, jobKey, covenantKey],
       [
         `pending:${requestId}`,
         `consumed:${requestId}`,

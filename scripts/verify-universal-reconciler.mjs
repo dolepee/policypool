@@ -32,9 +32,18 @@ async function seed({
   publicTaskReference = null,
   payoutDueAt = null,
   payoutBasis = 0,
+  jobIdOverride = null,
 }) {
-  const jobId = `0x${id.repeat(64).slice(0, 64)}`;
+  const jobId = jobIdOverride || `0x${id.repeat(64).slice(0, 64)}`;
   const covenantId = `0x${(Number.parseInt(id, 16) + 8).toString(16).repeat(64).slice(0, 64)}`;
+  const relayGrantPayload = clockMode === "policypool_relay" ? {
+    grantId: `pprg-${id}`,
+    covenantId,
+    targetJobId: jobId,
+    buyer: "0x3000000000000000000000000000000000000003",
+    agentId: "3808",
+    serviceId: "33461",
+  } : null;
   const record = {
     receiptId: `ppc-${id}`,
     requestId: `request-${id}`,
@@ -43,6 +52,7 @@ async function seed({
     liabilityAtomic: "0",
     providerBondLiabilityAtomic: "500000",
     universalCovenant: { covenantId },
+    relayGrantPayload,
     targetOrder: { jobId, publicTaskReference, amountAtomic: "500000" },
     receipt: {
       version: "0.4.0",
@@ -76,11 +86,16 @@ const relay = await seed({
 });
 await store.saveRelayReceipt({
   receiptId: "relay-one",
+  relayGrantId: relay.relayGrantPayload.grantId,
+  covenantId: relay.covenantId,
   signer: "0x1000000000000000000000000000000000000001",
   signature: "0xsigned",
-  provider: { targetJobId: relay.jobId },
+  provider: { agentId: "3808", serviceId: "33461", targetJobId: relay.jobId },
   request: { paymentVerified: true },
-  settlement: { transaction: `0x${"12".repeat(32)}` },
+  settlement: {
+    transaction: `0x${"12".repeat(32)}`,
+    payer: relay.relayGrantPayload.buyer,
+  },
   clock: {
     source: "policypool_relay_verified_x402_settlement",
     startedAt: "2026-07-16T12:59:00.000Z",
@@ -89,6 +104,15 @@ await store.saveRelayReceipt({
     completedWithinSla: true,
   },
   requestId: `sha256:${"11".repeat(32)}`,
+});
+
+const replacementRelay = await seed({
+  id: "d",
+  state: "pending_start",
+  clockMode: "policypool_relay",
+  deadline: null,
+  enrollmentClosedAt: "2026-07-16T13:02:00.000Z",
+  jobIdOverride: relay.jobId,
 });
 
 const breach = await seed({
@@ -381,14 +405,38 @@ const reconciler = createUniversalReconciler({
   now: () => now,
 });
 
+const misindexedReconciler = createUniversalReconciler({
+  ledger,
+  store: {
+    async getRelayReceiptForCovenant() {
+      return store.getRelayReceiptForCovenant(relay.covenantId);
+    },
+  },
+  issuer,
+  chain: { async getJobStatus(jobId) { return chainStates.get(jobId); } },
+  taskFetcher: async (reference) => structuredClone(tasks.get(String(reference))),
+  relaySigner: "0x1000000000000000000000000000000000000001",
+  relayVerifier: "0x2000000000000000000000000000000000000002",
+  verifyRelayReceipt: async () => true,
+  now: () => now,
+});
+const replacementRecord = await ledger.get(replacementRelay.receiptId);
+await assert.rejects(
+  () => misindexedReconciler.reconcileRecord(replacementRecord, false),
+  /relay_receipt_covenant_binding_invalid/,
+  "a corrupt covenant index must not let an old grant receipt drive a replacement covenant",
+);
+
 const result = await reconciler.reconcile();
 assert.equal(result.ok, true);
-assert.equal(result.checked, 13);
+assert.equal(result.checked, 14);
 assert.deepEqual(
   writes.map((write) => write.action).sort(),
   ["cancel", "cancel", "expire", "payout_due", "release", "release", "release", "settle", "settle", "start"],
 );
 assert.equal((await ledger.get(relay.receiptId)).state, "released");
+assert.equal((await ledger.get(replacementRelay.receiptId)).state, "pending_start");
+assert.equal(await store.getRelayReceiptForCovenant(replacementRelay.covenantId), null);
 assert.equal((await ledger.get(breach.receiptId)).state, "payout_due");
 assert.equal((await ledger.get(delivered.receiptId)).state, "released");
 assert.equal((await ledger.get(expired.receiptId)).state, "released");
@@ -404,6 +452,9 @@ assert.equal(await ledger.get(issuanceAbsent.receiptId), null);
 assert.equal(await ledger.get(interruptedPending.receiptId), null);
 assert.ok(result.holds.some((hold) => (
   hold.receiptId === challengeActive.receiptId && hold.reason === "payout_due_challenge_period_active"
+)));
+assert.ok(result.holds.some((hold) => (
+  hold.receiptId === replacementRelay.receiptId && hold.reason === "relay_clock_not_started"
 )));
 assert.ok(result.holds.some((hold) => (
   hold.receiptId === lateA2aNetLoss.receiptId && hold.reason === "marketplace_recovery_not_terminal"

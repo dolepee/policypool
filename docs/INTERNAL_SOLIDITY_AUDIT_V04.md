@@ -319,6 +319,23 @@ Source remediation:
 
 Regression: `scripts/verify-universal-reconciler.mjs` proves that the same late-delivery task pays a provider-bonded SLA credit after the challenge while a net-loss covenant remains in `PayoutDue` with `marketplace_recovery_not_terminal`.
 
+### H-15: Relay receipts were not bound to the current covenant
+
+Severity: High / P1 runtime
+
+Status: Fixed in source, not deployed
+
+Reconciliation previously selected the latest verified relay receipt by target job. If an unpaid covenant was cancelled and the same accepted job received a replacement covenant, the prior grant's receipt could be selected to start or resolve the new bond even though the provider request predated that coverage.
+
+Source remediation:
+
+- the signed relay receipt now includes the grant-bound covenant ID;
+- the receipt, covenant index, diagnostic job index, and replay claims become durable in the same Redis transaction;
+- reconciliation reads only the exact covenant index and validates receipt signature plus grant, covenant, job, agent, service, and payer bindings;
+- an old receipt remains auditable by receipt ID and job index but cannot start, release, breach, or settle a replacement covenant.
+
+Regression: `scripts/verify-universal-reconciler.mjs` creates a replacement pending covenant for the same job while only the old covenant receipt exists and proves the replacement remains `pending_start` with `relay_clock_not_started`.
+
 ### M-01: Vault owner could replace the manager
 
 Severity: Medium

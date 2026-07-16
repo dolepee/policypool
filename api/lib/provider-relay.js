@@ -421,6 +421,7 @@ export function createProviderRelay({
         signatureDomain,
         requestId,
         relayGrantId: grant.grantId,
+        covenantId: grant.covenantId.toLowerCase(),
         provider: {
           agentId: policy.agentId,
           serviceId: policy.serviceIds[0],

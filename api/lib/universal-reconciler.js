@@ -75,6 +75,10 @@ function challengeElapsed(onchain, nowMs) {
     && nowMs > payoutDueAtMs + SETTLEMENT_CHALLENGE_MS;
 }
 
+function sameIdentifier(left, right) {
+  return Boolean(left) && Boolean(right) && String(left).toLowerCase() === String(right).toLowerCase();
+}
+
 function expectedPayoutAtomic({ payoutBasis, coverageCapAtomic, buyerPaidAtomic, escrowRefundAtomic, otherRecoveryAtomic }) {
   const cap = BigInt(coverageCapAtomic);
   if (Number(payoutBasis) === 1) return cap.toString();
@@ -199,12 +203,38 @@ export function createUniversalReconciler({
   now = () => Date.now(),
 } = {}) {
   if (!ledger?.list || !ledger?.transitionUniversal) throw new Error("universal_reconciler_ledger_unavailable");
-  if (!store?.getLatestRelayReceiptForJob) throw new Error("universal_reconciler_relay_store_unavailable");
+  if (!store?.getRelayReceiptForCovenant) throw new Error("universal_reconciler_relay_store_unavailable");
   if (!issuer?.getCovenant) throw new Error("universal_reconciler_issuer_unavailable");
   if (!chain?.getJobStatus) throw new Error("universal_reconciler_chain_unavailable");
   if (typeof taskFetcher !== "function") throw new Error("universal_reconciler_task_fetcher_unavailable");
   if (!relaySigner) throw new Error("universal_reconciler_relay_signer_unavailable");
   if (!relayVerifier) throw new Error("universal_reconciler_relay_verifier_unavailable");
+
+  async function relayReceiptForCovenant(record) {
+    const covenantId = record.universalCovenant?.covenantId;
+    const targetJobId = record.targetOrder?.jobId;
+    const grant = record.relayGrantPayload;
+    if (
+      !grant?.grantId
+      || !sameIdentifier(grant.covenantId, covenantId)
+      || !sameIdentifier(grant.targetJobId, targetJobId)
+    ) throw new Error("relay_grant_covenant_binding_invalid");
+
+    const receipt = await store.getRelayReceiptForCovenant(covenantId);
+    if (!receipt) return null;
+    if (!await verifyRelayReceipt(receipt, relaySigner, relayVerifier)) {
+      throw new Error("relay_receipt_signature_invalid");
+    }
+    if (
+      receipt.relayGrantId !== grant.grantId
+      || !sameIdentifier(receipt.covenantId, covenantId)
+      || !sameIdentifier(receipt.provider?.targetJobId, targetJobId)
+      || String(receipt.provider?.agentId || "") !== String(grant.agentId || "")
+      || String(receipt.provider?.serviceId || "") !== String(grant.serviceId || "")
+      || !sameIdentifier(receipt.settlement?.payer, grant.buyer)
+    ) throw new Error("relay_receipt_covenant_binding_invalid");
+    return receipt;
+  }
 
   async function apply(record, action, details, dryRun) {
     const covenantId = record.universalCovenant.covenantId;
@@ -335,7 +365,7 @@ export function createUniversalReconciler({
     }
 
     if (record.state === "pending_start") {
-      const relayReceipt = await store.getLatestRelayReceiptForJob(record.targetOrder.jobId);
+      const relayReceipt = await relayReceiptForCovenant(record);
       if (!relayReceipt) {
         const closeMs = Date.parse(enrollmentClose(record) || "");
         if (Number.isFinite(closeMs) && now() > closeMs) {
@@ -346,9 +376,6 @@ export function createUniversalReconciler({
           return { changes, hold: null };
         }
         return { changes, hold: "relay_clock_not_started" };
-      }
-      if (!await verifyRelayReceipt(relayReceipt, relaySigner, relayVerifier)) {
-        throw new Error("relay_receipt_signature_invalid");
       }
       const observed = observeRelayClock({
         covenant: { ...record, targetJobId: record.targetOrder.jobId },
@@ -391,10 +418,7 @@ export function createUniversalReconciler({
     let task = null;
     let relayReceipt = null;
     if (clockMode === "policypool_relay") {
-      relayReceipt = await store.getLatestRelayReceiptForJob(record.targetOrder.jobId);
-      if (relayReceipt && !await verifyRelayReceipt(relayReceipt, relaySigner, relayVerifier)) {
-        throw new Error("relay_receipt_signature_invalid");
-      }
+      relayReceipt = await relayReceiptForCovenant(record);
       observed = observeRelayClock({
         covenant: { ...record, deadline: covenantDeadline(record) },
         relayReceipt,

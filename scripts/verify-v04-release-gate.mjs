@@ -136,7 +136,11 @@ assert.match(
   providerPolicyStore,
   /redis\.call\("SET", KEYS\[1\], ARGV\[2\], "EX", ARGV\[5\]\)\s+redis\.call\("SET", KEYS\[2\], ARGV\[2\]\)/,
 );
+assert.match(providerPolicyStore, /redis\.call\("SET", KEYS\[5\], ARGV\[4\]\)/);
+assert.match(providerPolicyStore, /\[grantKey, paymentKey, receiptKey, jobKey, covenantKey\]/);
 assert.match(providerPolicyStore, /function startsVerifiedRelayClock\(record\)/);
+assert.match(providerPolicyStore, /getRelayReceiptForCovenant/);
+assert.match(providerPolicyStore, /relay-covenant/);
 assert.match(providerPolicyStore, /record\?\.request\?\.paymentVerified === true/);
 assert.match(providerPolicyStore, /targetJobId && startsVerifiedRelayClock\(record\)/);
 assert.match(relayGrant, /MAX_RELAY_GRANT_TTL_MS = 7 \* 24 \* 60 \* 60 \* 1_000/);
@@ -146,6 +150,9 @@ assert.ok(
     < providerRelay.indexOf("store.commitRelayExecutionReceipt"),
   "the paid relay receipt must be signed before its claims commit",
 );
+assert.match(providerRelay, /covenantId:\s*grant\.covenantId\.toLowerCase\(\)/);
+assert.match(reconciler, /relay_receipt_covenant_binding_invalid/);
+assert.doesNotMatch(reconciler, /getLatestRelayReceiptForJob/);
 assert.doesNotMatch(providerRelay, /store\.commitRelayExecution\(/);
 assert.match(chain, /event AuthorizationUsed\(address indexed authorizer, bytes32 indexed nonce\)/);
 assert.match(chain, /verifyProviderPaymentAuthorization/);
@@ -216,6 +223,7 @@ assert.match(auditReport, /H-11: Unpaid relay receipts could replace the verifie
 assert.match(auditReport, /H-12: Relay claims were consumed before the paid receipt was durable/);
 assert.match(auditReport, /H-13: Consumed relay-grant claims expired before the longest grant window/);
 assert.match(auditReport, /H-14: A2A SLA-credit covenants could remain locked after verified late delivery/);
+assert.match(auditReport, /H-15: Relay receipts were not bound to the current covenant/);
 assert.ok(
   vercel.routes.some((route) => route.src === "/providers/enroll" && route.dest === "/web/enroll.html"),
   "provider enrollment route must stay explicit",

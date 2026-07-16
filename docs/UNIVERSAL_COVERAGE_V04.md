@@ -38,7 +38,7 @@ This is a permissioned oracle model, not trustless marketplace verification. A c
 5. The manager enforces the provider-signed maximum cap and exact enrollment window; quorum evidence cannot widen either.
 6. A covenant cap cannot exceed the target-job value, provider-signed cap, configured global cap, or available provider bond.
 7. Shared-reserve exposure is disabled. New v0.4 covenants lock provider first-loss capital only.
-8. A paid relay grant is short-lived, bound to one covenant, job, buyer, agent, and service, and permits at most one paid provider execution. A relay clock starts only after the buyer's EIP-3009 authorization is signature-verified, the exact USD₮0 transfer and authorization nonce are proven in the settlement transaction, and that authorization is permanently consumed.
+8. A paid relay grant is short-lived, bound to one covenant, job, buyer, agent, and service, and permits at most one paid provider execution. The signed receipt carries that covenant ID and is indexed and reconciled by the exact covenant rather than by job alone. A relay clock starts only after the buyer's EIP-3009 authorization is signature-verified, the exact USD₮0 transfer and authorization nonce are proven in the settlement transaction, and that authorization is permanently consumed.
 9. Settlement failure cannot erase the on-chain lock. A durable `compensation_required` record remains until reconciliation releases it.
 10. Issuance, clock start, subjective release, breach, and settlement require threshold-attested evidence. The runtime relayer cannot perform any of them alone.
 11. A full marketplace refund cannot stack with a net-loss payout. Recovery amounts are part of the signed settlement payload.

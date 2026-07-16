@@ -47,8 +47,10 @@ const resolver = { async resolve() { return structuredClone(policy); } };
 const resolveHost = async () => [{ address: "93.184.216.34", family: 4 }];
 const store = new MemoryProviderPolicyStore();
 const targetJobId = `0x${"44".repeat(32)}`;
+const covenantId = `0x${"45".repeat(32)}`;
 const grant = {
   grantId: "pprg-test",
+  covenantId,
   agentId: "3808",
   serviceId: "33461",
   targetJobId,
@@ -337,6 +339,7 @@ assert.equal(delivered.receipt.request.paymentAuthorizationPresent, true);
 assert.equal(delivered.receipt.request.paymentVerified, true);
 assert.equal(delivered.receipt.settlement.transaction, paymentTransaction);
 assert.equal(delivered.receipt.clock.source, "policypool_relay_verified_x402_settlement");
+assert.equal(delivered.receipt.covenantId, covenantId);
 assert.equal(delivered.receipt.provider.targetJobId, targetJobId);
 assert.equal(await verifyProviderRelayReceipt(delivered.receipt, signer.address, relayVerifier), true);
 assert.equal(
@@ -348,6 +351,11 @@ assert.equal(
   (await store.getLatestRelayReceiptForJob(targetJobId)).receiptId,
   delivered.receipt.receiptId,
   "relay receipt must be indexed by target job for autonomous reconciliation",
+);
+assert.equal(
+  (await store.getRelayReceiptForCovenant(covenantId)).receiptId,
+  delivered.receipt.receiptId,
+  "relay receipt must be indexed by its exact covenant for reconciliation",
 );
 responseStatus = 402;
 const unpaidAfterPaid = await relay.execute({
@@ -363,6 +371,11 @@ assert.equal(
   (await store.getLatestRelayReceiptForJob(targetJobId)).receiptId,
   delivered.receipt.receiptId,
   "an unpaid receipt must not replace the verified clock receipt used by reconciliation",
+);
+assert.equal(
+  (await store.getRelayReceiptForCovenant(covenantId)).receiptId,
+  delivered.receipt.receiptId,
+  "an unpaid receipt must not replace the covenant-bound paid receipt",
 );
 responseStatus = 200;
 const elapsedBeforeLateReuse = elapsed;
@@ -591,4 +604,4 @@ assert.deepEqual(pinnedAddress, { address: "93.184.216.34", family: 4 });
 assert.equal(__test.privateIp("::ffff:127.0.0.1"), true);
 assert.equal(__test.privateIp("ff02::1"), true);
 
-console.log("PolicyPool provider relay passed: buyer-bound payment, pinned DNS, verified settlement, retry-safe grant claims, signed clocks, and job index.");
+console.log("PolicyPool provider relay passed: buyer-bound payment, pinned DNS, verified settlement, retry-safe grant claims, signed clocks, and covenant index.");

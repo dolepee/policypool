@@ -146,6 +146,12 @@ An A2A policy using `provider_bonded_sla_credit` could enter `PayoutDue` after a
 
 The reconciler now settles the SLA-credit path only after the on-chain challenge period and only from a fresh, non-stale public OKX task observation that still proves the objective deadline breach. It supplies the full task and observed timing to the evidence quorum, uses zero marketplace recovery inputs, and preserves terminal-recovery requirements for every net-loss policy. A late-delivered net-loss covenant remains on hold until marketplace recovery is terminal.
 
+### Relay receipt covenant binding remediated in source
+
+Verified relay receipts were indexed by target job, but reconciliation did not prove the selected receipt belonged to the current covenant and grant. After an unpaid covenant cancellation cleared the on-chain job lock, an old receipt for that job could otherwise start or resolve a replacement covenant.
+
+Every signed relay receipt now includes the grant's covenant ID. Its durable atomic commit writes both the diagnostic job index and an exact covenant index. Reconciliation reads only the covenant index, verifies the receipt signature, and requires exact grant, covenant, job, agent, service, and grant-buyer/payment-payer equality before using any clock or delivery evidence. A prior receipt for the same job remains auditable but cannot drive a replacement covenant.
+
 ### Static analysis
 
 Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 31 raw results and no unclassified v0.4 manager/verifier custody bypass. Relevant warning dispositions are:
