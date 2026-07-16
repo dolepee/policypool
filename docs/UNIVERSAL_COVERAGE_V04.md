@@ -111,19 +111,19 @@ The v0.4 feature remains disabled unless `POLICYPOOL_UNIVERSAL_ENABLED=true` and
 POLICYPOOL_UNIVERSAL_ENABLED=false
 POLICYPOOL_SHARED_COVERAGE_ENABLED=false
 OKX_AGENT_IDENTITY_REGISTRY=0x8004A169FB4a3325136EB29fA0ceB6D2e539a432
-POLICYPOOL_V04_OWNER=
-POLICYPOOL_V04_OPERATOR=
-POLICYPOOL_V04_MONITOR=
+POLICYPOOL_V04_OWNER=0xe1B41AF2ebAB2476930eC4Da03D80dA525076A21
+POLICYPOOL_V04_OPERATOR=0x79b21b067b19b50Dbb1C890D4825Fdf6B6B61Dd2
+POLICYPOOL_V04_MONITOR=0x3376703ba5610688d88FeA99C9E09A0eA8B95199
 POLICYPOOL_PAYMENT_ASSET=0x779Ded0c9e1022225f8E0630b35a9b54bE713736
 POLICYPOOL_OKX_TASK_ESCROW=0x000000EB79a0c9cBEED4BD63372653E28F6bEdbE
 POLICYPOOL_MINIMUM_PROVIDER_BOND_ATOMIC=500000
-POLICYPOOL_POLICY_REGISTRY_ADDRESS=
-POLICYPOOL_BOND_VAULT_ADDRESS=
-POLICYPOOL_COVERAGE_MANAGER_ADDRESS=
-POLICYPOOL_OKX_A2A_ADAPTER_ADDRESS=
-POLICYPOOL_A2MCP_RELAY_ADAPTER_ADDRESS=
+POLICYPOOL_POLICY_REGISTRY_ADDRESS=0x57d1ee49c3df6f5Ea3000930068BF6059D2cA17B
+POLICYPOOL_BOND_VAULT_ADDRESS=0x23BE9FD569cB93db0324cC42BB4Bb439449cFd3a
+POLICYPOOL_COVERAGE_MANAGER_ADDRESS=0x112e45DC9C29ff2FFd1b60fe3B4E408266E5E855
+POLICYPOOL_OKX_A2A_ADAPTER_ADDRESS=0x37ff4e43cAdA62871E927C5C64B2b9876d21cc62
+POLICYPOOL_A2MCP_RELAY_ADAPTER_ADDRESS=0x84CA17c573F90181ABFdf9Baca066F7A592e3525
 POLICYPOOL_MANAGER_PRIVATE_KEY=
-POLICYPOOL_RELAY_SIGNER_ADDRESS=
+POLICYPOOL_RELAY_SIGNER_ADDRESS=0xfd5F856713d271A450Ef804095c847d52210d1dc
 POLICYPOOL_RELAY_SIGNER_PRIVATE_KEY=
 POLICYPOOL_RELAY_GRANT_SECRET=
 POLICYPOOL_PROVIDER_REGISTRY_PREFIX=pp:providers:v04
@@ -135,6 +135,20 @@ POLICYPOOL_UNIVERSAL_RECONCILE_URL=https://policypool.vercel.app/api/reconcile-u
 Keep manager and relay keys distinct. `POLICYPOOL_RELAY_SIGNER_ADDRESS` is public configuration; its corresponding private key and the relay-grant secret must never be committed. Verify secret byte lengths after setting Vercel variables because newline contamination changes HMAC output.
 
 `POLICYPOOL_V04_OWNER_PRIVATE_KEY` is deployment-only input for `WireAgentCoverageV04Roles.s.sol`. It must never be configured in Vercel or any always-on runtime. After deployment, the cold owner accepts the bond-vault ownership transfer and sets the dedicated manager operator and policy monitor through that script.
+
+## Flag-Off Production Checkpoint
+
+Production deployment `dpl_6h8MXHN5oWfEr8JHdyARLhP1oudm` was aliased to `https://policypool.vercel.app` on 2026-07-16 with `POLICYPOOL_UNIVERSAL_ENABLED=false` and `POLICYPOOL_SHARED_COVERAGE_ENABLED=false`.
+
+- The v0.3 manifest remains the active production contract at `/api/manifest`.
+- The v0.4 manifest is available at `/api/universal-manifest` and reports `feature_gated`, with every required public runtime address present.
+- The existing listed endpoint remains `HEAD 200` and fails closed with `charged:false` for an invalid request.
+- A production-ledger dry run inspected seven v0.3 records, selected zero v0.4 records, produced zero changes, and preserved the exact before/after record hash.
+- The full v0.4 gate passed with 63 Foundry tests and zero production dependency vulnerabilities.
+- No QStash schedule is active, no OKX listing field changed, and public provider enrollment remains closed.
+- The Hobby-plan function limit is met by serving both manifest surfaces through the existing manifest serverless function; both public URLs remain stable.
+
+This checkpoint does not satisfy the independent Solidity audit gate. Third-party bonds and public enrollment remain prohibited.
 
 ## Release Gates
 
