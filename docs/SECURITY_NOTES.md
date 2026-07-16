@@ -38,6 +38,36 @@ PolicyPool v1 assumes the pool policy owner is trusted to publish and maintain t
 
 For the invariant-by-invariant test and live-proof map, see [HOOK_INVARIANTS.md](HOOK_INVARIANTS.md).
 
+## V0.4 Provider-Funded Coverage
+
+The universal opt-in contracts are deployed flag-off on X Layer. Public enrollment and third-party bonds remain disabled until an independent Solidity review is complete.
+
+### Static analysis
+
+Slither `0.11.5` was run against the exact deployed source on July 16, 2026. It found no direct arbitrary-withdrawal or recipient-substitution path. The findings and dispositions are:
+
+- `ProviderBondVault.depositFor` performs an external token call before crediting the bond. The function is protected by its `nonReentrant` guard, requires the exact vault balance delta, and rejects false-return and fee-on-transfer assets. A malicious callback test confirms re-entry fails and the outer deposit rolls back.
+- `CoverageManager.issue` calls the immutable bond vault before writing the covenant. The deployed vault's `lock` path performs no external calls, the vault address is immutable, and issuance is restricted to the dedicated operator. This is a documented trusted-contract assumption, not a substitute for an external audit; a future deployment should use explicit manager reentrancy protection or checks-effects-interactions ordering.
+- Event-after-call warnings apply only to the immutable bond vault's `lock`, `release`, and `slash` methods. State transitions occur before release and settlement calls, and a revert rolls back the complete transaction.
+- Timestamp comparisons are intentional inputs to policy expiry, enrollment windows, withdrawal delay, SLA clocks, and objective breach eligibility. X Layer timestamp/sequencer integrity remains an external dependency.
+- Low-level token calls support both boolean-return and no-return ERC-20 implementations. False returns, transfer failure, fee-on-transfer behavior, zero amounts, and outbound-transfer rollback are covered by adversarial tests.
+- Inline assembly is limited to ECDSA recovery. Signature length, recovery id, high-`s`, zero-signer, wrong-signer, expiry, and nonce replay paths are covered.
+- The canonical X Layer ERC-8004 registry is an external EIP-1967 proxy. Policy ownership checks inherit its upgrade and availability risk.
+
+### Adversarial coverage gate
+
+The v0.4 custody/state-transition suite now contains 63 passing Foundry tests. Core branch coverage is:
+
+- `AgentPolicyRegistry`: `100%` (`23/23`);
+- `ProviderBondVault`: `100%` (`27/27`);
+- `CoverageManager`: `96.30%` (`26/27`);
+- `OkxA2AClockAdapter`: `100%` (`6/6`);
+- `RelayReceiptVerifier`: `100%` (`8/8`).
+
+The remaining uncovered manager branch is unreachable under the enforced policy invariant `enrollmentWindowSeconds <= slaSeconds`: an A2A deadline cannot already be elapsed while its shorter enrollment window is still open.
+
+These results strengthen the controlled-pilot gate. They do not authorize public deposits or replace an independent audit.
+
 ## Future Hardening
 
 - Factory-owned pool creation so policy ownership is bound at initialization.
