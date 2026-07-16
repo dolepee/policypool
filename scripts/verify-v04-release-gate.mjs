@@ -116,6 +116,8 @@ assert.match(providerRelay, /lookup:\s*createPinnedLookup\(record\)/);
 assert.match(providerRelay, /servername:\s*endpoint\.hostname/);
 assert.match(providerRelay, /rejectUnauthorized:\s*true/);
 assert.match(providerRelay, /await chain\.verifyProviderPaymentAuthorization/);
+assert.match(providerRelay, /!sameAddress\(authorization\.authorization\.from, grant\.buyer\)/);
+assert.match(providerRelay, /provider_payment_payer_mismatch/);
 assert.match(providerRelay, /authorizationNonce:\s*authorization\.authorization\.nonce/);
 assert.match(providerRelay, /provider_payment_authorization_already_used/);
 assert.match(providerRelay, /source:\s*"policypool_relay_verified_x402_settlement"/);
@@ -183,6 +185,7 @@ assert.match(auditReport, /H-05: Header presence could start an unpaid relay clo
 assert.match(auditReport, /H-06: DNS rebinding could bypass the provider relay SSRF check/);
 assert.match(auditReport, /H-07: Payout-due covenants lacked an operational settlement path/);
 assert.match(auditReport, /H-08: Failed coverage-fee settlement could strand provider bond/);
+assert.match(auditReport, /H-09: Provider payment payer was not bound to the relay-grant buyer/);
 assert.ok(
   vercel.routes.some((route) => route.src === "/providers/enroll" && route.dest === "/web/enroll.html"),
   "provider enrollment route must stay explicit",

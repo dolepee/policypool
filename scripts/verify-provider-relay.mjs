@@ -52,6 +52,7 @@ const grant = {
   agentId: "3808",
   serviceId: "33461",
   targetJobId,
+  buyer,
 };
 const secondGrant = { ...grant, grantId: "pprg-test-second" };
 const grantService = {
@@ -65,9 +66,10 @@ async function paymentHeader(tag, {
   amount = policy.servicePriceAtomic,
   payTo = provider,
   signingAccount = buyerSigner,
+  from = buyer,
 } = {}) {
   const authorization = {
-    from: buyer,
+    from: getAddress(from),
     to: getAddress(payTo),
     value: amount,
     validAfter: "0",
@@ -195,6 +197,10 @@ assert.equal(challenge.receipt.signer, signer.address);
 
 const wrongAmountPayment = await paymentHeader("wrong-amount", { amount: "1" });
 const wrongSignaturePayment = await paymentHeader("wrong-signature", { signingAccount: wrongSigner });
+const wrongPayerPayment = await paymentHeader("wrong-payer", {
+  signingAccount: wrongSigner,
+  from: wrongSigner.address,
+});
 await assert.rejects(
   () => relay.execute({
     agentId: "3808",
@@ -228,6 +234,17 @@ await assert.rejects(
   }, { "payment-signature": wrongSignaturePayment }),
   (error) => error instanceof ProviderRelayError && error.code === "provider_payment_signature_invalid",
   "a structurally valid authorization signed by a different key must fail before relay",
+);
+await assert.rejects(
+  () => relay.execute({
+    agentId: "3808",
+    serviceId: "33461",
+    targetJobId,
+    providerRequest: { target_url: "https://policypool.vercel.app/api/covered-job-receipt" },
+    relayGrant: "signed-relay-grant",
+  }, { "payment-signature": wrongPayerPayment }),
+  (error) => error instanceof ProviderRelayError && error.code === "provider_payment_payer_mismatch",
+  "a valid provider payment from a wallet other than the grant-bound buyer must not start the clock",
 );
 
 responseStatus = 200;
@@ -446,4 +463,4 @@ assert.deepEqual(pinnedAddress, { address: "93.184.216.34", family: 4 });
 assert.equal(__test.privateIp("::ffff:127.0.0.1"), true);
 assert.equal(__test.privateIp("ff02::1"), true);
 
-console.log("PolicyPool provider relay passed: pinned DNS, verified provider settlement, retry-safe grant claims, signed clocks, and job index.");
+console.log("PolicyPool provider relay passed: buyer-bound payment, pinned DNS, verified settlement, retry-safe grant claims, signed clocks, and job index.");

@@ -220,6 +220,22 @@ Residual: the attesters must independently check the fee token and exact authori
 
 Regression proofs: `testExpiredUnusedFeeAuthorizationCancelsAndAllowsCleanRetry`, `testUnpaidCancellationRejectsStaleEvidenceAndTerminalCovenants`, `testRecoveryQuorumCancelsExpiredUnusedAuthorizationOnlyAfterEmergencyDelay`, `scripts/verify-universal-flow.mjs`, and `scripts/verify-universal-reconciler.mjs`.
 
+### H-09: Provider payment payer was not bound to the relay-grant buyer
+
+Severity: High / P1 runtime
+
+Status: Fixed in source, not deployed
+
+The relay verified that a provider payment was valid and settled, but did not compare its EIP-3009 authorizer with the buyer bound into the signed relay grant. A different wallet holding a valid grant could therefore fund the provider request, start the covenant clock, and leave any later bond payout addressed to the original grant buyer.
+
+Source remediation:
+
+- the relay compares the verified authorization `from` address with `grant.buyer` before reserving the grant or forwarding the provider request;
+- a mismatch returns `provider_payment_payer_mismatch` and creates no clock, provider request, or grant/payment reservation;
+- the existing settlement proof remains bound to that same authorizer and authorization nonce.
+
+Regression: `scripts/verify-provider-relay.mjs` signs a structurally and cryptographically valid payment from a second wallet and proves it is rejected specifically for buyer mismatch before provider forwarding.
+
 ### M-01: Vault owner could replace the manager
 
 Severity: Medium

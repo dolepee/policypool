@@ -367,6 +367,9 @@ export function createProviderRelay({
     headers.accept ||= "application/json";
     headers["content-type"] = "application/json";
     const authorization = await providerPaymentAuthorization(paymentHeader(headers), policy, chain, now());
+    if (authorization && !sameAddress(authorization.authorization.from, grant.buyer)) {
+      throw new ProviderRelayError("provider_payment_payer_mismatch", 400);
+    }
     const requestId = `sha256:${sha256({
       agentId: policy.agentId,
       serviceId: policy.serviceIds[0],

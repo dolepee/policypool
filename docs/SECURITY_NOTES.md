@@ -89,22 +89,24 @@ Residual: terminal recovery and completion time are facts attested by permission
 
 ### Provider-relay payment and network findings remediated in source
 
-GitHub Codex found two High/P1 runtime paths after the Solidity review:
+GitHub Codex found three High/P1 runtime paths after the Solidity review:
 
 - Header presence could start an unpaid relay clock. The relay treated any nonempty payment header followed by a non-402 provider response as funded, so a fabricated header could create clock evidence without a provider payment.
 - DNS rebinding could bypass the provider relay SSRF check. The relay validated one DNS lookup but let the later fetch resolve the hostname again, allowing the checked public address and connected private address to differ.
+- A valid provider payment was not required to come from the buyer bound into the relay grant, so another wallet could start the clock while any breach payout still belonged to the original buyer.
 
 Source remediation:
 
 - the relay decodes exact x402 v2 requirements and requires the live listed service price, enrolled provider wallet, X Layer USD₮0 asset, and authentic token domain;
 - the buyer's EIP-3009 authorization fields and signature are verified before forwarding;
+- the verified authorization payer must equal the HMAC-signed relay-grant buyer before any reservation or provider request;
 - a successful provider response must carry settlement metadata whose X Layer transaction proves both the exact USD₮0 `Transfer` and matching `AuthorizationUsed` nonce;
 - the signed authorization is permanently consumed, independently of the short-lived one-use relay grant, so an old payment cannot start another covenant clock;
 - missing or invalid settlement proof releases only the pending reservations and creates no clock;
 - all resolved provider addresses must be public, and the HTTPS connection uses a pinned checked address while preserving the original hostname for SNI, certificate verification, and `Host`;
 - redirects remain disabled and request, response, and timeout limits remain enforced.
 
-Regression: `npm run agent:verify-relay` rejects malformed headers, wrong amounts, wrong signers, absent settlement evidence, authorization replay under a fresh grant, private DNS, and unpinned connection metadata. It proves that only a signature-valid, nonce-bound, on-chain-verified provider payment creates a relay clock.
+Regression: `npm run agent:verify-relay` rejects malformed headers, wrong amounts, wrong signers, a valid payment from the wrong buyer, absent settlement evidence, authorization replay under a fresh grant, private DNS, and unpinned connection metadata. It proves that only the grant-bound buyer's signature-valid, nonce-bound, on-chain-verified provider payment creates a relay clock.
 
 ### Universal lifecycle findings remediated in source
 
