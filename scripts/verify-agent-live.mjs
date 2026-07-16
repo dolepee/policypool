@@ -31,12 +31,8 @@ const sampleBody = {
 const head = await fetch(endpoint, { method: "HEAD" });
 assert.equal(head.status, 200, `HEAD expected 200, got ${head.status}`);
 
-const unpaid = await fetch(endpoint, {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify(sampleBody),
-});
-assert.equal(unpaid.status, 402, `unpaid POST expected 402, got ${unpaid.status}`);
+const unpaid = await fetch(endpoint, { cache: "no-store" });
+assert.equal(unpaid.status, 402, `anonymous discovery expected 402, got ${unpaid.status}`);
 const required = unpaid.headers.get("payment-required");
 assert.ok(required, "missing PAYMENT-REQUIRED header");
 const challenge = JSON.parse(Buffer.from(required, "base64").toString("utf8"));
@@ -70,13 +66,21 @@ assert.equal(
 );
 assert.equal(challenge.outputSchema.input.body.required.includes("targetAgent"), true);
 
-const genericAuth = await fetch(endpoint, {
+const stale = await fetch(endpoint, {
   method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(sampleBody),
+});
+assert.equal(stale.status, 400, `non-accepted task expected 400, got ${stale.status}`);
+assert.equal(stale.headers.has("payment-required"), false, "a stale task must not receive a payment challenge");
+const staleBody = await stale.json();
+assert.match(staleBody.error, /^target_job_not_accepted:\d+$/);
+assert.equal(staleBody.charged, false);
+
+const genericAuth = await fetch(endpoint, {
   headers: {
-    "content-type": "application/json",
     authorization: "Bearer invalid-payment-proof",
   },
-  body: JSON.stringify(sampleBody),
 });
 assert.equal(genericAuth.status, 402, "generic Authorization must not unlock the paid endpoint");
 
