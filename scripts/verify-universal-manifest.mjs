@@ -8,7 +8,9 @@ const configuration = {
   ready: true,
   policyRegistry: "0x1000000000000000000000000000000000000001",
   bondVault: "0x2000000000000000000000000000000000000002",
+  evidenceVerifier: "0x2500000000000000000000000000000000000002",
   coverageManager: "0x3000000000000000000000000000000000000003",
+  evidenceThreshold: 2,
 };
 const store = new MemoryProviderPolicyStore();
 const policy = await store.savePolicy({
@@ -51,6 +53,8 @@ assert.equal(
 );
 assert.equal(response.json().enrollment.recordedDemandSignals, 1);
 assert.equal(response.json().safety.sharedReserveForNewProviders, false);
+assert.equal(response.json().safety.evidenceThreshold, 2);
+assert.equal(response.json().safety.singleRelayerAuthority, false);
 assert.equal(response.json().safety.relayAuthorization, "short_lived_covenant_bound_single_request_grant");
 assert.ok(response.json().operations.automaticTransitions.includes("payout_due"));
 

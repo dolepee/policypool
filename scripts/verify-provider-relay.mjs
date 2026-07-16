@@ -10,6 +10,7 @@ import {
 const signer = privateKeyToAccount(
   "0x8b3a350cf5c34c9194ca3a545d9ef0ad14f60a17bcaef0aee4170b4818c50675",
 );
+const relayVerifier = "0x9000000000000000000000000000000000000009";
 const policy = {
   agentId: "3808",
   serviceIds: ["33461"],
@@ -50,6 +51,7 @@ const relay = createProviderRelay({
   fetchImpl,
   resolveHost,
   signer,
+  receiptVerifierAddress: relayVerifier,
   grantService,
   now: () => Date.parse("2026-07-16T12:00:00.000Z") + elapsed,
 });
@@ -80,7 +82,11 @@ assert.equal(delivered.receipt.clock.delivered, true);
 assert.equal(delivered.receipt.clock.completedWithinSla, true);
 assert.equal(delivered.receipt.request.paymentAuthorizationPresent, true);
 assert.equal(delivered.receipt.provider.targetJobId, targetJobId);
-assert.equal(await verifyProviderRelayReceipt(delivered.receipt, signer.address), true);
+assert.equal(await verifyProviderRelayReceipt(delivered.receipt, signer.address, relayVerifier), true);
+assert.equal(
+  await verifyProviderRelayReceipt(delivered.receipt, signer.address, "0x8000000000000000000000000000000000000008"),
+  false,
+);
 assert.equal(await store.getRelayReceipt(delivered.receipt.receiptId) !== null, true);
 assert.equal(
   (await store.getLatestRelayReceiptForJob(targetJobId)).receiptId,
@@ -130,6 +136,7 @@ const privateRelay = createProviderRelay({
   fetchImpl,
   resolveHost: async () => [{ address: "127.0.0.1", family: 4 }],
   signer,
+  receiptVerifierAddress: relayVerifier,
   grantService,
 });
 await assert.rejects(

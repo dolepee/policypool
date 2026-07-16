@@ -55,6 +55,7 @@ export function createUniversalManifestHandler(dependencies = {}) {
       contracts: {
         policyRegistry: configuration.policyRegistry,
         providerBondVault: configuration.bondVault,
+        evidenceVerifier: configuration.evidenceVerifier,
         coverageManager: configuration.coverageManager,
       },
       endpoints: {
@@ -77,7 +78,10 @@ export function createUniversalManifestHandler(dependencies = {}) {
         publicEndpoints: "redis_rate_limited_with_fail_closed_scope_validation",
         providerProjection: "last_confirmed_enrollment_not_a_live_coverability_guarantee",
         quoteTimeRevalidation: ["agent_owner", "service_fingerprint", "policy_state", "policy_expiry", "available_bond"],
-        reservePayout: "operator_approved_until_settlement_contract_audit",
+        lifecycleEvidence: "immutable_threshold_quorum_bound_to_chain_verifier_manager_action_and_payload",
+        evidenceThreshold: configuration.evidenceThreshold,
+        singleRelayerAuthority: false,
+        reservePayout: "provider_bond_settlement_requires_quorum_attested_recovery_evidence",
       },
       providers: policies.filter((record) => record.status === "active").map(publicPolicy),
       enrollment: {
@@ -88,7 +92,8 @@ export function createUniversalManifestHandler(dependencies = {}) {
       operations: {
         reconciliation: "managed_minute_scheduler_with_idempotent_onchain_state_recovery",
         automaticTransitions: ["relay_clock_start", "release", "payout_due", "unstarted_expiry"],
-        payoutSettlement: "operator_approved_with_independent_recovery_evidence",
+        payoutSettlement: "permissionless_execution_after_threshold_recovery_attestation",
+        relayer: "unprivileged_gas_payer",
       },
       okxListing: {
         endpointUnchanged: true,

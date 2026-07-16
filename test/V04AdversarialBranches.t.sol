@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {Test} from "forge-std/Test.sol";
-
 import {AgentPolicyRegistry} from "../src/AgentPolicyRegistry.sol";
+import {CoverageEvidenceVerifier} from "../src/CoverageEvidenceVerifier.sol";
 import {CoverageManager} from "../src/CoverageManager.sol";
 import {ProviderBondVault} from "../src/ProviderBondVault.sol";
 import {OkxA2AClockAdapter} from "../src/adapters/OkxA2AClockAdapter.sol";
@@ -11,6 +10,7 @@ import {RelayReceiptVerifier} from "../src/adapters/RelayReceiptVerifier.sol";
 import {MockAgentIdentityRegistry} from "../src/mocks/MockAgentIdentityRegistry.sol";
 import {MockERC20} from "../src/mocks/MockERC20.sol";
 import {MockOkxTaskStatus} from "../src/mocks/MockOkxTaskStatus.sol";
+import {CoverageEvidenceTestBase} from "./helpers/CoverageEvidenceTestBase.sol";
 
 contract ConfigurableBondAsset {
     mapping(address account => uint256 balance) public balanceOf;
@@ -69,7 +69,7 @@ contract ConfigurableBondAsset {
     }
 }
 
-contract V04AdversarialBranchesTest is Test {
+contract V04AdversarialBranchesTest is CoverageEvidenceTestBase {
     MockERC20 internal asset;
     ProviderBondVault internal vault;
     MockAgentIdentityRegistry internal identity;
@@ -87,12 +87,13 @@ contract V04AdversarialBranchesTest is Test {
     bytes32 internal constant JOB_ID = keccak256("job-v04-adversarial");
 
     function setUp() public {
+        _setUpEvidenceVerifier();
         (provider, providerKey) = makeAddrAndKey("provider");
         asset = new MockERC20("USD0", "USD0", 6);
         vault = new ProviderBondVault(address(asset), address(this), 8 days);
         identity = new MockAgentIdentityRegistry();
         registry = new AgentPolicyRegistry(address(identity), address(vault), address(this), 500_000, 7 days);
-        manager = new CoverageManager(address(registry), address(vault), address(this));
+        manager = new CoverageManager(address(registry), address(vault), address(evidenceVerifier));
         vault.initializeManager(address(manager));
 
         identity.setOwner(3808, provider);
@@ -308,106 +309,84 @@ contract V04AdversarialBranchesTest is Test {
         registry.registerPolicyBySig(provider, terms, 0, block.timestamp + 10 minutes, highS);
     }
 
-    function testManagerRejectsInvalidConstructionAndOwnershipChanges() public {
+    function testManagerRejectsInvalidConstructionAndHasNoPrivilegedExecutor() public {
         vm.expectRevert(CoverageManager.ZeroAddress.selector);
-        new CoverageManager(address(0), address(vault), address(this));
+        new CoverageManager(address(0), address(vault), address(evidenceVerifier));
         vm.expectRevert(CoverageManager.ZeroAddress.selector);
-        new CoverageManager(address(registry), address(0), address(this));
+        new CoverageManager(address(registry), address(0), address(evidenceVerifier));
         vm.expectRevert(CoverageManager.ZeroAddress.selector);
         new CoverageManager(address(registry), address(vault), address(0));
-
-        vm.prank(outsider);
-        vm.expectRevert(CoverageManager.Unauthorized.selector);
-        manager.setOperator(outsider);
-        vm.expectRevert(CoverageManager.ZeroAddress.selector);
-        manager.setOperator(address(0));
-        vm.expectRevert(CoverageManager.ZeroAddress.selector);
-        manager.transferOwnership(address(0));
-        vm.prank(outsider);
-        vm.expectRevert(CoverageManager.Unauthorized.selector);
-        manager.acceptOwnership();
+        assertEq(address(manager.evidenceVerifier()), address(evidenceVerifier));
     }
 
     function testManagerRejectsInvalidIssueAndLifecycleTransitions() public {
         bytes32 policyId = _registerPolicy();
+        CoverageManager.IssueEvidence memory evidence = _issueEvidence(policyId, JOB_ID);
+        evidence.provider = address(0);
         vm.expectRevert(CoverageManager.ZeroAddress.selector);
-        manager.issue(
-            policyId,
-            FINGERPRINT,
-            JOB_ID,
-            address(0),
-            buyer,
-            1,
-            1,
-            uint64(block.timestamp),
-            uint64(block.timestamp + 60)
-        );
+        manager.issue(evidence, new bytes[](0));
+
+        evidence = _issueEvidence(policyId, JOB_ID);
+        evidence.buyer = address(0);
         vm.expectRevert(CoverageManager.ZeroAddress.selector);
-        manager.issue(
-            policyId,
-            FINGERPRINT,
-            JOB_ID,
-            provider,
-            address(0),
-            1,
-            1,
-            uint64(block.timestamp),
-            uint64(block.timestamp + 60)
-        );
+        manager.issue(evidence, new bytes[](0));
+
+        evidence = _issueEvidence(policyId, JOB_ID);
+        evidence.policyId = bytes32(0);
         vm.expectRevert(CoverageManager.InvalidCovenant.selector);
-        manager.issue(
-            bytes32(0),
-            FINGERPRINT,
-            JOB_ID,
-            provider,
-            buyer,
-            1,
-            1,
-            uint64(block.timestamp),
-            uint64(block.timestamp + 60)
-        );
+        manager.issue(evidence, new bytes[](0));
+
+        evidence = _issueEvidence(policyId, JOB_ID);
+        evidence.verifiedAcceptanceAt = uint64(block.timestamp + 1);
         vm.expectRevert(CoverageManager.InvalidCovenant.selector);
-        manager.issue(
-            policyId,
-            FINGERPRINT,
-            JOB_ID,
-            provider,
-            buyer,
-            1,
-            1,
-            uint64(block.timestamp + 1),
-            uint64(block.timestamp + 60)
-        );
+        manager.issue(evidence, new bytes[](0));
+
+        evidence = _issueEvidence(policyId, JOB_ID);
+        evidence.observedFingerprint = keccak256("wrong-fingerprint");
         vm.expectRevert(CoverageManager.PolicyNotCoverable.selector);
-        manager.issue(
-            policyId,
-            keccak256("wrong-fingerprint"),
-            JOB_ID,
-            provider,
-            buyer,
-            1,
-            1,
-            uint64(block.timestamp),
-            uint64(block.timestamp + 60)
-        );
+        manager.issue(evidence, new bytes[](0));
 
         bytes32 covenantId = _issue(policyId, JOB_ID);
+        CoverageManager.ClockEvidence memory clockEvidence = CoverageManager.ClockEvidence({
+            covenantId: covenantId, startedAt: uint64(block.timestamp), evidenceHash: keccak256("not-relay")
+        });
+        bytes[] memory clockSignatures = _signatures(manager.clockEvidenceDigest(clockEvidence));
         vm.expectRevert(CoverageManager.CovenantNotActive.selector);
-        manager.startClock(covenantId, uint64(block.timestamp), keccak256("not-relay"));
+        manager.startClock(clockEvidence, clockSignatures);
         vm.expectRevert(CoverageManager.CovenantNotActive.selector);
         manager.expireUnstarted(covenantId);
+        CoverageManager.SettlementEvidence memory settlement = CoverageManager.SettlementEvidence({
+            covenantId: covenantId,
+            escrowRefundAtomic: 0,
+            otherRecoveryAtomic: 0,
+            observedAt: uint64(block.timestamp),
+            recoveryEvidenceHash: keccak256("not-due")
+        });
+        bytes[] memory prematureSettlementSignatures = _signatures(manager.settlementEvidenceDigest(settlement));
         vm.expectRevert(CoverageManager.CovenantNotActive.selector);
-        manager.settleNetLoss(covenantId, 0, 0, keccak256("not-due"));
+        manager.settleNetLoss(settlement, prematureSettlementSignatures);
 
         vm.warp(block.timestamp + 301);
+        CoverageManager.BreachEvidence memory breach = CoverageManager.BreachEvidence({
+            covenantId: covenantId, observedAt: uint64(block.timestamp), evidenceHash: bytes32(0)
+        });
         vm.expectRevert(CoverageManager.InvalidCovenant.selector);
-        manager.markPayoutDue(covenantId, bytes32(0));
-        manager.markPayoutDue(covenantId, keccak256("deadline-missed"));
+        manager.markPayoutDue(breach, new bytes[](0));
+        breach.evidenceHash = keccak256("deadline-missed");
+        _markPayoutDue(manager, breach);
+        bytes[] memory duplicateBreachSignatures = _signatures(manager.breachEvidenceDigest(breach));
         vm.expectRevert(CoverageManager.CovenantNotActive.selector);
-        manager.markPayoutDue(covenantId, keccak256("duplicate"));
-        manager.settleNetLoss(covenantId, 500_000, 0, keccak256("full-recovery"));
+        manager.markPayoutDue(breach, duplicateBreachSignatures);
+        settlement.escrowRefundAtomic = 500_000;
+        settlement.observedAt = uint64(block.timestamp);
+        settlement.recoveryEvidenceHash = keccak256("full-recovery");
+        _settle(manager, settlement);
+        CoverageManager.ReleaseEvidence memory releaseEvidence = CoverageManager.ReleaseEvidence({
+            covenantId: covenantId, observedAt: uint64(block.timestamp), evidenceHash: keccak256("already-final")
+        });
+        bytes[] memory releaseSignatures = _signatures(manager.releaseEvidenceDigest(releaseEvidence));
         vm.expectRevert(CoverageManager.CovenantNotActive.selector);
-        manager.release(covenantId, keccak256("already-final"));
+        manager.release(releaseEvidence, releaseSignatures);
     }
 
     function testManagerRejectsEarlyRelayExpiry() public {
@@ -417,17 +396,9 @@ contract V04AdversarialBranchesTest is Test {
         terms.clockMode = 1;
         vm.prank(provider);
         bytes32 policyId = registry.registerPolicy(terms);
-        bytes32 covenantId = manager.issue(
-            policyId,
-            terms.serviceFingerprint,
-            keccak256("relay-job"),
-            provider,
-            buyer,
-            500_000,
-            500_000,
-            uint64(block.timestamp),
-            uint64(block.timestamp + 60)
-        );
+        CoverageManager.IssueEvidence memory evidence = _issueEvidence(policyId, keccak256("relay-job"));
+        evidence.observedFingerprint = terms.serviceFingerprint;
+        bytes32 covenantId = _issue(manager, evidence);
 
         vm.expectRevert(CoverageManager.DeadlineNotElapsed.selector);
         manager.expireUnstarted(covenantId);
@@ -490,17 +461,26 @@ contract V04AdversarialBranchesTest is Test {
     }
 
     function _issue(bytes32 policyId, bytes32 jobId) internal returns (bytes32 covenantId) {
-        covenantId = manager.issue(
-            policyId,
-            FINGERPRINT,
-            jobId,
-            provider,
-            buyer,
-            500_000,
-            500_000,
-            uint64(block.timestamp),
-            uint64(block.timestamp + 60)
-        );
+        covenantId = _issue(manager, _issueEvidence(policyId, jobId));
+    }
+
+    function _issueEvidence(bytes32 policyId, bytes32 jobId)
+        internal
+        view
+        returns (CoverageManager.IssueEvidence memory)
+    {
+        return CoverageManager.IssueEvidence({
+            policyId: policyId,
+            observedFingerprint: FINGERPRINT,
+            jobId: jobId,
+            provider: provider,
+            buyer: buyer,
+            coverageCapAtomic: 500_000,
+            buyerPaidAtomic: 500_000,
+            verifiedAcceptanceAt: uint64(block.timestamp),
+            enrollmentExpiresAt: uint64(block.timestamp + 60),
+            acceptanceEvidenceHash: keccak256(abi.encode("OKX_ACCEPTANCE", jobId))
+        });
     }
 
     function _expectInvalidPolicy(AgentPolicyRegistry.PolicyTerms memory terms) internal {

@@ -1,7 +1,8 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { privateKeyToAccount } from "viem/accounts";
-import { keccak256, stringToHex, verifyMessage } from "viem";
+import { getAddress, isAddress, keccak256, stringToHex, verifyTypedData } from "viem";
+import { XLAYER } from "./config.js";
 import { clean, isBytes32, sha256, stableStringify } from "./utils.js";
 import { RelayGrantError } from "./relay-grant.js";
 
@@ -10,6 +11,9 @@ const MAX_RESPONSE_BYTES = 2_000_000;
 const MAX_TIMEOUT_MS = 300_000;
 const FORWARDED_HEADERS = ["accept", "content-type", "payment-signature", "x-payment"];
 const RETURNED_HEADERS = ["content-type", "payment-required", "payment-response", "x-payment-response"];
+const RELAY_RECEIPT_TYPES = {
+  RelayReceipt: [{ name: "receiptDigest", type: "bytes32" }],
+};
 
 export class ProviderRelayError extends Error {
   constructor(code, status = 422) {
@@ -84,12 +88,24 @@ function defaultSigner() {
   return privateKeyToAccount(key);
 }
 
+function receiptDomain(verifierAddress) {
+  const raw = String(verifierAddress || process.env.POLICYPOOL_A2MCP_RELAY_ADAPTER_ADDRESS || "").trim();
+  if (!isAddress(raw)) throw new ProviderRelayError("provider_relay_verifier_not_configured", 503);
+  return {
+    name: "PolicyPool Relay Receipt",
+    version: "1",
+    chainId: XLAYER.id,
+    verifyingContract: getAddress(raw),
+  };
+}
+
 export function createProviderRelay({
   policyResolver,
   store,
   fetchImpl = globalThis.fetch,
   resolveHost = lookup,
   signer,
+  receiptVerifierAddress,
   grantService,
   now = () => Date.now(),
 } = {}) {
@@ -99,6 +115,7 @@ export function createProviderRelay({
   if (!grantService?.resolve) throw new ProviderRelayError("provider_relay_grant_service_unavailable", 503);
   if (typeof fetchImpl !== "function") throw new ProviderRelayError("provider_relay_fetch_unavailable", 503);
   const receiptSigner = signer || defaultSigner();
+  const signatureDomain = receiptDomain(receiptVerifierAddress);
 
   async function execute(input, requestHeaders = {}) {
     let grant;
@@ -182,6 +199,7 @@ export function createProviderRelay({
     const unsignedReceipt = {
       protocol: "PolicyPool Provider Relay",
       version: "0.4.0",
+      signatureDomain,
       requestId,
       relayGrantId: grant.grantId,
       provider: {
@@ -215,7 +233,12 @@ export function createProviderRelay({
         : null,
     };
     const receiptDigest = keccak256(stringToHex(stableStringify(unsignedReceipt)));
-    const signature = await receiptSigner.signMessage({ message: { raw: receiptDigest } });
+    const signature = await receiptSigner.signTypedData({
+      domain: signatureDomain,
+      types: RELAY_RECEIPT_TYPES,
+      primaryType: "RelayReceipt",
+      message: { receiptDigest },
+    });
     const stored = await store.saveRelayReceipt({
       ...unsignedReceipt,
       receiptDigest,
@@ -236,14 +259,34 @@ export function createProviderRelay({
   return { execute };
 }
 
-export async function verifyProviderRelayReceipt(receipt, expectedSigner) {
+export async function verifyProviderRelayReceipt(receipt, expectedSigner, expectedVerifierAddress) {
   if (!receipt?.signature || !receipt?.signer || receipt.signer.toLowerCase() !== expectedSigner.toLowerCase()) {
     return false;
   }
+  let expectedDomain;
+  try {
+    expectedDomain = receiptDomain(expectedVerifierAddress);
+  } catch {
+    return false;
+  }
+  if (
+    receipt.signatureDomain?.name !== expectedDomain.name
+    || receipt.signatureDomain?.version !== expectedDomain.version
+    || Number(receipt.signatureDomain?.chainId) !== expectedDomain.chainId
+    || String(receipt.signatureDomain?.verifyingContract || "").toLowerCase()
+      !== expectedDomain.verifyingContract.toLowerCase()
+  ) return false;
   const { signature, signer, receiptId, receiptDigest, ...unsigned } = receipt;
   const expectedDigest = keccak256(stringToHex(stableStringify(unsigned)));
   if (receiptDigest !== expectedDigest) return false;
-  return verifyMessage({ address: signer, message: { raw: receiptDigest }, signature });
+  return verifyTypedData({
+    address: signer,
+    domain: expectedDomain,
+    types: RELAY_RECEIPT_TYPES,
+    primaryType: "RelayReceipt",
+    message: { receiptDigest },
+    signature,
+  });
 }
 
 export const __test = { privateIp, verifyPublicEndpoint };

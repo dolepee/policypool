@@ -79,6 +79,7 @@ export function createUniversalReconcileHandler(dependencies = {}) {
         chain: dependencies.chain || createChainService(),
         taskFetcher: dependencies.taskFetcher || fetchOkxTaskPage,
         relaySigner: configuration.relaySigner,
+        relayVerifier: configuration.relayAdapter,
         now,
       });
       const result = await runtimeReconciler.reconcile({ dryRun: dryRunRequested(req) });

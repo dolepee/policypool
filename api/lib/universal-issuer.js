@@ -9,17 +9,28 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { XLAYER } from "./config.js";
+import { createEvidenceAttestationClient, EvidenceAttestationError } from "./evidence-attestation.js";
 import { universalConfiguration } from "./universal-config.js";
 import { isBytes32 } from "./utils.js";
 
+const ISSUE_TUPLE = "(bytes32 policyId,bytes32 observedFingerprint,bytes32 jobId,address provider,address buyer,uint128 coverageCapAtomic,uint128 buyerPaidAtomic,uint64 verifiedAcceptanceAt,uint64 enrollmentExpiresAt,bytes32 acceptanceEvidenceHash)";
+const CLOCK_TUPLE = "(bytes32 covenantId,uint64 startedAt,bytes32 evidenceHash)";
+const OBSERVATION_TUPLE = "(bytes32 covenantId,uint64 observedAt,bytes32 evidenceHash)";
+const SETTLEMENT_TUPLE = "(bytes32 covenantId,uint128 escrowRefundAtomic,uint128 otherRecoveryAtomic,uint64 observedAt,bytes32 recoveryEvidenceHash)";
+
 const MANAGER_ABI = parseAbi([
-  "function getCovenant(bytes32 covenantId) view returns ((bytes32 id,bytes32 policyId,bytes32 jobId,address provider,address buyer,uint128 coverageCapAtomic,uint128 buyerPaidAtomic,uint64 issuedAt,uint64 startAt,uint64 deadline,uint64 enrollmentExpiresAt,uint32 slaSeconds,uint8 payoutBasis,uint8 clockMode,uint8 state,uint128 payoutAtomic,bytes32 recoveryEvidenceHash))",
-  "function issue(bytes32 policyId, bytes32 observedFingerprint, bytes32 jobId, address provider, address buyer, uint128 coverageCapAtomic, uint128 buyerPaidAtomic, uint64 verifiedAcceptanceAt, uint64 enrollmentExpiresAt) returns (bytes32)",
-  "function release(bytes32 covenantId, bytes32 reason)",
-  "function startClock(bytes32 covenantId, uint64 startedAt, bytes32 evidenceHash)",
+  "function getCovenant(bytes32 covenantId) view returns ((bytes32 id,bytes32 policyId,bytes32 jobId,address provider,address buyer,uint128 coverageCapAtomic,uint128 buyerPaidAtomic,uint64 issuedAt,uint64 startAt,uint64 deadline,uint64 enrollmentExpiresAt,uint64 payoutDueAt,uint32 slaSeconds,uint8 payoutBasis,uint8 clockMode,uint8 state,uint128 payoutAtomic,bytes32 acceptanceEvidenceHash,bytes32 breachEvidenceHash,bytes32 recoveryEvidenceHash))",
+  `function issue(${ISSUE_TUPLE} evidence, bytes[] signatures) returns (bytes32)`,
+  `function issueEvidenceDigest(${ISSUE_TUPLE} evidence) view returns (bytes32)`,
+  `function release(${OBSERVATION_TUPLE} evidence, bytes[] signatures)`,
+  `function releaseEvidenceDigest(${OBSERVATION_TUPLE} evidence) view returns (bytes32)`,
+  `function startClock(${CLOCK_TUPLE} evidence, bytes[] signatures)`,
+  `function clockEvidenceDigest(${CLOCK_TUPLE} evidence) view returns (bytes32)`,
   "function expireUnstarted(bytes32 covenantId)",
-  "function markPayoutDue(bytes32 covenantId, bytes32 breachEvidenceHash)",
-  "function settleNetLoss(bytes32 covenantId, uint128 escrowRefundAtomic, uint128 otherRecoveryAtomic, bytes32 recoveryEvidenceHash) returns (uint256)",
+  `function markPayoutDue(${OBSERVATION_TUPLE} evidence, bytes[] signatures)`,
+  `function breachEvidenceDigest(${OBSERVATION_TUPLE} evidence) view returns (bytes32)`,
+  `function settleNetLoss(${SETTLEMENT_TUPLE} evidence, bytes[] signatures) returns (uint256)`,
+  `function settlementEvidenceDigest(${SETTLEMENT_TUPLE} evidence) view returns (bytes32)`,
 ]);
 
 export class UniversalIssuerError extends Error {
@@ -43,9 +54,9 @@ function policyId(value) {
   return parsed;
 }
 
-function operatorAccount() {
-  const key = String(process.env.POLICYPOOL_MANAGER_PRIVATE_KEY || "").trim();
-  if (!/^0x[a-fA-F0-9]{64}$/.test(key)) throw new UniversalIssuerError("coverage_manager_signer_not_configured");
+function relayerAccount() {
+  const key = String(process.env.POLICYPOOL_RELAYER_PRIVATE_KEY || "").trim();
+  if (!/^0x[a-fA-F0-9]{64}$/.test(key)) throw new UniversalIssuerError("coverage_relayer_signer_not_configured");
   return privateKeyToAccount(key);
 }
 
@@ -62,20 +73,38 @@ function clients(account) {
   };
 }
 
+function acceptanceEvidenceHash(targetOrder) {
+  if (!isBytes32(targetOrder?.jobId) || !isBytes32(targetOrder?.creationTxHash) || !isBytes32(targetOrder?.acceptanceTxHash)) {
+    throw new UniversalIssuerError("target_acceptance_evidence_invalid", 422);
+  }
+  return keccak256(encodeAbiParameters(
+    [{ type: "bytes32" }, { type: "bytes32" }, { type: "bytes32" }],
+    [targetOrder.jobId, targetOrder.creationTxHash, targetOrder.acceptanceTxHash],
+  ));
+}
+
 export function createUniversalIssuer({
   configuration = universalConfiguration(),
-  account = operatorAccount(),
+  account,
+  evidenceProvider,
   publicClient,
   walletClient,
+  now = () => Date.now(),
 } = {}) {
-  if (!configuration.ready || !configuration.coverageManager) {
+  if (!configuration.ready || !configuration.coverageManager || !configuration.evidenceVerifier) {
     throw new UniversalIssuerError("universal_issuance_not_configured");
   }
+  account ||= relayerAccount();
   if (!publicClient || !walletClient) {
     const defaults = clients(account);
     publicClient ||= defaults.publicClient;
     walletClient ||= defaults.walletClient;
   }
+  evidenceProvider ||= createEvidenceAttestationClient({
+    url: configuration.evidenceAttestationUrl,
+    token: process.env.POLICYPOOL_EVIDENCE_ATTESTATION_TOKEN,
+    threshold: configuration.evidenceThreshold,
+  });
 
   async function write(functionName, args) {
     let request;
@@ -102,6 +131,39 @@ export function createUniversalIssuer({
     }
   }
 
+  async function signatures({ action, digestFunctionName, evidence, context }) {
+    let digest;
+    try {
+      digest = await publicClient.readContract({
+        address: configuration.coverageManager,
+        abi: MANAGER_ABI,
+        functionName: digestFunctionName,
+        args: [evidence],
+      });
+      return await evidenceProvider.attest({
+        action,
+        digest,
+        evidence,
+        context,
+        domain: {
+          chainId: XLAYER.id,
+          manager: configuration.coverageManager,
+          verifier: configuration.evidenceVerifier,
+        },
+      });
+    } catch (error) {
+      if (error instanceof EvidenceAttestationError) throw new UniversalIssuerError(error.code, error.status);
+      throw new UniversalIssuerError(
+        `coverage_evidence_${action}_failed:${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  async function attestedWrite({ functionName, digestFunctionName, action, evidence, context }) {
+    const approved = await signatures({ action, digestFunctionName, evidence, context });
+    return write(functionName, [evidence, approved]);
+  }
+
   async function getCovenant(covenantId) {
     if (!isBytes32(covenantId)) throw new UniversalIssuerError("covenant_id_invalid", 422);
     try {
@@ -123,11 +185,14 @@ export function createUniversalIssuer({
         startAt: Number(value.startAt),
         deadline: Number(value.deadline),
         enrollmentExpiresAt: Number(value.enrollmentExpiresAt),
+        payoutDueAt: Number(value.payoutDueAt),
         slaSeconds: Number(value.slaSeconds),
         payoutBasis: Number(value.payoutBasis),
         clockMode: Number(value.clockMode),
         state: Number(value.state),
         payoutAtomic: value.payoutAtomic.toString(),
+        acceptanceEvidenceHash: value.acceptanceEvidenceHash,
+        breachEvidenceHash: value.breachEvidenceHash,
         recoveryEvidenceHash: value.recoveryEvidenceHash,
       };
     } catch (error) {
@@ -138,20 +203,29 @@ export function createUniversalIssuer({
   }
 
   async function issue({ policy, targetOrder, coverageCapAtomic, enrollmentClosesAt }) {
-    const onchainPolicyId = policyId(policy?.onchainPolicyId);
-    const args = [
-      onchainPolicyId,
-      policy.serviceFingerprint,
-      targetOrder.jobId,
-      policy.providerWallet,
-      targetOrder.buyer,
-      BigInt(coverageCapAtomic),
-      BigInt(targetOrder.amountAtomic),
-      BigInt(seconds(targetOrder.acceptedAt, "target_acceptance_time")),
-      BigInt(seconds(enrollmentClosesAt, "coverage_enrollment_close")),
-    ];
+    const evidence = {
+      policyId: policyId(policy?.onchainPolicyId),
+      observedFingerprint: policy.serviceFingerprint,
+      jobId: targetOrder.jobId,
+      provider: policy.providerWallet,
+      buyer: targetOrder.buyer,
+      coverageCapAtomic: BigInt(coverageCapAtomic),
+      buyerPaidAtomic: BigInt(targetOrder.amountAtomic),
+      verifiedAcceptanceAt: BigInt(seconds(targetOrder.acceptedAt, "target_acceptance_time")),
+      enrollmentExpiresAt: BigInt(seconds(enrollmentClosesAt, "coverage_enrollment_close")),
+      acceptanceEvidenceHash: acceptanceEvidenceHash(targetOrder),
+    };
     const id = previewCovenantId({ policy, targetOrder });
-    return { covenantId: id, ...(await write("issue", args)) };
+    return {
+      covenantId: id,
+      ...(await attestedWrite({
+        functionName: "issue",
+        digestFunctionName: "issueEvidenceDigest",
+        action: "issue",
+        evidence,
+        context: { policy, targetOrder },
+      })),
+    };
   }
 
   function previewCovenantId({ policy, targetOrder }) {
@@ -162,17 +236,33 @@ export function createUniversalIssuer({
     ));
   }
 
-  async function release(covenantId, reason) {
-    if (!isBytes32(covenantId) || !isBytes32(reason)) throw new UniversalIssuerError("release_evidence_invalid", 422);
-    return write("release", [covenantId, reason]);
+  async function release(covenantId, evidenceHash, context = {}) {
+    if (!isBytes32(covenantId) || !isBytes32(evidenceHash)) {
+      throw new UniversalIssuerError("release_evidence_invalid", 422);
+    }
+    const evidence = { covenantId, observedAt: BigInt(Math.floor(now() / 1_000)), evidenceHash };
+    return attestedWrite({
+      functionName: "release",
+      digestFunctionName: "releaseEvidenceDigest",
+      action: "release",
+      evidence,
+      context,
+    });
   }
 
-  async function startClock(covenantId, startedAt, evidenceHash) {
-    return write("startClock", [
+  async function startClock(covenantId, startedAt, evidenceHash, context = {}) {
+    const evidence = {
       covenantId,
-      BigInt(seconds(startedAt, "relay_clock_start")),
+      startedAt: BigInt(seconds(startedAt, "relay_clock_start")),
       evidenceHash,
-    ]);
+    };
+    return attestedWrite({
+      functionName: "startClock",
+      digestFunctionName: "clockEvidenceDigest",
+      action: "start_clock",
+      evidence,
+      context,
+    });
   }
 
   async function expireUnstarted(covenantId) {
@@ -180,17 +270,42 @@ export function createUniversalIssuer({
     return write("expireUnstarted", [covenantId]);
   }
 
-  async function markPayoutDue(covenantId, breachEvidenceHash) {
-    return write("markPayoutDue", [covenantId, breachEvidenceHash]);
+  async function markPayoutDue(covenantId, breachEvidenceHash, context = {}) {
+    const evidence = {
+      covenantId,
+      observedAt: BigInt(Math.floor(now() / 1_000)),
+      evidenceHash: breachEvidenceHash,
+    };
+    return attestedWrite({
+      functionName: "markPayoutDue",
+      digestFunctionName: "breachEvidenceDigest",
+      action: "breach",
+      evidence,
+      context,
+    });
   }
 
-  async function settleNetLoss(covenantId, escrowRefundAtomic, otherRecoveryAtomic, recoveryEvidenceHash) {
-    return write("settleNetLoss", [
+  async function settleNetLoss(
+    covenantId,
+    escrowRefundAtomic,
+    otherRecoveryAtomic,
+    recoveryEvidenceHash,
+    context = {},
+  ) {
+    const evidence = {
       covenantId,
-      BigInt(escrowRefundAtomic),
-      BigInt(otherRecoveryAtomic),
+      escrowRefundAtomic: BigInt(escrowRefundAtomic),
+      otherRecoveryAtomic: BigInt(otherRecoveryAtomic),
+      observedAt: BigInt(Math.floor(now() / 1_000)),
       recoveryEvidenceHash,
-    ]);
+    };
+    return attestedWrite({
+      functionName: "settleNetLoss",
+      digestFunctionName: "settlementEvidenceDigest",
+      action: "settlement",
+      evidence,
+      context,
+    });
   }
 
   return {
@@ -202,6 +317,6 @@ export function createUniversalIssuer({
     expireUnstarted,
     markPayoutDue,
     settleNetLoss,
-    operator: account.address,
+    relayer: account.address,
   };
 }

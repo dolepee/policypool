@@ -16,6 +16,7 @@
     "agent:verify-enrollment": "node scripts/verify-provider-enrollment.mjs",
     "agent:verify-relay": "node scripts/verify-provider-relay.mjs",
     "agent:verify-clocks": "node scripts/verify-coverage-clocks.mjs",
+    "agent:verify-evidence": "node scripts/verify-evidence-attestation.mjs",
     "agent:verify-issuer": "node scripts/verify-universal-issuer.mjs",
     "agent:verify-universal-flow": "node scripts/verify-universal-flow.mjs",
     "agent:verify-universal-manifest": "node scripts/verify-universal-manifest.mjs",
@@ -30,7 +31,7 @@
     "ops:breach:settle": "node scripts/settle-controlled-breach.mjs --execute",
     "ops:qstash:setup": "node scripts/setup-qstash-schedule.mjs",
     "ops:qstash:universal:setup": "node scripts/setup-qstash-universal-schedule.mjs",
-    "agent:gate": "npm run typecheck && npm run agent:verify && npm run agent:verify-preflight && npm run agent:verify-manifest && npm run agent:verify-payout-runner && npm run agent:verify-chain && npm run agent:verify-directory && npm run agent:verify-enrollment && npm run agent:verify-relay && npm run agent:verify-clocks && npm run agent:verify-issuer && npm run agent:verify-universal-flow && npm run agent:verify-universal-manifest && npm run agent:verify-bond && npm run agent:verify-rate-limits && npm run agent:verify-relay-grants && npm run agent:verify-universal-reconciler && npm run agent:probe && npm run site:verify && npm run build",
+    "agent:gate": "npm run typecheck && npm run agent:verify && npm run agent:verify-preflight && npm run agent:verify-manifest && npm run agent:verify-payout-runner && npm run agent:verify-chain && npm run agent:verify-directory && npm run agent:verify-enrollment && npm run agent:verify-relay && npm run agent:verify-clocks && npm run agent:verify-evidence && npm run agent:verify-issuer && npm run agent:verify-universal-flow && npm run agent:verify-universal-manifest && npm run agent:verify-bond && npm run agent:verify-rate-limits && npm run agent:verify-relay-grants && npm run agent:verify-universal-reconciler && npm run agent:probe && npm run site:verify && npm run build",
     "agent:verify-v04-release": "node scripts/verify-v04-release-gate.mjs",
     "agent:gate-v04": "npm run agent:gate && forge fmt --check && forge test --summary && npm run agent:verify-v04-release && npm audit --omit=dev",
     "agent:gate-live": "npm run agent:gate && npm run agent:verify-live"

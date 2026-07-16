@@ -106,6 +106,7 @@ export function createUniversalReconciler({
   chain,
   taskFetcher,
   relaySigner,
+  relayVerifier,
   verifyRelayReceipt = verifyProviderRelayReceipt,
   now = () => Date.now(),
 } = {}) {
@@ -115,19 +116,20 @@ export function createUniversalReconciler({
   if (!chain?.getJobStatus) throw new Error("universal_reconciler_chain_unavailable");
   if (typeof taskFetcher !== "function") throw new Error("universal_reconciler_task_fetcher_unavailable");
   if (!relaySigner) throw new Error("universal_reconciler_relay_signer_unavailable");
+  if (!relayVerifier) throw new Error("universal_reconciler_relay_verifier_unavailable");
 
   async function apply(record, action, details, dryRun) {
     const covenantId = record.universalCovenant.covenantId;
     if (action === "release") {
       const reasonHash = evidenceHash({ action, receiptId: record.receiptId, ...details });
-      if (!dryRun) await issuer.release(covenantId, reasonHash);
+      if (!dryRun) await issuer.release(covenantId, reasonHash, details);
       const updated = transition(record, "released", details.reason, { ...details, reasonHash }, now());
       if (!dryRun) await ledger.transitionUniversal(updated, [record.state]);
       return { receiptId: record.receiptId, from: record.state, to: "released", reason: details.reason };
     }
     if (action === "mark_payout_due") {
       const breachEvidenceHash = evidenceHash({ action, receiptId: record.receiptId, ...details });
-      if (!dryRun) await issuer.markPayoutDue(covenantId, breachEvidenceHash);
+      if (!dryRun) await issuer.markPayoutDue(covenantId, breachEvidenceHash, details);
       const updated = transition(record, "payout_due", details.reason, { ...details, breachEvidenceHash }, now());
       if (!dryRun) await ledger.transitionUniversal(updated, [record.state]);
       return { receiptId: record.receiptId, from: record.state, to: "payout_due", reason: details.reason };
@@ -146,11 +148,17 @@ export function createUniversalReconciler({
       const covenantId = original.universalCovenant.covenantId;
       const onchain = await issuer.getCovenant(covenantId);
       if (Number(onchain.state) === 1 || Number(onchain.state) === 2) {
-        if (!dryRun) await issuer.release(covenantId, evidenceHash({
-          action: "abort_unsettled_coverage",
-          receiptId: original.receiptId,
-          reason: original.compensation?.reason || "coverage_fee_not_settled",
-        }));
+        if (!dryRun) {
+          const compensationEvidence = {
+            action: "abort_unsettled_coverage",
+            receiptId: original.receiptId,
+            reason: original.compensation?.reason || "coverage_fee_not_settled",
+          };
+          await issuer.release(covenantId, evidenceHash(compensationEvidence), {
+            compensationEvidence,
+            record: original,
+          });
+        }
       } else if (![0, 3].includes(Number(onchain.state))) {
         throw new Error(`compensation_covenant_state_unsafe:${onchain.state}`);
       }
@@ -183,7 +191,9 @@ export function createUniversalReconciler({
         }
         return { changes, hold: "relay_clock_not_started" };
       }
-      if (!await verifyRelayReceipt(relayReceipt, relaySigner)) throw new Error("relay_receipt_signature_invalid");
+      if (!await verifyRelayReceipt(relayReceipt, relaySigner, relayVerifier)) {
+        throw new Error("relay_receipt_signature_invalid");
+      }
       const observed = observeRelayClock({
         covenant: { ...record, targetJobId: record.targetOrder.jobId },
         relayReceipt,
@@ -198,6 +208,7 @@ export function createUniversalReconciler({
           record.universalCovenant.covenantId,
           observed.startedAt,
           evidenceHash({ relayReceiptId: relayReceipt.receiptId, requestId: observed.evidenceHash }),
+          { relayReceipt },
         );
       }
       const started = transition(record, "active", observed.reason, {
@@ -223,7 +234,7 @@ export function createUniversalReconciler({
     let evidence;
     if (clockMode === "policypool_relay") {
       const relayReceipt = await store.getLatestRelayReceiptForJob(record.targetOrder.jobId);
-      if (relayReceipt && !await verifyRelayReceipt(relayReceipt, relaySigner)) {
+      if (relayReceipt && !await verifyRelayReceipt(relayReceipt, relaySigner, relayVerifier)) {
         throw new Error("relay_receipt_signature_invalid");
       }
       observed = observeRelayClock({

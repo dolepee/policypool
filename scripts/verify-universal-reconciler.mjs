@@ -143,6 +143,7 @@ const reconciler = createUniversalReconciler({
   chain: { async getJobStatus(jobId) { return chainStates.get(jobId); } },
   taskFetcher: async (reference) => structuredClone(tasks.get(String(reference))),
   relaySigner: "0x1000000000000000000000000000000000000001",
+  relayVerifier: "0x2000000000000000000000000000000000000002",
   verifyRelayReceipt: async () => true,
   now: () => now,
 });

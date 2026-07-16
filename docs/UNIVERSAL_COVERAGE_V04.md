@@ -1,14 +1,32 @@
 # PolicyPool Universal Coverage v0.4
 
-Status: the pre-audit v0.4 contracts were deployed flag-off for a controlled house pilot. The hardened source now differs from that bytecode and is not deployed. Production remains v0.3; public enrollment and third-party bonds are blocked by the internal audit verdict.
+Status: REMEDIATED IN SOURCE: independent review and redeployment required.
+
+The pre-audit v0.4 contracts were deployed flag-off for a controlled house pilot. The hardened source now differs from that bytecode and is not deployed. Production remains v0.3. Public enrollment and third-party bonds remain blocked.
 
 ## Product Boundary
 
-v0.4 makes any eligible OKX.AI service coverable only after its provider opts in. The provider must own the listed agent, deposit first-loss USD₮0 into the bond vault, and sign objective versioned terms for one exact service fingerprint. Unknown services create a deduplicated demand signal and an enrollment link; they never receive unbacked coverage.
+v0.4 makes an eligible OKX.AI service coverable only after its provider opts in. The provider must own the listed agent, deposit first-loss USD₮0 into the bond vault, and sign objective versioned terms for one exact service fingerprint. Unknown services create a deduplicated demand signal and an enrollment link; they never receive unbacked coverage.
 
-This is not provider-agnostic insurance. A buyer and an unenrolled provider could otherwise collude, allow a task to fail, recover marketplace escrow, and also claim coverage. Provider-funded first loss removes that extraction path.
+This is not provider-agnostic insurance. Without provider first loss, a buyer and an unenrolled provider could collude, allow a task to fail, recover marketplace escrow, and also claim coverage. Provider-funded first loss closes that buyer-provider extraction path only when the evidence quorum is honest. It does not protect against a colluding signer threshold.
 
 The listed PolicyPool service continues to charge a fixed `0.1 USD₮0` issuance fee. Provider-defined premiums are not active in v0.4 and the enrollment API requires `premiumBps: 0`.
+
+## Evidence Trust Model
+
+The original manager gave one hot operator authority over the job, buyer, acceptance, release, breach, and recovery facts that moved provider bonds. The remediated source removes that owner/operator path.
+
+Every subjective lifecycle action now requires an immutable threshold evidence quorum:
+
+- `CoverageEvidenceVerifier` requires at least two authorized EIP-712 signatures.
+- The digest binds the current chain, verifier, destination manager, action, and exact payload.
+- The manager consumes each digest once and rejects replay.
+- Signatures must be unique and sorted by recovered signer address.
+- Any account may relay a valid quorum-attested action; the relayer has no custody authority.
+- The verifier has no owner, signer rotation, threshold update, or emergency bypass.
+- The runtime sends the exact evidence plus its underlying task, transaction, relay, or recovery context to independently operated attesters. Attesters must recompute the payload and manager digest rather than trust the relayer's summary.
+
+This is a permissioned oracle model, not trustless marketplace verification. A colluding threshold can still attest false facts, while unavailable signers can halt subjective transitions. Before external bonds, the signer deployment must be arranged so no one operator, machine, cloud account, or organization can satisfy the threshold alone. Replacing lost or compromised signers requires a new verifier and manager deployment, followed by an orderly migration with no funds abandoned in the old vault.
 
 ## Invariants
 
@@ -16,13 +34,15 @@ The listed PolicyPool service continues to charge a fixed `0.1 USD₮0` issuance
 2. The provider wallet must own the OKX.AI agent at enrollment and quote time.
 3. One policy version binds one agent ID, service ID, live service fingerprint, scope hash, cap, SLA, enrollment window, payout basis, clock mode, expiry, and adapter.
 4. A listing or ownership change fails closed for new coverage until the provider signs a new policy version.
-5. The on-chain manager enforces the provider-signed maximum cap and exact enrollment window; the operator cannot silently widen either.
+5. The manager enforces the provider-signed maximum cap and exact enrollment window; quorum evidence cannot widen either.
 6. A covenant cap cannot exceed the target-job value, provider-signed cap, configured global cap, or available provider bond.
-7. Shared-reserve exposure is disabled by default. New v0.4 covenants lock provider first-loss capital only.
+7. Shared-reserve exposure is disabled. New v0.4 covenants lock provider first-loss capital only.
 8. A paid relay grant is short-lived, bound to one covenant, job, buyer, agent, and service, and permits at most one paid provider execution.
 9. Settlement failure cannot erase the on-chain lock. A durable `compensation_required` record remains until reconciliation releases it.
-10. Payout settlement remains operator-approved and requires independently verified recovery evidence. The scheduler can mark `payout_due`; it cannot decide or send final compensation.
-11. One marketplace job can receive only one covenant, across all policy versions and buyers.
+10. Issuance, clock start, subjective release, breach, and settlement require threshold-attested evidence. The runtime relayer cannot perform any of them alone.
+11. A full marketplace refund cannot stack with a net-loss payout. Recovery amounts are part of the signed settlement payload.
+12. One marketplace job can receive only one covenant, across all policy versions and buyers.
+13. Every state-changing manager entry point has an explicit reentrancy guard.
 
 ## Contracts
 
@@ -30,102 +50,103 @@ The listed PolicyPool service continues to charge a fixed `0.1 USD₮0` issuance
 
 - Holds provider-owned USD₮0 first-loss deposits.
 - Locks a covenant-specific amount before the PolicyPool service fee settles.
-- Prevents withdrawal of locked or queued capital.
-- Uses an eight-day withdrawal queue.
-- Releases a successful covenant or slashes only the verified payout amount.
-- Rejects fee-on-transfer assets and uses a reentrancy guard on token-moving paths.
+- Prevents withdrawal of locked or queued capital and uses an eight-day withdrawal queue.
+- Releases a successful covenant or slashes only the manager-authorized payout amount to the covenant's fixed buyer.
+- Rejects fee-on-transfer assets and guards token-moving paths against reentrancy.
+- Initializes its manager once; the manager cannot be replaced.
 
 ### `AgentPolicyRegistry`
 
 - Verifies ERC-8004/OKX agent ownership.
 - Supports direct enrollment and relayed EIP-712 enrollment with nonces and expiry.
-- Creates immutable policy versions; a new version does not mutate an existing covenant.
-- Revalidates live agent ownership, latest version, fingerprint, expiry, and minimum available bond in `isCoverable`.
-- Lets a provider pause its own policy and a monitor suspend a changed fingerprint.
+- Creates immutable policy versions and revalidates ownership, latest version, fingerprint, expiry, and minimum available bond.
+- Lets a provider pause its policy and a separate monitor suspend a changed fingerprint.
+
+### `CoverageEvidenceVerifier`
+
+- Stores an immutable signer set and threshold, with a hard maximum of 16 signers.
+- Rejects a threshold below two, duplicate signers, malformed or high-`s` signatures, unauthorized signers, duplicate signatures, unordered signatures, and cross-domain attestations.
+- Binds every attestation to the calling manager and returns the replay-protection digest.
+- Has no privileged administration after construction.
 
 ### `CoverageManager`
 
 - Locks provider capital before the x402 fee is settled.
-- Pins policy, job, buyer, provider, cap, job value, SLA, enrollment window, and clock mode.
-- Enforces provider-signed cap and enrollment window on-chain.
+- Pins policy, job, buyer, provider, cap, job value, SLA, enrollment window, clock mode, and acceptance evidence.
 - Supports A2A acceptance clocks and A2MCP relay clocks.
-- Releases, marks payout due, expires an unstarted relay clock, or settles verified loss.
-- Prevents a full marketplace refund from stacking with a net-loss payout.
-- Rejects a second covenant for a job even if the policy version or buyer changes.
+- Verifies threshold evidence for issue, clock start, release, breach, and settlement.
+- Allows permissionless execution only after valid quorum authorization.
+- Prevents duplicate job coverage and double recovery.
+- Keeps objective `expireUnstarted` permissionless after the on-chain enrollment deadline.
 
-The contracts are intentionally non-upgradeable. The bond-vault manager is initialized once and cannot be replaced. Audit fixes require a complete redeployment, and an independent security audit remains mandatory before third-party capital is accepted.
+### Clock adapters
+
+`OkxA2AClockAdapter` holds timing-ambiguous delivery statuses until historical delivery timing is available. `RelayReceiptVerifier` uses EIP-712 signatures bound to chain ID and verifier address; relay receipts alone cannot move bonds because the manager separately requires quorum evidence.
+
+The contracts are intentionally non-upgradeable. Security changes require a complete redeployment. A qualified independent human audit remains mandatory before third-party capital is accepted.
 
 ## Enrollment Flow
 
-1. Open `/providers/enroll` and connect the wallet that owns the OKX.AI agent.
-2. Build and broadcast the USD₮0 approval/deposit transactions returned by `/api/provider-bond`.
+1. Open `/providers/enroll` with the wallet that owns the OKX.AI agent.
+2. Approve and deposit USD₮0 into the bond vault.
 3. Enter one service ID and objective terms.
-4. `/api/provider-enrollment` fetches the live OKX.AI agent page, verifies owner and service, calculates the service fingerprint, checks available bond, and returns EIP-712 data.
-5. The provider signs the exact terms.
-6. The provider broadcasts `registerPolicyBySig` and confirms its transaction hash.
-7. PolicyPool verifies the event, current fingerprint, latest policy version, and on-chain coverability before projecting the policy as active.
+4. `/api/provider-enrollment` verifies the live owner and service, computes the fingerprint, checks bond capacity, and returns EIP-712 enrollment data.
+5. The provider signs and broadcasts `registerPolicyBySig`.
+6. PolicyPool verifies the event, fingerprint, latest version, and current coverability before projecting the policy as active.
 
-The public manifest is a last-confirmed enrollment projection, not a live guarantee. Every quote revalidates agent owner, service fingerprint, policy state, expiry, and available bond.
+The manifest is a last-confirmed projection, not a guarantee. Every quote revalidates the live owner, service fingerprint, policy, expiry, and bond.
 
 ## Buyer Flow
 
-1. Submit an OKX.AI task URL, target agent, target service, and requested cap to `/api/coverage-preflight`.
+1. Submit an OKX.AI task URL, target agent, service, and requested cap to `/api/coverage-preflight`.
 2. PolicyPool verifies the public task and X Layer acceptance evidence.
-3. If the service is not enrolled, `/api/coverage-demand` records one deduplicated signal and returns the provider enrollment link without charging.
-4. If eligible, preflight returns a signed ten-minute quote bound to the verified buyer, job, policy, and canonical request.
-5. The buyer pays the existing `/api/covered-job-receipt` x402 endpoint.
-6. PolicyPool reruns the entire eligibility pass, locks the provider bond on-chain, settles the `0.1 USD₮0` service fee, and returns the covenant receipt.
-7. If settlement fails, PolicyPool releases the bond. If that release fails, durable compensation evidence is retained for the reconciler.
+3. An unenrolled service produces a deduplicated demand signal and provider enrollment link without charge.
+4. An eligible request produces a signed ten-minute quote bound to the buyer, job, policy, and canonical request.
+5. The buyer pays `/api/covered-job-receipt` through x402.
+6. PolicyPool reruns eligibility and asks the evidence-attestation service for quorum signatures over the exact issue payload and underlying task evidence.
+7. Any relayer submits the signed issue action. The bond locks before the `0.1 USD₮0` fee settles.
+8. If service-fee settlement fails, the same evidence process releases the bond; an unresolved failure remains durable as `compensation_required`.
 
-Bodyless OKX replay is supported by the payment payer: exactly one live canonical quote bound to that payer may be recovered. Zero or multiple canonical quotes fail closed without settlement.
-
-## Clock Adapters
-
-### A2A
-
-The clock starts at verified target-job acceptance. Reconciliation uses the public OKX task timeline for delivery timing. If a historical delivery timestamp is unavailable, PolicyPool holds rather than guessing. New preflight-generated covenants store the public task reference needed for that evidence.
-
-### A2MCP
-
-The buyer sends the funded provider request through `/api/provider-relay` using the relay grant returned with the covenant. The relay only calls the exact live enrolled HTTPS endpoint, blocks private/reserved DNS results, caps request and response sizes, forwards a narrow header allowlist, and signs a receipt over request/response hashes and timing.
-
-The first paid request consumes the grant. Paid retries fail closed instead of risking duplicate provider execution.
+Bodyless OKX replay is supported by the verified payer: exactly one live quote may be recovered. Zero or multiple matches fail closed without settlement.
 
 ## Reconciliation
 
-`/api/reconcile-universal` is authenticated by the operator token. QStash requests additionally require a valid QStash signature. The intended primary schedule is once per minute with retries; the existing GitHub schedule remains a backup.
+`/api/reconcile-universal` is authenticated by the existing operator token. QStash requests also require a valid QStash signature. That endpoint is an unprivileged relayer: it observes state, obtains threshold attestations, and broadcasts authorized actions. It cannot fabricate or approve custody facts itself.
 
-Automatic transitions:
+The scheduled path can request quorum authorization to:
 
 - start a verified relay clock;
 - release timely A2A or A2MCP delivery;
 - mark an objective missed deadline as payout due;
-- expire an A2MCP covenant whose funded request never reached the relay;
-- release a bond left in `compensation_required` after a failed service-fee settlement.
+- release a lock left after failed service-fee settlement.
 
-Final payout remains outside the scheduler. An operator must supply independently verified recovery evidence and approve settlement.
+An unstarted relay covenant may be expired permissionlessly after its on-chain enrollment deadline. Final net-loss settlement requires quorum signatures over the exact refund, other-recovery, observation time, and recovery-evidence hash.
 
 ## Runtime Configuration
 
-The v0.4 feature remains disabled unless `POLICYPOOL_UNIVERSAL_ENABLED=true` and all contract/signer addresses are present.
+The feature remains disabled unless `POLICYPOOL_UNIVERSAL_ENABLED=true` and every required address and evidence-attestation setting is valid.
 
 ```text
 POLICYPOOL_UNIVERSAL_ENABLED=false
 POLICYPOOL_SHARED_COVERAGE_ENABLED=false
 OKX_AGENT_IDENTITY_REGISTRY=0x8004A169FB4a3325136EB29fA0ceB6D2e539a432
-POLICYPOOL_V04_OWNER=0xe1B41AF2ebAB2476930eC4Da03D80dA525076A21
-POLICYPOOL_V04_OPERATOR=0x79b21b067b19b50Dbb1C890D4825Fdf6B6B61Dd2
-POLICYPOOL_V04_MONITOR=0x3376703ba5610688d88FeA99C9E09A0eA8B95199
+POLICYPOOL_V04_OWNER=
+POLICYPOOL_V04_MONITOR=
 POLICYPOOL_PAYMENT_ASSET=0x779Ded0c9e1022225f8E0630b35a9b54bE713736
 POLICYPOOL_OKX_TASK_ESCROW=0x000000EB79a0c9cBEED4BD63372653E28F6bEdbE
 POLICYPOOL_MINIMUM_PROVIDER_BOND_ATOMIC=500000
-POLICYPOOL_POLICY_REGISTRY_ADDRESS=0x57d1ee49c3df6f5Ea3000930068BF6059D2cA17B
-POLICYPOOL_BOND_VAULT_ADDRESS=0x23BE9FD569cB93db0324cC42BB4Bb439449cFd3a
-POLICYPOOL_COVERAGE_MANAGER_ADDRESS=0x112e45DC9C29ff2FFd1b60fe3B4E408266E5E855
-POLICYPOOL_OKX_A2A_ADAPTER_ADDRESS=0x37ff4e43cAdA62871E927C5C64B2b9876d21cc62
-POLICYPOOL_A2MCP_RELAY_ADAPTER_ADDRESS=0x84CA17c573F90181ABFdf9Baca066F7A592e3525
-POLICYPOOL_MANAGER_PRIVATE_KEY=
-POLICYPOOL_RELAY_SIGNER_ADDRESS=0xfd5F856713d271A450Ef804095c847d52210d1dc
+POLICYPOOL_POLICY_REGISTRY_ADDRESS=
+POLICYPOOL_BOND_VAULT_ADDRESS=
+POLICYPOOL_COVERAGE_MANAGER_ADDRESS=
+POLICYPOOL_EVIDENCE_VERIFIER_ADDRESS=
+POLICYPOOL_OKX_A2A_ADAPTER_ADDRESS=
+POLICYPOOL_A2MCP_RELAY_ADAPTER_ADDRESS=
+POLICYPOOL_EVIDENCE_SIGNERS=
+POLICYPOOL_EVIDENCE_THRESHOLD=2
+POLICYPOOL_EVIDENCE_ATTESTATION_URL=
+POLICYPOOL_EVIDENCE_ATTESTATION_TOKEN=
+POLICYPOOL_RELAYER_PRIVATE_KEY=
+POLICYPOOL_RELAY_SIGNER_ADDRESS=
 POLICYPOOL_RELAY_SIGNER_PRIVATE_KEY=
 POLICYPOOL_RELAY_GRANT_SECRET=
 POLICYPOOL_PROVIDER_REGISTRY_PREFIX=pp:providers:v04
@@ -134,51 +155,40 @@ POLICYPOOL_PROVIDER_EXPOSURE_MULTIPLIER_BPS=10000
 POLICYPOOL_UNIVERSAL_RECONCILE_URL=https://policypool.vercel.app/api/reconcile-universal
 ```
 
-Keep manager and relay keys distinct. `POLICYPOOL_RELAY_SIGNER_ADDRESS` is public configuration; its corresponding private key and the relay-grant secret must never be committed. Verify secret byte lengths after setting Vercel variables because newline contamination changes HMAC output.
+The relayer key, relay signer, and evidence signers are distinct roles. The relayer may broadcast but cannot authorize custody. Evidence signers must be independently operated; the aggregation service returns unique signatures sorted by recovered address. Secrets must never be committed, and Vercel values must be checked for newline contamination.
 
-`POLICYPOOL_V04_OWNER_PRIVATE_KEY` is deployment-only input for `WireAgentCoverageV04Roles.s.sol`. It must never be configured in Vercel or any always-on runtime. After deployment, the cold owner accepts the bond-vault ownership transfer and sets the dedicated manager operator and policy monitor through that script.
+`POLICYPOOL_V04_OWNER_PRIVATE_KEY` is deployment-only. It must never be configured in an always-on runtime. The cold owner accepts vault ownership and configures the registry monitor; it has no manager or evidence-verifier override.
 
-## Flag-Off Production Checkpoint
+## Historical Flag-Off Deployment
 
-Production deployment `dpl_6h8MXHN5oWfEr8JHdyARLhP1oudm` was aliased to `https://policypool.vercel.app` on 2026-07-16 with `POLICYPOOL_UNIVERSAL_ENABLED=false` and `POLICYPOOL_SHARED_COVERAGE_ENABLED=false`.
+The July 16 pre-audit deployment is historical and must not be reused:
 
-- The v0.3 manifest remains the active production contract at `/api/manifest`.
-- The v0.4 manifest is available at `/api/universal-manifest` and reports `feature_gated`, with every required public runtime address present.
-- The existing listed endpoint remains `HEAD 200` and fails closed with `charged:false` for an invalid request.
-- A production-ledger dry run inspected seven v0.3 records, selected zero v0.4 records, produced zero changes, and preserved the exact before/after record hash.
-- The pre-audit v0.4 gate passed with 63 Foundry tests and zero production dependency vulnerabilities.
-- No QStash schedule is active, no OKX listing field changed, and public provider enrollment remains closed.
-- The Hobby-plan function limit is met by serving both manifest surfaces through the existing manifest serverless function; both public URLs remain stable.
+- bond vault: `0x23BE9FD569cB93db0324cC42BB4Bb439449cFd3a`
+- policy registry: `0x57d1ee49c3df6f5Ea3000930068BF6059D2cA17B`
+- coverage manager: `0x112e45DC9C29ff2FFd1b60fe3B4E408266E5E855`
+- A2A adapter: `0x37ff4e43cAdA62871E927C5C64B2b9876d21cc62`
+- relay verifier: `0x84CA17c573F90181ABFdf9Baca066F7A592e3525`
 
-This checkpoint does not satisfy the independent Solidity audit gate. Third-party bonds and public enrollment remain prohibited.
+That stack has no `CoverageEvidenceVerifier` and retains the original single-operator trust boundary. Its controlled release and full-payout transactions prove only that the old wiring moved house funds. They do not validate the remediated source.
 
-## Controlled Mainnet Pilot
-
-The two-path house pilot completed on X Layer on 2026-07-16. It used only PolicyPool-controlled wallets and `0.5 USD₮0` of provider bond, is labeled controlled and house-funded, and is excluded from revenue, external usage, and organic traction claims.
-
-- Policy: `0x1f9b305f5f5f8e3da7d1604841ac4504c147b0052c0f96c347eec1efc8619e31`.
-- Release covenant: `0x0720c4daefa787dc3760a430e25d0b8d04b5e9348e078a98b748ada1da71c9b9`; final on-chain state `Released` (`3`); the full bond lock returned to available capacity.
-- Breach covenant: `0x3866b4dd515c77c02f253e9c47811b66bc845d2da3dc987258ddce4c30efe898`; final on-chain state `Paid` (`5`); payout `500000` atomic USD₮0.
-- Net-loss settlement: `0x96590b055dc400c57b8087e220e08f292741563d631c68b6ba3cc9a0d00c0af0`; the receipt is successful and its ERC-20 transfer moves exactly `0.5 USD₮0` from the bond vault to the separate controlled buyer.
-- Recovery inputs were zero escrow refund, zero other recovery, and a nonzero evidence hash. No shared reserve was used.
-- After settlement the provider bond is zero and the policy fails closed as not coverable.
-
-Do not rerun or fund this pilot again. The next release gate is independent Solidity review, followed by a separately authorized bounded rollout; the completed house proof does not authorize third-party capital.
+Production remains v0.3, `/api/manifest` remains the active contract, universal flags remain off, no public enrollment is open, and no OKX listing field needs to change for source development.
 
 ## Internal Audit Checkpoint
 
-The July 16 internal adversarial review is recorded in [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md). Its release verdict is `BLOCKED: confirmed unresolved High issue` for third-party bonds and public enrollment.
+The July 16 internal review and remediation are recorded in [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md). The original High single-operator finding is remediated in source by the immutable threshold evidence quorum. The source now passes 75 Foundry tests.
 
-The hardened source:
+Core branch coverage:
 
-- prevents duplicate coverage of one job across policy versions or buyers;
-- initializes the vault manager once and makes it non-replaceable;
-- holds timing-ambiguous A2A delivery states until historical timing is proven;
-- passes 64 Foundry tests, with 96.43% to 100% branch coverage across the five core v0.4 contracts.
+- `AgentPolicyRegistry`: `100%` (`23/23`)
+- `ProviderBondVault`: `100%` (`29/29`)
+- `CoverageEvidenceVerifier`: `100%` (`13/13`)
+- `CoverageManager`: `96.30%` (`26/27`)
+- `OkxA2AClockAdapter`: `100%` (`6/6`)
+- `RelayReceiptVerifier`: `100%` (`8/8`)
 
-The unresolved blocker is operator evidence authority: `CoverageManager` still trusts the hot operator for the job, buyer, acceptance time, release, breach, and recovery facts that control provider bond settlement. Those facts must be authenticated independently before strangers' capital is accepted.
+The remaining manager branch is unreachable under `enrollmentWindowSeconds <= slaSeconds`: an A2A deadline cannot already be elapsed while its shorter enrollment window remains open.
 
-The audit fixes changed contract bytecode. The existing flag-off deployment and house-pilot receipts remain historical evidence for the pre-audit stack only. A remediated stack requires a full redeployment and a new, separately authorized controlled pilot. No audit action changed production, the OKX listing, feature flags, schedulers, funding, or deployed contracts.
+This is still an internal review. Claude's second review is another internal adversarial pass, not a qualified independent human audit.
 
 ## Release Gates
 
@@ -187,44 +197,41 @@ npm install
 npm run agent:gate-v04
 ```
 
-Required before deployment:
+Required before the next deployment:
 
-- all JavaScript and Python syntax checks pass;
-- all v0.3 regression gates pass;
-- all v0.4 enrollment, bond, relay, clock, issuer, manifest, rate-limit, compensation, and reconciliation gates pass;
-- all Foundry tests pass;
-- dependency audit reports zero known production vulnerabilities;
-- secret scan and `git diff --check` pass;
-- `/coverage`, `/providers`, and `/providers/enroll` pass an interactive 390px browser gate;
-- the High operator-evidence finding in the internal audit is resolved in code and regression tests;
-- an independent Solidity audit is complete;
-- deployment owner, operator, monitor, and relay signer are distinct where appropriate;
-- dry-run reconciliation leaves existing external v0.3 receipts untouched;
-- a controlled provider-funded test succeeds before public enrollment opens.
+- all runtime, v0.3 regression, v0.4, Foundry, dependency, secret, and diff gates pass;
+- Claude independently reviews the remediated commit and no unresolved Critical or High finding remains;
+- a qualified independent human Solidity audit is complete;
+- evidence signers are operationally independent and no one failure domain can satisfy the threshold;
+- the evidence service independently verifies underlying context instead of signing relayer assertions;
+- the old deployment remains disabled and empty of third-party capital;
+- a new six-contract stack is deployed flag-off and source/creation bytecode is verified;
+- a fresh house pilot proves release, full payout, and recovery-reduced payout;
+- interactive 390px browser checks and a dry-run reconciler preserve v0.3 receipts;
+- public enrollment opens only after every preceding gate is recorded.
 
 ## Rollout And Rollback
 
-1. Deploy contracts without enabling the feature.
-2. Run `WireAgentCoverageV04Roles.s.sol` from the cold owner to accept bond-vault ownership, set the hot operator, and set the registry monitor.
-3. Verify bytecode, ownership, pending ownership, manager wiring, minimum bond, signer, monitor, operator, token, identity registry, and adapters from chain state.
-4. Configure Redis, signer, and contract addresses while `POLICYPOOL_UNIVERSAL_ENABLED=false`.
-5. Run the full gate and a read-only reconciler dry run.
-6. Enable v0.4 for one house provider and one bounded controlled covenant only.
-7. Open external enrollment only after independent review and the controlled covenant releases or settles correctly.
+1. Deploy the vault, registry, evidence verifier, manager, A2A adapter, and relay verifier while the feature is off.
+2. Initialize the vault manager once, transfer vault ownership to the cold owner, accept ownership, and set the registry monitor.
+3. Verify bytecode, immutable dependencies, signer set, threshold, token, identity registry, ownership, monitor, and relay signer from chain state.
+4. Configure the unprivileged relayer and independently operated evidence service while the feature remains off.
+5. Run the complete gate and read-only reconciliation.
+6. Run three separately labeled house covenants: release, full payout, and payout reduced by verified recovery.
+7. Enable one bounded external provider only after the qualified independent audit signs off.
 
-Rollback is the feature flag: set `POLICYPOOL_UNIVERSAL_ENABLED=false`. Production v0.3 static policies and receipts continue through the unchanged listed endpoint. Existing on-chain v0.4 covenants still require reconciliation and cannot be abandoned by disabling new issuance.
+Rollback stops new issuance by setting `POLICYPOOL_UNIVERSAL_ENABLED=false`. Existing covenants still require their normal evidence-attested lifecycle and cannot be abandoned.
 
 ## Known Limitations
 
-- The deployed v0.4 bytecode predates the internal audit fixes and must never be enabled for third-party bonds.
-- The hardened source still has an unresolved High operator-evidence trust boundary and must not custody public provider funds.
-- This internal review is not an independent Solidity audit.
-- The canonical X Layer ERC-8004 identity registry at `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` is an EIP-1967 upgradeable proxy controlled outside PolicyPool. Agent ownership checks inherit that third-party upgrade and availability risk.
-- OKX.AI has no documented stable JSON service-directory API; PolicyPool uses strict, cached, bounded HTML parsing and fails closed on stale evidence.
-- A2A delivery timing requires a public task reference and timeline timestamp. Current status alone never proves historical timing.
+- The hardened source is not deployed. The historical flag-off bytecode must never accept third-party bonds.
+- The evidence quorum is a trusted oracle set. Threshold collusion can authorize false evidence; signer outage can halt subjective transitions.
+- The immutable signer set and one-time vault manager favor fail-closed custody over easy recovery. Rotation requires a new stack and planned migration.
+- This internal work is not a qualified independent audit.
+- The canonical X Layer ERC-8004 registry is an externally controlled EIP-1967 proxy; ownership checks inherit its upgrade and availability risk.
+- OKX.AI exposes no documented stable JSON service directory, so strict cached HTML parsing remains an external dependency and fails closed when stale.
+- A2A delivery timing needs a public task reference and historical timestamp. Current status alone does not prove timing.
 - A2MCP coverage requires the PolicyPool relay; direct provider calls cannot prove the processing-start clock.
-- Relay execution is at-most-once. A lost response after provider execution requires operator investigation rather than an automatic paid retry.
-- Relay receipt signatures are not yet domain-separated by chain ID and verifier address; use a dedicated deployment signer until EIP-712 binding lands.
-- Policy expiry currently means the last time new coverage may be issued, not the deadline by which an already-issued covenant must finish.
-- One-time vault-manager initialization prevents manager migration while funds remain in that vault.
-- Provider-defined premiums, shared-reserve co-coverage, subjective quality claims, ratings, additional chains, and automatic payout discretion are out of v0.4.
+- Relay execution is at-most-once. An uncertain provider response requires investigation rather than an automatic paid retry.
+- Policy expiry is the last issuance time, not the deadline by which an existing covenant must finish.
+- Provider premiums, shared-reserve co-coverage, subjective quality claims, ratings, additional chains, and discretionary automated payouts remain out of scope.

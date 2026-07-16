@@ -57,6 +57,18 @@ contract CoverageAdaptersTest is Test {
         assertFalse(relayVerifier.verify(keccak256("tampered"), signature));
     }
 
+    function testRelayReceiptSignatureIsBoundToChainAndVerifier() public {
+        bytes32 receiptDigest = keccak256("domain-bound-relay-receipt");
+        bytes32 digest = relayVerifier.messageDigest(receiptDigest);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, digest);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        RelayReceiptVerifier anotherVerifier = new RelayReceiptVerifier(address(this), signer);
+        assertFalse(anotherVerifier.verify(receiptDigest, signature));
+        vm.chainId(block.chainid + 1);
+        assertFalse(relayVerifier.verify(receiptDigest, signature));
+    }
+
     function testRelayReceiptRejectsMalformedSignatureAndInvalidRecoveryId() public {
         bytes32 receiptDigest = keccak256("relay-receipt");
         vm.expectRevert(RelayReceiptVerifier.InvalidSignature.selector);

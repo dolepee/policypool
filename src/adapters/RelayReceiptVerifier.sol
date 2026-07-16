@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-/// @notice Verifies PolicyPool relay receipts signed over a bytes32 digest.
+/// @notice Verifies domain-separated PolicyPool relay receipts.
 contract RelayReceiptVerifier {
     error Unauthorized();
     error ZeroAddress();
     error InvalidSignature();
 
     uint256 private constant SECP256K1N_HALF = 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0;
+    bytes32 private constant DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 private constant NAME_HASH = keccak256("PolicyPool Relay Receipt");
+    bytes32 private constant VERSION_HASH = keccak256("1");
+    bytes32 public constant RECEIPT_TYPEHASH = keccak256("RelayReceipt(bytes32 receiptDigest)");
 
     address public owner;
     address public pendingOwner;
@@ -34,8 +39,12 @@ contract RelayReceiptVerifier {
         return _recover(_messageDigest(receiptDigest), signature) == trustedSigner;
     }
 
-    function messageDigest(bytes32 receiptDigest) external pure returns (bytes32) {
+    function messageDigest(bytes32 receiptDigest) external view returns (bytes32) {
         return _messageDigest(receiptDigest);
+    }
+
+    function domainSeparator() public view returns (bytes32) {
+        return keccak256(abi.encode(DOMAIN_TYPEHASH, NAME_HASH, VERSION_HASH, block.chainid, address(this)));
     }
 
     function setTrustedSigner(address nextSigner) external onlyOwner {
@@ -59,8 +68,9 @@ contract RelayReceiptVerifier {
         emit OwnershipTransferred(previous, msg.sender);
     }
 
-    function _messageDigest(bytes32 receiptDigest) private pure returns (bytes32) {
-        return keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", receiptDigest));
+    function _messageDigest(bytes32 receiptDigest) private view returns (bytes32) {
+        bytes32 structHash = keccak256(abi.encode(RECEIPT_TYPEHASH, receiptDigest));
+        return keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
     }
 
     function _recover(bytes32 digest, bytes calldata signature) private pure returns (address signer) {
