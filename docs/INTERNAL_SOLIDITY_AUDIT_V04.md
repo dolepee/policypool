@@ -268,6 +268,40 @@ Source remediation:
 
 Regression: `scripts/verify-provider-relay.mjs` creates a paid receipt, follows it with a valid unpaid 402 receipt under the same grant, and proves the unpaid receipt is stored while the per-job pointer remains on the paid receipt.
 
+### H-12: Relay claims were consumed before the paid receipt was durable
+
+Severity: High / P1 runtime
+
+Status: Fixed in source, not deployed
+
+The relay committed the grant and payment authorization claims immediately after verifying provider settlement, then signed and saved the receipt in later operations. A signing failure, Redis outage, or process loss in that gap could leave both claims consumed while no receipt or per-job pointer existed. Reconciliation would never start the paid covenant clock.
+
+Source remediation:
+
+- the receipt is fully constructed and signed before any consumed state is written;
+- the verified receipt, per-job pointer, grant claim, and payment claim commit in one Redis Lua transaction;
+- a failure before the atomic transaction leaves only pending reservations that are released or expire;
+- an uncertain client response after Redis commits cannot erase the receipt or reopen either claim.
+
+Regression: `scripts/verify-provider-relay.mjs` injects a failure before atomic commit and proves the same payment can recover, then injects a response loss after atomic commit and proves the receipt remains indexed while a retry cannot call the provider twice.
+
+### H-13: Consumed relay-grant claims expired before the longest grant window
+
+Severity: High / P1 runtime
+
+Status: Fixed in source, not deployed
+
+Successful grant claims had a fixed 24-hour Redis TTL, while a provider enrollment and its relay grant can remain valid for longer. Once the claim expired, the same still-valid grant could authorize a fresh provider payment and replace the job's clock or delivery receipt after the original SLA.
+
+Source remediation:
+
+- pending grant and payment reservations still expire after 15 minutes so an interrupted pre-commit call can recover;
+- grant issuance rejects an expiry beyond the seven-day maximum SLA;
+- successful grant claims use an expiry-derived Redis TTL that lasts through the signed grant expiry plus a one-hour margin, capped at eight days because v0.4 grants cannot exceed the seven-day SLA limit;
+- payment claims remain durable, and the signed grant's own expiry prevents first use after the enrollment window, so neither authorization can become reusable during its valid window.
+
+Regression: `scripts/verify-provider-relay.mjs` advances the relay clock 48 hours beyond a successful call, supplies a fresh valid payment authorization, and proves the original grant still fails with `relay_grant_already_used`.
+
 ### M-01: Vault owner could replace the manager
 
 Severity: Medium

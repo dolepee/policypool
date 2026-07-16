@@ -89,12 +89,14 @@ Residual: terminal recovery and completion time are facts attested by permission
 
 ### Provider-relay payment and network findings remediated in source
 
-GitHub Codex found four High/P1 runtime paths after the Solidity review:
+GitHub Codex found six High/P1 runtime paths after the Solidity review:
 
 - Header presence could start an unpaid relay clock. The relay treated any nonempty payment header followed by a non-402 provider response as funded, so a fabricated header could create clock evidence without a provider payment.
 - DNS rebinding could bypass the provider relay SSRF check. The relay validated one DNS lookup but let the later fetch resolve the hostname again, allowing the checked public address and connected private address to differ.
 - A valid provider payment was not required to come from the buyer bound into the relay grant, so another wallet could start the clock while any breach payout still belonged to the original buyer.
 - An unpaid receipt could replace the per-job pointer to an earlier payment-verified receipt, causing reconciliation to lose the valid clock or delivery result.
+- The relay consumed grant and payment claims before signing and persisting the verified receipt, so a later signing or Redis failure could permanently leave a paid provider call without reconciliation evidence.
+- A consumed grant claim expired after 24 hours even though a valid relay grant can remain usable longer, allowing a fresh payment to reuse the grant and replace the clock after the claim expired.
 
 Source remediation:
 
@@ -105,10 +107,13 @@ Source remediation:
 - the signed authorization is permanently consumed, independently of the short-lived one-use relay grant, so an old payment cannot start another covenant clock;
 - missing or invalid settlement proof releases only the pending reservations and creates no clock;
 - all signed relay receipts remain available by receipt ID, but the per-job reconciliation pointer advances only for receipts carrying a payment-verified clock and settlement transaction;
+- a verified paid receipt, its per-job pointer, and both consumed claims commit in one Redis Lua transaction only after the receipt is signed;
+- relay-grant issuance rejects lifetimes beyond the seven-day maximum SLA;
+- failed commits leave only short-lived pending reservations, while successful grant claims remain consumed through the signed grant expiry plus a safety margin and payment claims remain durable;
 - all resolved provider addresses must be public, and the HTTPS connection uses a pinned checked address while preserving the original hostname for SNI, certificate verification, and `Host`;
 - redirects remain disabled and request, response, and timeout limits remain enforced.
 
-Regression: `npm run agent:verify-relay` rejects malformed headers, wrong amounts, wrong signers, a valid payment from the wrong buyer, absent settlement evidence, authorization replay under a fresh grant, private DNS, and unpinned connection metadata. It also proves that a later unpaid receipt cannot replace the payment-verified job pointer. Only the grant-bound buyer's signature-valid, nonce-bound, on-chain-verified provider payment creates or replaces a relay clock.
+Regression: `npm run agent:verify-relay` rejects malformed headers, wrong amounts, wrong signers, a valid payment from the wrong buyer, absent settlement evidence, authorization replay under a fresh grant, private DNS, and unpinned connection metadata. It proves that a later unpaid receipt cannot replace the payment-verified job pointer, a failure before atomic commit can retry, a lost response after atomic commit cannot lose or duplicate the provider call, and a consumed grant remains blocked beyond the former 24-hour TTL. Only the grant-bound buyer's signature-valid, nonce-bound, on-chain-verified provider payment creates or replaces a relay clock.
 
 ### Enrollment confirmation terms binding remediated in source
 

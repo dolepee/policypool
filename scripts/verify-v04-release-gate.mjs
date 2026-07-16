@@ -15,6 +15,7 @@ const [
   relay,
   providerRelay,
   providerPolicyStore,
+  relayGrant,
   chain,
   universalPolicy,
   enrollment,
@@ -39,6 +40,7 @@ const [
   read("src/adapters/RelayReceiptVerifier.sol"),
   read("api/lib/provider-relay.js"),
   read("api/lib/provider-policy-store.js"),
+  read("api/lib/relay-grant.js"),
   read("api/lib/chain.js"),
   read("api/lib/universal-policy.js"),
   read("api/lib/provider-enrollment.js"),
@@ -123,11 +125,26 @@ assert.match(providerRelay, /provider_payment_authorization_already_used/);
 assert.match(providerRelay, /source:\s*"policypool_relay_verified_x402_settlement"/);
 assert.doesNotMatch(providerRelay, /paymentHeaderPresent/);
 assert.match(providerPolicyStore, /reserveRelayExecution/);
-assert.match(providerPolicyStore, /commitRelayExecution/);
+assert.match(providerPolicyStore, /commitRelayExecutionReceipt/);
 assert.match(providerPolicyStore, /releaseRelayExecution/);
+assert.doesNotMatch(providerPolicyStore, /RELAY_GRANT_CLAIM_TTL_SECONDS/);
+assert.match(providerPolicyStore, /function relayGrantClaimTtlSeconds\(expiresAt/);
+assert.match(providerPolicyStore, /RELAY_GRANT_CLAIM_MAX_TTL_SECONDS = 8 \* 24 \* 60 \* 60/);
+assert.match(
+  providerPolicyStore,
+  /redis\.call\("SET", KEYS\[1\], ARGV\[2\], "EX", ARGV\[5\]\)\s+redis\.call\("SET", KEYS\[2\], ARGV\[2\]\)/,
+);
 assert.match(providerPolicyStore, /function startsVerifiedRelayClock\(record\)/);
 assert.match(providerPolicyStore, /record\?\.request\?\.paymentVerified === true/);
 assert.match(providerPolicyStore, /targetJobId && startsVerifiedRelayClock\(record\)/);
+assert.match(relayGrant, /MAX_RELAY_GRANT_TTL_MS = 7 \* 24 \* 60 \* 60 \* 1_000/);
+assert.match(relayGrant, /expiresAt > issuedAt \+ MAX_RELAY_GRANT_TTL_MS/);
+assert.ok(
+  providerRelay.indexOf("receiptSigner.signTypedData")
+    < providerRelay.indexOf("store.commitRelayExecutionReceipt"),
+  "the paid relay receipt must be signed before its claims commit",
+);
+assert.doesNotMatch(providerRelay, /store\.commitRelayExecution\(/);
 assert.match(chain, /event AuthorizationUsed\(address indexed authorizer, bytes32 indexed nonce\)/);
 assert.match(chain, /verifyProviderPaymentAuthorization/);
 assert.match(universalPolicy, /servicePriceAtomic:\s*servicePriceAtomic\.toString\(\)/);
@@ -194,6 +211,8 @@ assert.match(auditReport, /H-08: Failed coverage-fee settlement could strand pro
 assert.match(auditReport, /H-09: Provider payment payer was not bound to the relay-grant buyer/);
 assert.match(auditReport, /H-10: Enrollment confirmation did not bind the complete on-chain policy terms/);
 assert.match(auditReport, /H-11: Unpaid relay receipts could replace the verified per-job receipt/);
+assert.match(auditReport, /H-12: Relay claims were consumed before the paid receipt was durable/);
+assert.match(auditReport, /H-13: Consumed relay-grant claims expired before the longest grant window/);
 assert.ok(
   vercel.routes.some((route) => route.src === "/providers/enroll" && route.dest === "/web/enroll.html"),
   "provider enrollment route must stay explicit",

@@ -11,12 +11,28 @@ function serviceKey(agentId, serviceId) {
 }
 
 const RELAY_GRANT_RESERVATION_TTL_SECONDS = 15 * 60;
-const RELAY_GRANT_CLAIM_TTL_SECONDS = 24 * 60 * 60;
+const RELAY_GRANT_CLAIM_EXPIRY_MARGIN_SECONDS = 60 * 60;
+const RELAY_GRANT_CLAIM_MAX_TTL_SECONDS = 8 * 24 * 60 * 60;
 
 function startsVerifiedRelayClock(record) {
   return record?.request?.paymentVerified === true
     && record?.clock?.source === "policypool_relay_verified_x402_settlement"
     && Boolean(record?.settlement?.transaction);
+}
+
+function relayReceiptRecord(input) {
+  const receiptId = input.receiptId || `ppr-${sha256(input).slice(0, 24)}`;
+  return { ...input, receiptId };
+}
+
+function relayGrantClaimTtlSeconds(expiresAt, nowMs = Date.now()) {
+  const expiryMs = Date.parse(String(expiresAt || ""));
+  if (!Number.isFinite(expiryMs)) return null;
+  const throughExpiry = Math.ceil((expiryMs - nowMs) / 1_000) + RELAY_GRANT_CLAIM_EXPIRY_MARGIN_SECONDS;
+  return Math.min(
+    RELAY_GRANT_CLAIM_MAX_TTL_SECONDS,
+    Math.max(RELAY_GRANT_CLAIM_EXPIRY_MARGIN_SECONDS, throughExpiry),
+  );
 }
 
 export class MemoryProviderPolicyStore {
@@ -76,10 +92,10 @@ export class MemoryProviderPolicyStore {
   }
 
   async saveRelayReceipt(input) {
-    const receiptId = input.receiptId || `ppr-${sha256(input).slice(0, 24)}`;
+    const { receiptId, ...receipt } = relayReceiptRecord(input);
     const current = this.relayReceipts.get(receiptId);
     if (current) return structuredClone(current);
-    const record = structuredClone({ ...input, receiptId });
+    const record = structuredClone({ ...receipt, receiptId });
     this.relayReceipts.set(receiptId, record);
     const targetJobId = String(record.provider?.targetJobId || "").toLowerCase();
     if (targetJobId && startsVerifiedRelayClock(record)) {
@@ -109,11 +125,23 @@ export class MemoryProviderPolicyStore {
     return "reserved";
   }
 
-  async commitRelayExecution(grantId, paymentId, requestId) {
+  async commitRelayExecutionReceipt(grantId, paymentId, requestId, grantExpiresAt, input) {
     const grantKey = String(grantId);
     const paymentKey = String(paymentId);
     const grant = this.relayGrantClaims.get(grantKey);
     const payment = this.relayPaymentClaims.get(paymentKey);
+    if (relayGrantClaimTtlSeconds(grantExpiresAt) === null) return null;
+    const record = structuredClone(relayReceiptRecord(input));
+    const consumed = { requestId, state: "consumed" };
+    if (
+      grant?.requestId === requestId
+      && payment?.requestId === requestId
+      && grant.state === "consumed"
+      && payment.state === "consumed"
+    ) {
+      const existing = this.relayReceipts.get(record.receiptId);
+      return existing && sha256(existing) === sha256(record) ? structuredClone(existing) : null;
+    }
     if (
       !grant
       || !payment
@@ -121,11 +149,17 @@ export class MemoryProviderPolicyStore {
       || payment.requestId !== requestId
       || grant.state !== "pending"
       || payment.state !== "pending"
-    ) return false;
-    const consumed = { requestId, state: "consumed" };
+      || !startsVerifiedRelayClock(record)
+    ) return null;
+    const targetJobId = String(record.provider?.targetJobId || "").toLowerCase();
+    if (!targetJobId) return null;
+    const current = this.relayReceipts.get(record.receiptId);
+    if (current && sha256(current) !== sha256(record)) return null;
+    this.relayReceipts.set(record.receiptId, current || record);
+    this.latestRelayByJob.set(targetJobId, record.receiptId);
     this.relayGrantClaims.set(grantKey, consumed);
     this.relayPaymentClaims.set(paymentKey, consumed);
-    return true;
+    return structuredClone(current || record);
   }
 
   async releaseRelayExecution(grantId, paymentId, requestId) {
@@ -148,9 +182,10 @@ export class MemoryProviderPolicyStore {
 }
 
 export class RedisProviderPolicyStore {
-  constructor({ redis, prefix = UNIVERSAL.registryPrefix } = {}) {
+  constructor({ redis, prefix = UNIVERSAL.registryPrefix, now = () => Date.now() } = {}) {
     this.redis = redis || Redis.fromEnv();
     this.prefix = String(prefix).replace(/:+$/, "");
+    this.now = now;
   }
 
   key(kind, id = "") {
@@ -217,8 +252,8 @@ export class RedisProviderPolicyStore {
   }
 
   async saveRelayReceipt(input) {
-    const receiptId = input.receiptId || `ppr-${sha256(input).slice(0, 24)}`;
-    const record = { ...input, receiptId };
+    const record = relayReceiptRecord(input);
+    const { receiptId } = record;
     const targetJobId = String(record.provider?.targetJobId || "").toLowerCase();
     const writes = [this.redis.set(this.key("relay", receiptId), JSON.stringify(record), { nx: true })];
     if (targetJobId && startsVerifiedRelayClock(record)) {
@@ -258,22 +293,46 @@ export class RedisProviderPolicyStore {
     return "reserved";
   }
 
-  async commitRelayExecution(grantId, paymentId, requestId) {
+  async commitRelayExecutionReceipt(grantId, paymentId, requestId, grantExpiresAt, input) {
     const grantKey = this.key("relay-grant", String(grantId));
     const paymentKey = this.key("relay-payment", String(paymentId));
+    const record = relayReceiptRecord(input);
+    const targetJobId = String(record.provider?.targetJobId || "").toLowerCase();
+    const grantClaimTtlSeconds = relayGrantClaimTtlSeconds(grantExpiresAt, this.now());
+    if (!targetJobId || !startsVerifiedRelayClock(record) || grantClaimTtlSeconds === null) return null;
+    const receiptKey = this.key("relay", record.receiptId);
+    const jobKey = this.key("relay-job", targetJobId);
+    // A paid clock is usable only if its receipt, index, and replay claims become durable together.
     const result = await this.redis.eval(
       `
-        if redis.call("GET", KEYS[1]) == ARGV[1] and redis.call("GET", KEYS[2]) == ARGV[1] then
-          redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3])
+        local grant = redis.call("GET", KEYS[1])
+        local payment = redis.call("GET", KEYS[2])
+        local existing = redis.call("GET", KEYS[3])
+        if grant == ARGV[2] and payment == ARGV[2] then
+          if existing ~= ARGV[3] then return 0 end
+          redis.call("SET", KEYS[4], ARGV[4])
+          return 2
+        end
+        if grant == ARGV[1] and payment == ARGV[1] then
+          if existing and existing ~= ARGV[3] then return 0 end
+          if not existing then redis.call("SET", KEYS[3], ARGV[3]) end
+          redis.call("SET", KEYS[4], ARGV[4])
+          redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[5])
           redis.call("SET", KEYS[2], ARGV[2])
           return 1
         end
         return 0
       `,
-      [grantKey, paymentKey],
-      [`pending:${requestId}`, `consumed:${requestId}`, String(RELAY_GRANT_CLAIM_TTL_SECONDS)],
+      [grantKey, paymentKey, receiptKey, jobKey],
+      [
+        `pending:${requestId}`,
+        `consumed:${requestId}`,
+        JSON.stringify(record),
+        record.receiptId,
+        String(grantClaimTtlSeconds),
+      ],
     );
-    return Number(result) === 1;
+    return Number(result) > 0 ? this.getRelayReceipt(record.receiptId) : null;
   }
 
   async releaseRelayExecution(grantId, paymentId, requestId) {

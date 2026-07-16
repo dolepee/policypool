@@ -2,6 +2,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { getAddress } from "viem";
 import { clean, isBytes32, sha256, stableStringify } from "./utils.js";
 
+const MAX_RELAY_GRANT_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
+
 export class RelayGrantError extends Error {
   constructor(code, status = 422) {
     super(code);
@@ -54,8 +56,13 @@ export function createRelayGrantService({
     } catch {
       throw new RelayGrantError("relay_grant_buyer_invalid");
     }
+    const issuedAt = now();
     const expiresAt = Date.parse(String(input?.expiresAt || ""));
-    if (!Number.isFinite(expiresAt) || expiresAt <= now()) throw new RelayGrantError("relay_grant_expiry_invalid");
+    if (
+      !Number.isFinite(expiresAt)
+      || expiresAt <= issuedAt
+      || expiresAt > issuedAt + MAX_RELAY_GRANT_TTL_MS
+    ) throw new RelayGrantError("relay_grant_expiry_invalid");
     const payload = {
       version: "0.4.0",
       covenantId: input.covenantId.toLowerCase(),
@@ -63,7 +70,7 @@ export function createRelayGrantService({
       buyer,
       agentId: numericId(input.agentId, "relay_grant_agent_id"),
       serviceId: numericId(input.serviceId, "relay_grant_service_id"),
-      issuedAt: new Date(now()).toISOString(),
+      issuedAt: new Date(issuedAt).toISOString(),
       expiresAt: new Date(expiresAt).toISOString(),
     };
     payload.grantId = `pprg-${sha256(payload).slice(0, 24)}`;

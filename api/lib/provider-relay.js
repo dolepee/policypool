@@ -316,7 +316,7 @@ export function createProviderRelay({
   if (!store?.saveRelayReceipt) throw new ProviderRelayError("provider_relay_store_unavailable", 503);
   if (
     !store?.reserveRelayExecution
-    || !store?.commitRelayExecution
+    || !store?.commitRelayExecutionReceipt
     || !store?.releaseRelayExecution
   ) {
     throw new ProviderRelayError("provider_relay_grant_store_unavailable", 503);
@@ -415,12 +415,6 @@ export function createProviderRelay({
       const providerSettlement = authorization && response.status !== 402
         ? await verifyProviderPaymentSettlement(authorization, returnedHeaders, chain)
         : null;
-      if (providerSettlement) {
-        if (!await store.commitRelayExecution(grant.grantId, authorization.id, requestId)) {
-          throw new ProviderRelayError("provider_relay_commit_failed", 503);
-        }
-        executionCommitted = true;
-      }
       const unsignedReceipt = {
         protocol: "PolicyPool Provider Relay",
         version: "0.4.0",
@@ -467,12 +461,30 @@ export function createProviderRelay({
         primaryType: "RelayReceipt",
         message: { receiptDigest },
       });
-      const stored = await store.saveRelayReceipt({
+      const signedReceipt = {
         ...unsignedReceipt,
         receiptDigest,
         signer: receiptSigner.address,
         signature,
-      });
+      };
+      let stored;
+      if (providerSettlement) {
+        try {
+          stored = await store.commitRelayExecutionReceipt(
+            grant.grantId,
+            authorization.id,
+            requestId,
+            grant.expiresAt,
+            signedReceipt,
+          );
+        } catch {
+          throw new ProviderRelayError("provider_relay_commit_failed", 503);
+        }
+        if (!stored) throw new ProviderRelayError("provider_relay_commit_failed", 503);
+        executionCommitted = true;
+      } else {
+        stored = await store.saveRelayReceipt(signedReceipt);
+      }
       return {
         receipt: stored,
         upstream: {

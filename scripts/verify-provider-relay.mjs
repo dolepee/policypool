@@ -53,6 +53,7 @@ const grant = {
   serviceId: "33461",
   targetJobId,
   buyer,
+  expiresAt: "2026-07-22T12:00:00.000Z",
 };
 const secondGrant = { ...grant, grantId: "pprg-test-second" };
 const grantService = {
@@ -67,13 +68,14 @@ async function paymentHeader(tag, {
   payTo = provider,
   signingAccount = buyerSigner,
   from = buyer,
+  authorizationAtMs = Date.now(),
 } = {}) {
   const authorization = {
     from: getAddress(from),
     to: getAddress(payTo),
     value: amount,
     validAfter: "0",
-    validBefore: String(Math.floor(Date.now() / 1_000) + 600),
+    validBefore: String(Math.floor(authorizationAtMs / 1_000) + 600),
     nonce: `0x${sha256(`nonce:${tag}`)}`,
   };
   const signature = await signingAccount.signTypedData({
@@ -121,6 +123,7 @@ function settlementHeader() {
 }
 
 let elapsed = 0;
+const relayNowBase = Date.parse("2026-07-16T12:00:00.000Z");
 let responseStatus = 402;
 const fetchImpl = async (url, options, connection) => {
   assert.equal(url, policy.serviceEndpoint);
@@ -179,7 +182,7 @@ const relay = createProviderRelay({
   signer,
   receiptVerifierAddress: relayVerifier,
   grantService,
-  now: () => Date.parse("2026-07-16T12:00:00.000Z") + elapsed,
+  now: () => relayNowBase + elapsed,
 });
 
 const challenge = await relay.execute({
@@ -362,6 +365,23 @@ assert.equal(
   "an unpaid receipt must not replace the verified clock receipt used by reconciliation",
 );
 responseStatus = 200;
+const elapsedBeforeLateReuse = elapsed;
+elapsed += 48 * 60 * 60 * 1_000;
+const lateFreshPayment = await paymentHeader("late-grant-reuse", {
+  authorizationAtMs: relayNowBase + elapsed,
+});
+await assert.rejects(
+  () => relay.execute({
+    agentId: "3808",
+    serviceId: "33461",
+    targetJobId,
+    providerRequest: { target_url: "https://policypool.vercel.app/api/covered-job-receipt" },
+    relayGrant: "signed-relay-grant",
+  }, { "payment-signature": lateFreshPayment }),
+  (error) => error instanceof ProviderRelayError && error.code === "relay_grant_already_used",
+  "a consumed relay grant must remain consumed beyond the former 24-hour claim TTL",
+);
+elapsed = elapsedBeforeLateReuse;
 await assert.rejects(
   () => relay.execute({
     agentId: "3808",
@@ -415,6 +435,93 @@ includeSettlementProof = true;
 const retried = await retryRelay.execute(retryInput, { "payment-signature": retryPayment });
 assert.equal(retried.receipt.request.paymentVerified, true);
 assert.equal(retried.receipt.clock !== null, true, "released reservation must permit a verified retry");
+
+const atomicFetch = async () => new Response(JSON.stringify({ status: "audit_complete" }), {
+  status: 200,
+  headers: { "content-type": "application/json", "payment-response": settlementHeader() },
+});
+const retryableAtomicBacking = new MemoryProviderPolicyStore();
+let failBeforeAtomicCommit = true;
+const retryableAtomicStore = {
+  saveRelayReceipt: (...args) => retryableAtomicBacking.saveRelayReceipt(...args),
+  reserveRelayExecution: (...args) => retryableAtomicBacking.reserveRelayExecution(...args),
+  releaseRelayExecution: (...args) => retryableAtomicBacking.releaseRelayExecution(...args),
+  async commitRelayExecutionReceipt(...args) {
+    if (failBeforeAtomicCommit) {
+      failBeforeAtomicCommit = false;
+      throw new Error("simulated Redis outage before atomic commit");
+    }
+    return retryableAtomicBacking.commitRelayExecutionReceipt(...args);
+  },
+};
+const retryableAtomicRelay = createProviderRelay({
+  policyResolver: resolver,
+  store: retryableAtomicStore,
+  fetchImpl: atomicFetch,
+  resolveHost,
+  chain,
+  signer,
+  receiptVerifierAddress: relayVerifier,
+  grantService,
+});
+const retryableAtomicPayment = await paymentHeader("retryable-atomic-commit");
+await assert.rejects(
+  () => retryableAtomicRelay.execute(retryInput, { "payment-signature": retryableAtomicPayment }),
+  (error) => error instanceof ProviderRelayError && error.code === "provider_relay_commit_failed",
+  "a store outage before the atomic commit must fail without consuming the grant",
+);
+assert.equal(await retryableAtomicBacking.getLatestRelayReceiptForJob(targetJobId), null);
+const recoveredAtomicCommit = await retryableAtomicRelay.execute(
+  retryInput,
+  { "payment-signature": retryableAtomicPayment },
+);
+assert.equal(recoveredAtomicCommit.receipt.request.paymentVerified, true);
+
+const uncertainAtomicBacking = new MemoryProviderPolicyStore();
+let loseAtomicCommitReply = true;
+let uncertainProviderCalls = 0;
+const uncertainAtomicStore = {
+  saveRelayReceipt: (...args) => uncertainAtomicBacking.saveRelayReceipt(...args),
+  reserveRelayExecution: (...args) => uncertainAtomicBacking.reserveRelayExecution(...args),
+  releaseRelayExecution: (...args) => uncertainAtomicBacking.releaseRelayExecution(...args),
+  async commitRelayExecutionReceipt(...args) {
+    const stored = await uncertainAtomicBacking.commitRelayExecutionReceipt(...args);
+    if (loseAtomicCommitReply) {
+      loseAtomicCommitReply = false;
+      throw new Error("simulated Redis response loss after atomic commit");
+    }
+    return stored;
+  },
+};
+const uncertainAtomicRelay = createProviderRelay({
+  policyResolver: resolver,
+  store: uncertainAtomicStore,
+  fetchImpl: async (...args) => {
+    uncertainProviderCalls += 1;
+    return atomicFetch(...args);
+  },
+  resolveHost,
+  chain,
+  signer,
+  receiptVerifierAddress: relayVerifier,
+  grantService,
+});
+const uncertainAtomicPayment = await paymentHeader("uncertain-atomic-commit");
+await assert.rejects(
+  () => uncertainAtomicRelay.execute(retryInput, { "payment-signature": uncertainAtomicPayment }),
+  (error) => error instanceof ProviderRelayError && error.code === "provider_relay_commit_failed",
+  "a lost Redis reply after the atomic commit may fail the request but must not lose its receipt",
+);
+assert.equal(
+  (await uncertainAtomicBacking.getLatestRelayReceiptForJob(targetJobId)).request.paymentVerified,
+  true,
+);
+await assert.rejects(
+  () => uncertainAtomicRelay.execute(retryInput, { "payment-signature": uncertainAtomicPayment }),
+  (error) => error instanceof ProviderRelayError && error.code === "relay_grant_already_used",
+  "an uncertain response after atomic commit must not forward or settle the provider twice",
+);
+assert.equal(uncertainProviderCalls, 1);
 
 await assert.rejects(
   () => relay.execute({
