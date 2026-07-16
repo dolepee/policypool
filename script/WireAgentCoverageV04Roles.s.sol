@@ -14,6 +14,7 @@ contract WireAgentCoverageV04Roles is Script {
     error OwnershipMismatch();
     error StaticWiringMismatch();
     error RoleWiringMismatch();
+    error EvidenceSignerOverlap();
 
     function run() external {
         uint256 ownerKey = vm.envUint("POLICYPOOL_V04_OWNER_PRIVATE_KEY");
@@ -22,11 +23,15 @@ contract WireAgentCoverageV04Roles is Script {
         address relaySigner = vm.envAddress("POLICYPOOL_RELAY_SIGNER_ADDRESS");
         address[] memory evidenceSigners = vm.envAddress("POLICYPOOL_EVIDENCE_SIGNERS", ",");
         uint256 evidenceThreshold = vm.envUint("POLICYPOOL_EVIDENCE_THRESHOLD");
+        address[] memory recoveryEvidenceSigners = vm.envAddress("POLICYPOOL_RECOVERY_EVIDENCE_SIGNERS", ",");
+        uint256 recoveryEvidenceThreshold = vm.envUint("POLICYPOOL_RECOVERY_EVIDENCE_THRESHOLD");
 
         ProviderBondVault vault = ProviderBondVault(vm.envAddress("POLICYPOOL_BOND_VAULT_ADDRESS"));
         AgentPolicyRegistry registry = AgentPolicyRegistry(vm.envAddress("POLICYPOOL_POLICY_REGISTRY_ADDRESS"));
         CoverageEvidenceVerifier evidenceVerifier =
             CoverageEvidenceVerifier(vm.envAddress("POLICYPOOL_EVIDENCE_VERIFIER_ADDRESS"));
+        CoverageEvidenceVerifier recoveryEvidenceVerifier =
+            CoverageEvidenceVerifier(vm.envAddress("POLICYPOOL_RECOVERY_EVIDENCE_VERIFIER_ADDRESS"));
         CoverageManager manager = CoverageManager(vm.envAddress("POLICYPOOL_COVERAGE_MANAGER_ADDRESS"));
         RelayReceiptVerifier relay = RelayReceiptVerifier(vm.envAddress("POLICYPOOL_A2MCP_RELAY_ADAPTER_ADDRESS"));
 
@@ -39,6 +44,7 @@ contract WireAgentCoverageV04Roles is Script {
                 || address(manager.bondVault()) != address(vault)
                 || address(manager.policyRegistry()) != address(registry)
                 || address(manager.evidenceVerifier()) != address(evidenceVerifier)
+                || address(manager.recoveryEvidenceVerifier()) != address(recoveryEvidenceVerifier)
         ) revert StaticWiringMismatch();
         if (relay.trustedSigner() != relaySigner) revert RoleWiringMismatch();
         if (
@@ -47,6 +53,18 @@ contract WireAgentCoverageV04Roles is Script {
         ) revert RoleWiringMismatch();
         for (uint256 index; index < evidenceSigners.length; ++index) {
             if (evidenceVerifier.signerAt(index) != evidenceSigners[index]) revert RoleWiringMismatch();
+        }
+        if (
+            recoveryEvidenceVerifier.threshold() != recoveryEvidenceThreshold
+                || recoveryEvidenceVerifier.signerCount() != recoveryEvidenceSigners.length
+        ) revert RoleWiringMismatch();
+        for (uint256 index; index < recoveryEvidenceSigners.length; ++index) {
+            if (recoveryEvidenceVerifier.signerAt(index) != recoveryEvidenceSigners[index]) {
+                revert RoleWiringMismatch();
+            }
+            for (uint256 primaryIndex; primaryIndex < evidenceSigners.length; ++primaryIndex) {
+                if (recoveryEvidenceSigners[index] == evidenceSigners[primaryIndex]) revert EvidenceSignerOverlap();
+            }
         }
 
         vm.startBroadcast(ownerKey);
@@ -62,6 +80,9 @@ contract WireAgentCoverageV04Roles is Script {
         console2.log("Coverage evidence verifier", address(manager.evidenceVerifier()));
         console2.log("Evidence signer threshold", evidenceVerifier.threshold());
         console2.log("Evidence signer count", evidenceVerifier.signerCount());
+        console2.log("Recovery evidence verifier", address(manager.recoveryEvidenceVerifier()));
+        console2.log("Recovery evidence signer threshold", recoveryEvidenceVerifier.threshold());
+        console2.log("Recovery evidence signer count", recoveryEvidenceVerifier.signerCount());
         console2.log("Policy registry owner", registry.owner());
         console2.log("Policy registry monitor", registry.monitor());
         console2.log("Relay verifier owner", relay.owner());

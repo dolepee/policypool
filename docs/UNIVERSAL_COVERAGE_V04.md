@@ -18,15 +18,16 @@ The original manager gave one hot operator authority over the job, buyer, accept
 
 Every subjective lifecycle action now requires an immutable threshold evidence quorum:
 
-- `CoverageEvidenceVerifier` requires at least two authorized EIP-712 signatures.
+- Each `CoverageEvidenceVerifier` is contractually restricted to at least five signers and a 3-of-5 threshold.
 - The digest binds the current chain, verifier, destination manager, action, and exact payload.
 - The manager consumes each digest once and rejects replay.
 - Signatures must be unique and sorted by recovered signer address.
 - Any account may relay a valid quorum-attested action; the relayer has no custody authority.
-- The verifier has no owner, signer rotation, threshold update, or emergency bypass.
+- The primary and recovery verifier signer sets must be completely disjoint; the manager checks this during construction.
+- The verifier has no owner, signer rotation, threshold update, or privileged bypass.
 - The runtime sends the exact evidence plus its underlying task, transaction, relay, or recovery context to independently operated attesters. Attesters must recompute the payload and manager digest rather than trust the relayer's summary.
 
-This is a permissioned oracle model, not trustless marketplace verification. A colluding threshold can still attest false facts, while unavailable signers can halt subjective transitions. Before external bonds, the signer deployment must be arranged so no one operator, machine, cloud account, or organization can satisfy the threshold alone. Replacing lost or compromised signers requires a new verifier and manager deployment, followed by an orderly migration with no funds abandoned in the old vault.
+This is a permissioned oracle model, not trustless marketplace verification. A colluding threshold can still attest false facts. A separate disjoint 3-of-5 recovery quorum can resolve a covenant only after a 30-day delayed recovery window, so loss of the primary quorum does not immediately strand provider capital. If both evidence quorums lose threshold availability, an unresolved bond can still remain locked. Replacing lost or compromised signer sets requires a new verifier and manager deployment after every old obligation is resolved.
 
 ## Invariants
 
@@ -43,6 +44,9 @@ This is a permissioned oracle model, not trustless marketplace verification. A c
 11. A full marketplace refund cannot stack with a net-loss payout. Recovery amounts are part of the signed settlement payload.
 12. One marketplace job can receive only one covenant, across all policy versions and buyers.
 13. Every state-changing manager entry point has an explicit reentrancy guard.
+14. Net-loss settlement requires terminal recovery evidence observed within ten minutes of execution.
+15. Breach is provisional for a 24-hour challenge period. A quorum-attested completion at or before the original deadline can correct `PayoutDue` to `Released` before settlement.
+16. The primary and 30-day delayed recovery quorums each require at least 3-of-5 signers and share no signer address.
 
 ## Contracts
 
@@ -64,8 +68,8 @@ This is a permissioned oracle model, not trustless marketplace verification. A c
 
 ### `CoverageEvidenceVerifier`
 
-- Stores an immutable signer set and threshold, with a hard maximum of 16 signers.
-- Rejects a threshold below two, duplicate signers, malformed or high-`s` signatures, unauthorized signers, duplicate signatures, unordered signatures, and cross-domain attestations.
+- Stores an immutable signer set and threshold, with a minimum of five signers, a minimum threshold of three, and a hard maximum of 16 signers.
+- Rejects weak thresholds, duplicate signers, malformed or high-`s` signatures, unauthorized signers, duplicate signatures, unordered signatures, and cross-domain attestations.
 - Binds every attestation to the calling manager and returns the replay-protection digest.
 - Has no privileged administration after construction.
 
@@ -77,6 +81,9 @@ This is a permissioned oracle model, not trustless marketplace verification. A c
 - Verifies threshold evidence for issue, clock start, release, breach, and settlement.
 - Allows permissionless execution only after valid quorum authorization.
 - Prevents duplicate job coverage and double recovery.
+- Stores the attested completion and terminal-recovery observation timestamps on chain.
+- Enforces completion at or before the covenant deadline, 10-minute settlement-evidence freshness, terminal recovery, and a 24-hour challenge period before normal settlement.
+- Allows a completely disjoint recovery quorum to release or settle after a 30-day delay without giving an owner or relayer a custody bypass.
 - Keeps objective `expireUnstarted` permissionless after the on-chain enrollment deadline.
 
 ### Clock adapters
@@ -120,7 +127,7 @@ The scheduled path can request quorum authorization to:
 - mark an objective missed deadline as payout due;
 - release a lock left after failed service-fee settlement.
 
-An unstarted relay covenant may be expired permissionlessly after its on-chain enrollment deadline. Final net-loss settlement requires quorum signatures over the exact refund, other-recovery, observation time, and recovery-evidence hash.
+An unstarted relay covenant may be expired permissionlessly after its on-chain enrollment deadline. A provisional breach stays open for 24 hours so an attested on-time completion can correct it. Final net-loss settlement requires quorum signatures over the exact refund, other recovery, terminal-finality flag, observation time, and recovery-evidence hash, and the observation must be no more than ten minutes old when executed.
 
 ## Runtime Configuration
 
@@ -142,9 +149,14 @@ POLICYPOOL_EVIDENCE_VERIFIER_ADDRESS=
 POLICYPOOL_OKX_A2A_ADAPTER_ADDRESS=
 POLICYPOOL_A2MCP_RELAY_ADAPTER_ADDRESS=
 POLICYPOOL_EVIDENCE_SIGNERS=
-POLICYPOOL_EVIDENCE_THRESHOLD=2
+POLICYPOOL_EVIDENCE_THRESHOLD=3
 POLICYPOOL_EVIDENCE_ATTESTATION_URL=
 POLICYPOOL_EVIDENCE_ATTESTATION_TOKEN=
+POLICYPOOL_RECOVERY_EVIDENCE_SIGNERS=
+POLICYPOOL_RECOVERY_EVIDENCE_THRESHOLD=3
+POLICYPOOL_RECOVERY_EVIDENCE_ATTESTATION_URL=
+POLICYPOOL_RECOVERY_EVIDENCE_ATTESTATION_TOKEN=
+POLICYPOOL_RECOVERY_EVIDENCE_VERIFIER_ADDRESS=
 POLICYPOOL_RELAYER_PRIVATE_KEY=
 POLICYPOOL_RELAY_SIGNER_ADDRESS=
 POLICYPOOL_RELAY_SIGNER_PRIVATE_KEY=
@@ -155,7 +167,7 @@ POLICYPOOL_PROVIDER_EXPOSURE_MULTIPLIER_BPS=10000
 POLICYPOOL_UNIVERSAL_RECONCILE_URL=https://policypool.vercel.app/api/reconcile-universal
 ```
 
-The relayer key, relay signer, and evidence signers are distinct roles. The relayer may broadcast but cannot authorize custody. Evidence signers must be independently operated; the aggregation service returns unique signatures sorted by recovered address. Secrets must never be committed, and Vercel values must be checked for newline contamination.
+The relayer key, relay signer, five primary evidence signers, and five recovery evidence signers are distinct roles. The relayer may broadcast but cannot authorize custody. Both 3-of-5 quorums must span genuinely independent failure domains, and no signer address may appear in both sets. Each aggregation service returns unique signatures sorted by recovered address. Secrets must never be committed, and Vercel values must be checked for newline contamination.
 
 `POLICYPOOL_V04_OWNER_PRIVATE_KEY` is deployment-only. It must never be configured in an always-on runtime. The cold owner accepts vault ownership and configures the registry monitor; it has no manager or evidence-verifier override.
 
@@ -175,18 +187,18 @@ Production remains v0.3, `/api/manifest` remains the active contract, universal 
 
 ## Internal Audit Checkpoint
 
-The July 16 internal review and remediation are recorded in [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md). The original High single-operator finding is remediated in source by the immutable threshold evidence quorum. The source now passes 75 Foundry tests.
+The July 16 internal reviews and remediation are recorded in [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md). The original High single-operator finding is remediated in source. The later hostile review's stale-settlement, release-ordering, and quorum-loss findings are also remediated in source with terminal recovery plus 10-minute settlement-evidence freshness, a 24-hour challenge period with signed completion time, and a 30-day delayed recovery quorum. The candidate suite passes 84 Foundry tests.
 
 Core branch coverage:
 
 - `AgentPolicyRegistry`: `100%` (`23/23`)
 - `ProviderBondVault`: `100%` (`29/29`)
 - `CoverageEvidenceVerifier`: `100%` (`13/13`)
-- `CoverageManager`: `96.30%` (`26/27`)
+- `CoverageManager`: `94.87%` (`37/39`)
 - `OkxA2AClockAdapter`: `100%` (`6/6`)
 - `RelayReceiptVerifier`: `100%` (`8/8`)
 
-The remaining manager branch is unreachable under `enrollmentWindowSeconds <= slaSeconds`: an A2A deadline cannot already be elapsed while its shorter enrollment window remains open.
+The two uncovered manager branches are defensive states excluded by construction: an A2A deadline cannot already be elapsed while its shorter enrollment window remains open under `enrollmentWindowSeconds <= slaSeconds`, and an `Active` or `PayoutDue` covenant cannot enter emergency resolution with an unset deadline.
 
 This is still an internal review. Claude's second review is another internal adversarial pass, not a qualified independent human audit.
 
@@ -205,17 +217,17 @@ Required before the next deployment:
 - evidence signers are operationally independent and no one failure domain can satisfy the threshold;
 - the evidence service independently verifies underlying context instead of signing relayer assertions;
 - the old deployment remains disabled and empty of third-party capital;
-- a new six-contract stack is deployed flag-off and source/creation bytecode is verified;
+- a new seven-contract stack is deployed flag-off and source/creation bytecode is verified;
 - a fresh house pilot proves release, full payout, and recovery-reduced payout;
 - interactive 390px browser checks and a dry-run reconciler preserve v0.3 receipts;
 - public enrollment opens only after every preceding gate is recorded.
 
 ## Rollout And Rollback
 
-1. Deploy the vault, registry, evidence verifier, manager, A2A adapter, and relay verifier while the feature is off.
+1. Deploy the vault, registry, primary evidence verifier, disjoint recovery evidence verifier, manager, A2A adapter, and relay verifier while the feature is off.
 2. Initialize the vault manager once, transfer vault ownership to the cold owner, accept ownership, and set the registry monitor.
-3. Verify bytecode, immutable dependencies, signer set, threshold, token, identity registry, ownership, monitor, and relay signer from chain state.
-4. Configure the unprivileged relayer and independently operated evidence service while the feature remains off.
+3. Verify bytecode, immutable dependencies, both 3-of-5 signer sets, zero signer overlap, thresholds, token, identity registry, ownership, monitor, and relay signer from chain state.
+4. Configure the unprivileged relayer and both independently operated evidence services while the feature remains off.
 5. Run the complete gate and read-only reconciliation.
 6. Run three separately labeled house covenants: release, full payout, and payout reduced by verified recovery.
 7. Enable one bounded external provider only after the qualified independent audit signs off.
@@ -225,8 +237,8 @@ Rollback stops new issuance by setting `POLICYPOOL_UNIVERSAL_ENABLED=false`. Exi
 ## Known Limitations
 
 - The hardened source is not deployed. The historical flag-off bytecode must never accept third-party bonds.
-- The evidence quorum is a trusted oracle set. Threshold collusion can authorize false evidence; signer outage can halt subjective transitions.
-- The immutable signer set and one-time vault manager favor fail-closed custody over easy recovery. Rotation requires a new stack and planned migration.
+- Both evidence quorums are trusted oracle sets. Threshold collusion can authorize false evidence; the delayed recovery quorum reduces primary-quorum liveness risk but cannot resolve an obligation if both evidence quorums lose threshold availability.
+- Immutable signer sets and the one-time vault manager favor fail-closed custody over privileged recovery. Rotation requires a new stack and planned migration after old obligations close.
 - This internal work is not a qualified independent audit.
 - The canonical X Layer ERC-8004 registry is an externally controlled EIP-1967 proxy; ownership checks inherit its upgrade and availability risk.
 - OKX.AI exposes no documented stable JSON service directory, so strict cached HTML parsing remains an external dependency and fails closed when stale.

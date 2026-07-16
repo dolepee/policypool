@@ -12,6 +12,36 @@ import {MockERC20} from "../src/mocks/MockERC20.sol";
 import {MockOkxTaskStatus} from "../src/mocks/MockOkxTaskStatus.sol";
 import {CoverageEvidenceTestBase} from "./helpers/CoverageEvidenceTestBase.sol";
 
+contract TopologyEvidenceVerifier {
+    uint8 public immutable threshold;
+    address[] private signers;
+    mapping(address signer => bool authorized) public isSigner;
+
+    constructor(address[] memory signers_, uint8 threshold_) {
+        threshold = threshold_;
+        for (uint256 index; index < signers_.length; ++index) {
+            signers.push(signers_[index]);
+            isSigner[signers_[index]] = true;
+        }
+    }
+
+    function signerCount() external view returns (uint256) {
+        return signers.length;
+    }
+
+    function signerAt(uint256 index) external view returns (address) {
+        return signers[index];
+    }
+
+    function verify(bytes32, bytes32, bytes[] calldata) external pure returns (bytes32) {
+        return keccak256("topology-verifier");
+    }
+
+    function attestationDigest(address, bytes32, bytes32) external pure returns (bytes32) {
+        return keccak256("topology-verifier");
+    }
+}
+
 contract ConfigurableBondAsset {
     mapping(address account => uint256 balance) public balanceOf;
     mapping(address account => mapping(address spender => uint256 amount)) public allowance;
@@ -93,7 +123,9 @@ contract V04AdversarialBranchesTest is CoverageEvidenceTestBase {
         vault = new ProviderBondVault(address(asset), address(this), 8 days);
         identity = new MockAgentIdentityRegistry();
         registry = new AgentPolicyRegistry(address(identity), address(vault), address(this), 500_000, 7 days);
-        manager = new CoverageManager(address(registry), address(vault), address(evidenceVerifier));
+        manager = new CoverageManager(
+            address(registry), address(vault), address(evidenceVerifier), address(recoveryEvidenceVerifier)
+        );
         vault.initializeManager(address(manager));
 
         identity.setOwner(3808, provider);
@@ -311,12 +343,44 @@ contract V04AdversarialBranchesTest is CoverageEvidenceTestBase {
 
     function testManagerRejectsInvalidConstructionAndHasNoPrivilegedExecutor() public {
         vm.expectRevert(CoverageManager.ZeroAddress.selector);
-        new CoverageManager(address(0), address(vault), address(evidenceVerifier));
+        new CoverageManager(address(0), address(vault), address(evidenceVerifier), address(recoveryEvidenceVerifier));
         vm.expectRevert(CoverageManager.ZeroAddress.selector);
-        new CoverageManager(address(registry), address(0), address(evidenceVerifier));
+        new CoverageManager(address(registry), address(0), address(evidenceVerifier), address(recoveryEvidenceVerifier));
         vm.expectRevert(CoverageManager.ZeroAddress.selector);
-        new CoverageManager(address(registry), address(vault), address(0));
+        new CoverageManager(address(registry), address(vault), address(0), address(recoveryEvidenceVerifier));
+        vm.expectRevert(CoverageManager.ZeroAddress.selector);
+        new CoverageManager(address(registry), address(vault), address(evidenceVerifier), address(0));
+        vm.expectRevert(CoverageManager.EvidenceVerifierCollision.selector);
+        new CoverageManager(address(registry), address(vault), address(evidenceVerifier), address(evidenceVerifier));
+        address[] memory overlappingSigners = new address[](5);
+        overlappingSigners[0] = evidenceSignerOne;
+        overlappingSigners[1] = evidenceSignerTwo;
+        overlappingSigners[2] = evidenceSignerThree;
+        overlappingSigners[3] = evidenceSignerFour;
+        overlappingSigners[4] = evidenceSignerFive;
+        CoverageEvidenceVerifier overlappingRecovery = new CoverageEvidenceVerifier(overlappingSigners, 3);
+        vm.expectRevert(CoverageManager.EvidenceSignerOverlap.selector);
+        new CoverageManager(address(registry), address(vault), address(evidenceVerifier), address(overlappingRecovery));
+
+        address[] memory tooFewSigners = new address[](4);
+        for (uint256 index; index < tooFewSigners.length; ++index) {
+            tooFewSigners[index] = address(uint160(100 + index));
+        }
+        TopologyEvidenceVerifier weakVerifier = new TopologyEvidenceVerifier(tooFewSigners, 3);
+        vm.expectRevert(CoverageManager.EvidenceTopologyInvalid.selector);
+        new CoverageManager(address(registry), address(vault), address(weakVerifier), address(recoveryEvidenceVerifier));
+
+        address[] memory zeroSignerSet = new address[](5);
+        for (uint256 index = 1; index < zeroSignerSet.length; ++index) {
+            zeroSignerSet[index] = address(uint160(200 + index));
+        }
+        TopologyEvidenceVerifier zeroSignerVerifier = new TopologyEvidenceVerifier(zeroSignerSet, 3);
+        vm.expectRevert(CoverageManager.EvidenceTopologyInvalid.selector);
+        new CoverageManager(
+            address(registry), address(vault), address(zeroSignerVerifier), address(recoveryEvidenceVerifier)
+        );
         assertEq(address(manager.evidenceVerifier()), address(evidenceVerifier));
+        assertEq(address(manager.recoveryEvidenceVerifier()), address(recoveryEvidenceVerifier));
     }
 
     function testManagerRejectsInvalidIssueAndLifecycleTransitions() public {
@@ -360,6 +424,7 @@ contract V04AdversarialBranchesTest is CoverageEvidenceTestBase {
             escrowRefundAtomic: 0,
             otherRecoveryAtomic: 0,
             observedAt: uint64(block.timestamp),
+            recoveryFinalized: true,
             recoveryEvidenceHash: keccak256("not-due")
         });
         bytes[] memory prematureSettlementSignatures = _signatures(manager.settlementEvidenceDigest(settlement));
@@ -378,11 +443,15 @@ contract V04AdversarialBranchesTest is CoverageEvidenceTestBase {
         vm.expectRevert(CoverageManager.CovenantNotActive.selector);
         manager.markPayoutDue(breach, duplicateBreachSignatures);
         settlement.escrowRefundAtomic = 500_000;
+        vm.warp(block.timestamp + manager.SETTLEMENT_CHALLENGE_PERIOD() + 1);
         settlement.observedAt = uint64(block.timestamp);
         settlement.recoveryEvidenceHash = keccak256("full-recovery");
         _settle(manager, settlement);
         CoverageManager.ReleaseEvidence memory releaseEvidence = CoverageManager.ReleaseEvidence({
-            covenantId: covenantId, observedAt: uint64(block.timestamp), evidenceHash: keccak256("already-final")
+            covenantId: covenantId,
+            completedAt: uint64(block.timestamp),
+            observedAt: uint64(block.timestamp),
+            evidenceHash: keccak256("already-final")
         });
         bytes[] memory releaseSignatures = _signatures(manager.releaseEvidenceDigest(releaseEvidence));
         vm.expectRevert(CoverageManager.CovenantNotActive.selector);

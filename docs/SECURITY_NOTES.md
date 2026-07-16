@@ -50,12 +50,13 @@ The original manager let one hot operator choose the job, buyer, acceptance, rel
 
 The remediated source removes the manager owner/operator role and introduces `CoverageEvidenceVerifier`:
 
-- issuance, relay-clock start, release, breach, and settlement require at least two EIP-712 evidence signatures;
+- issuance, relay-clock start, release, breach, and settlement require a minimum 3-of-5 EIP-712 evidence quorum;
 - every signature is bound to chain ID, verifier, manager, action, and exact payload;
 - evidence digests are single-use;
 - signatures must be unique, authorized, and sorted by recovered address;
 - any address may submit a valid quorum, but no relayer can authorize a transition alone;
 - the signer set and threshold are immutable and have no owner bypass;
+- a second disjoint 3-of-5 quorum is the only emergency authority and cannot act until 30 days after the original deadline;
 - recovery amounts are signed as part of settlement, so a relayer cannot reduce a known refund to inflate payout;
 - every state-changing manager function has an explicit reentrancy guard.
 
@@ -63,9 +64,9 @@ The runtime sends the exact payload and underlying marketplace, transaction, rel
 
 ### Residual quorum trust boundary
 
-This is a permissioned oracle model, not trustless verification. A colluding signer threshold can still attest false facts and slash a provider; unavailable signers can halt subjective lifecycle transitions. Operational separation is therefore part of the security model: no one operator, host, cloud account, or organization may control enough keys to satisfy the threshold.
+This is a permissioned oracle model, not trustless verification. A colluding signer threshold can still attest false facts and slash a provider. Operational separation is therefore part of the security model: no one operator, host, cloud account, or organization may control enough keys to satisfy either threshold.
 
-The verifier is intentionally immutable. A signer loss or compromise requires a new verifier and manager deployment and an orderly migration after the old vault has no stranded obligations. The cold owner can manage the vault and registry monitor but cannot bypass the evidence verifier.
+Both verifiers are intentionally immutable. A disjoint recovery quorum limits primary-quorum liveness failure, but if both evidence quorums lose threshold availability an unresolved bond can still remain locked. Signer replacement requires a new verifier and manager deployment after all old obligations are resolved. The cold owner can manage the vault and registry monitor but cannot bypass either evidence verifier.
 
 Third-party capital remains blocked until the remediated source receives independent review, signer independence is demonstrated, a qualified independent human audit is complete, a new stack is deployed and bytecode-verified, and fresh house pilots pass.
 
@@ -76,13 +77,24 @@ Third-party capital remains blocked until the remediated source receives indepen
 - A2A delivery-like statuses remain on hold until historical delivery timing is proven.
 - Relay receipts use EIP-712 domain separation by chain ID and verifier address.
 
+### Hostile freshness, ordering, and liveness findings remediated in source
+
+- A stale recovery observation can no longer be held and broadcast after a later marketplace refund. Settlement requires a signed terminal-recovery flag, a nonzero evidence hash, and an observation no more than ten minutes old.
+- Release binds the authoritative completion timestamp and rejects completion after the covenant deadline. The contract stores that timestamp for later inspection.
+- A breach is provisional for 24 hours. During that challenge period, quorum-attested proof of an on-time completion can move `PayoutDue` to `Released`; normal settlement cannot win by transaction ordering alone.
+- Loss of the primary quorum no longer makes resolution impossible by itself. A contract-enforced, signer-disjoint recovery quorum may release, breach, or settle after 30 days.
+- The manager constructor rejects fewer than five signers, thresholds below three, and any signer overlap between the primary and recovery quorums. Deployment scripts repeat these checks and the release gate verifies them.
+
+Residual: terminal recovery and completion time are facts attested by permissioned quorums, not facts derived directly from OKX contracts. Threshold collusion remains capable of false attestation. If both quorums become unavailable, no privileged reclaim path exists because any deterministic unilateral recipient would sacrifice either the buyer or provider.
+
 ### Static analysis
 
-Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 26 raw results and no unclassified v0.4 manager/verifier custody bypass. Relevant warning dispositions are:
+Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 29 raw results and no unclassified v0.4 manager/verifier custody bypass. Relevant warning dispositions are:
 
 - `ProviderBondVault.depositFor` performs an external token call before crediting the bond. The function is protected by its `nonReentrant` guard, requires the exact vault balance delta, and rejects false-return and fee-on-transfer assets. A malicious callback test confirms re-entry fails and the outer deposit rolls back.
 - `CoverageManager` calls immutable verifier and vault dependencies. Every state-changing entry point is `nonReentrant`, state is written before the vault call, and any dependency revert rolls back the full transaction.
 - `CoverageEvidenceVerifier` loops over at most 16 signatures and rejects duplicate, unordered, unauthorized, malformed, high-`s`, and cross-domain attestations.
+- `CoverageManager` validates primary/recovery signer separation with bounded constructor-time calls to immutable verifier contracts. The loop is capped by each verifier's 16-signer maximum, runs only during deployment, and fails deployment closed on any dependency revert or overlap.
 - Timestamp comparisons are intentional inputs to policy expiry, enrollment windows, withdrawal delay, SLA clocks, and objective breach eligibility. X Layer timestamp/sequencer integrity remains an external dependency.
 - Low-level token calls support both boolean-return and no-return ERC-20 implementations. False returns, transfer failure, fee-on-transfer behavior, zero amounts, and outbound-transfer rollback are covered by adversarial tests.
 - Inline assembly is limited to ECDSA recovery. Signature length, recovery ID, high-`s`, zero signer, wrong signer, ordering, threshold, expiry, nonce replay, and digest replay paths are covered.
@@ -92,16 +104,16 @@ Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 26 raw re
 
 ### Adversarial coverage gate
 
-The remediated custody/state-transition suite contains 75 passing Foundry tests. Core branch coverage is:
+The remediated custody/state-transition suite passes 84 Foundry tests and includes executable hostile regressions for stale settlement, terminal recovery, late completion, provisional-breach correction, challenge-period ordering, quorum separation, and delayed recovery.
 
 - `AgentPolicyRegistry`: `100%` (`23/23`);
 - `ProviderBondVault`: `100%` (`29/29`);
 - `CoverageEvidenceVerifier`: `100%` (`13/13`);
-- `CoverageManager`: `96.30%` (`26/27`);
+- `CoverageManager`: `94.87%` (`37/39`);
 - `OkxA2AClockAdapter`: `100%` (`6/6`);
 - `RelayReceiptVerifier`: `100%` (`8/8`).
 
-The remaining uncovered manager branch is unreachable under the enforced policy invariant `enrollmentWindowSeconds <= slaSeconds`: an A2A deadline cannot already be elapsed while its shorter enrollment window is still open.
+The two uncovered manager branches are defensive states excluded by construction: an A2A deadline cannot already be elapsed while its shorter enrollment window remains open under `enrollmentWindowSeconds <= slaSeconds`, and an `Active` or `PayoutDue` covenant cannot enter emergency resolution with an unset deadline.
 
 These results verify the implemented source changes. They do not authorize public deposits, validate the old deployment, prove signer independence, or replace an independent audit.
 

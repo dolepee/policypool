@@ -16,14 +16,15 @@ import { isBytes32 } from "./utils.js";
 const ISSUE_TUPLE = "(bytes32 policyId,bytes32 observedFingerprint,bytes32 jobId,address provider,address buyer,uint128 coverageCapAtomic,uint128 buyerPaidAtomic,uint64 verifiedAcceptanceAt,uint64 enrollmentExpiresAt,bytes32 acceptanceEvidenceHash)";
 const CLOCK_TUPLE = "(bytes32 covenantId,uint64 startedAt,bytes32 evidenceHash)";
 const OBSERVATION_TUPLE = "(bytes32 covenantId,uint64 observedAt,bytes32 evidenceHash)";
-const SETTLEMENT_TUPLE = "(bytes32 covenantId,uint128 escrowRefundAtomic,uint128 otherRecoveryAtomic,uint64 observedAt,bytes32 recoveryEvidenceHash)";
+const RELEASE_TUPLE = "(bytes32 covenantId,uint64 completedAt,uint64 observedAt,bytes32 evidenceHash)";
+const SETTLEMENT_TUPLE = "(bytes32 covenantId,uint128 escrowRefundAtomic,uint128 otherRecoveryAtomic,uint64 observedAt,bool recoveryFinalized,bytes32 recoveryEvidenceHash)";
 
 const MANAGER_ABI = parseAbi([
-  "function getCovenant(bytes32 covenantId) view returns ((bytes32 id,bytes32 policyId,bytes32 jobId,address provider,address buyer,uint128 coverageCapAtomic,uint128 buyerPaidAtomic,uint64 issuedAt,uint64 startAt,uint64 deadline,uint64 enrollmentExpiresAt,uint64 payoutDueAt,uint32 slaSeconds,uint8 payoutBasis,uint8 clockMode,uint8 state,uint128 payoutAtomic,bytes32 acceptanceEvidenceHash,bytes32 breachEvidenceHash,bytes32 recoveryEvidenceHash))",
+  "function getCovenant(bytes32 covenantId) view returns ((bytes32 id,bytes32 policyId,bytes32 jobId,address provider,address buyer,uint128 coverageCapAtomic,uint128 buyerPaidAtomic,uint64 issuedAt,uint64 startAt,uint64 deadline,uint64 enrollmentExpiresAt,uint64 payoutDueAt,uint64 completedAt,uint64 recoveryObservedAt,uint32 slaSeconds,uint8 payoutBasis,uint8 clockMode,uint8 state,uint128 payoutAtomic,bytes32 acceptanceEvidenceHash,bytes32 breachEvidenceHash,bytes32 recoveryEvidenceHash,bool recoveryFinalized))",
   `function issue(${ISSUE_TUPLE} evidence, bytes[] signatures) returns (bytes32)`,
   `function issueEvidenceDigest(${ISSUE_TUPLE} evidence) view returns (bytes32)`,
-  `function release(${OBSERVATION_TUPLE} evidence, bytes[] signatures)`,
-  `function releaseEvidenceDigest(${OBSERVATION_TUPLE} evidence) view returns (bytes32)`,
+  `function release(${RELEASE_TUPLE} evidence, bytes[] signatures)`,
+  `function releaseEvidenceDigest(${RELEASE_TUPLE} evidence) view returns (bytes32)`,
   `function startClock(${CLOCK_TUPLE} evidence, bytes[] signatures)`,
   `function clockEvidenceDigest(${CLOCK_TUPLE} evidence) view returns (bytes32)`,
   "function expireUnstarted(bytes32 covenantId)",
@@ -31,6 +32,12 @@ const MANAGER_ABI = parseAbi([
   `function breachEvidenceDigest(${OBSERVATION_TUPLE} evidence) view returns (bytes32)`,
   `function settleNetLoss(${SETTLEMENT_TUPLE} evidence, bytes[] signatures) returns (uint256)`,
   `function settlementEvidenceDigest(${SETTLEMENT_TUPLE} evidence) view returns (bytes32)`,
+  `function emergencyRelease(${RELEASE_TUPLE} evidence, bytes[] signatures)`,
+  `function emergencyReleaseEvidenceDigest(${RELEASE_TUPLE} evidence) view returns (bytes32)`,
+  `function emergencyMarkPayoutDue(${OBSERVATION_TUPLE} evidence, bytes[] signatures)`,
+  `function emergencyBreachEvidenceDigest(${OBSERVATION_TUPLE} evidence) view returns (bytes32)`,
+  `function emergencySettleNetLoss(${SETTLEMENT_TUPLE} evidence, bytes[] signatures) returns (uint256)`,
+  `function emergencySettlementEvidenceDigest(${SETTLEMENT_TUPLE} evidence) view returns (bytes32)`,
 ]);
 
 export class UniversalIssuerError extends Error {
@@ -87,11 +94,17 @@ export function createUniversalIssuer({
   configuration = universalConfiguration(),
   account,
   evidenceProvider,
+  recoveryEvidenceProvider,
   publicClient,
   walletClient,
   now = () => Date.now(),
 } = {}) {
-  if (!configuration.ready || !configuration.coverageManager || !configuration.evidenceVerifier) {
+  if (
+    !configuration.ready
+    || !configuration.coverageManager
+    || !configuration.evidenceVerifier
+    || !configuration.recoveryEvidenceVerifier
+  ) {
     throw new UniversalIssuerError("universal_issuance_not_configured");
   }
   account ||= relayerAccount();
@@ -104,6 +117,11 @@ export function createUniversalIssuer({
     url: configuration.evidenceAttestationUrl,
     token: process.env.POLICYPOOL_EVIDENCE_ATTESTATION_TOKEN,
     threshold: configuration.evidenceThreshold,
+  });
+  recoveryEvidenceProvider ||= createEvidenceAttestationClient({
+    url: configuration.recoveryEvidenceAttestationUrl,
+    token: process.env.POLICYPOOL_RECOVERY_EVIDENCE_ATTESTATION_TOKEN,
+    threshold: configuration.recoveryEvidenceThreshold,
   });
 
   async function write(functionName, args) {
@@ -131,7 +149,7 @@ export function createUniversalIssuer({
     }
   }
 
-  async function signatures({ action, digestFunctionName, evidence, context }) {
+  async function signatures({ action, digestFunctionName, evidence, context, recovery = false }) {
     let digest;
     try {
       digest = await publicClient.readContract({
@@ -140,7 +158,8 @@ export function createUniversalIssuer({
         functionName: digestFunctionName,
         args: [evidence],
       });
-      return await evidenceProvider.attest({
+      const provider = recovery ? recoveryEvidenceProvider : evidenceProvider;
+      return await provider.attest({
         action,
         digest,
         evidence,
@@ -148,7 +167,7 @@ export function createUniversalIssuer({
         domain: {
           chainId: XLAYER.id,
           manager: configuration.coverageManager,
-          verifier: configuration.evidenceVerifier,
+          verifier: recovery ? configuration.recoveryEvidenceVerifier : configuration.evidenceVerifier,
         },
       });
     } catch (error) {
@@ -159,8 +178,8 @@ export function createUniversalIssuer({
     }
   }
 
-  async function attestedWrite({ functionName, digestFunctionName, action, evidence, context }) {
-    const approved = await signatures({ action, digestFunctionName, evidence, context });
+  async function attestedWrite({ functionName, digestFunctionName, action, evidence, context, recovery = false }) {
+    const approved = await signatures({ action, digestFunctionName, evidence, context, recovery });
     return write(functionName, [evidence, approved]);
   }
 
@@ -186,6 +205,8 @@ export function createUniversalIssuer({
         deadline: Number(value.deadline),
         enrollmentExpiresAt: Number(value.enrollmentExpiresAt),
         payoutDueAt: Number(value.payoutDueAt),
+        completedAt: Number(value.completedAt),
+        recoveryObservedAt: Number(value.recoveryObservedAt),
         slaSeconds: Number(value.slaSeconds),
         payoutBasis: Number(value.payoutBasis),
         clockMode: Number(value.clockMode),
@@ -194,6 +215,7 @@ export function createUniversalIssuer({
         acceptanceEvidenceHash: value.acceptanceEvidenceHash,
         breachEvidenceHash: value.breachEvidenceHash,
         recoveryEvidenceHash: value.recoveryEvidenceHash,
+        recoveryFinalized: Boolean(value.recoveryFinalized),
       };
     } catch (error) {
       throw new UniversalIssuerError(
@@ -236,17 +258,42 @@ export function createUniversalIssuer({
     ));
   }
 
-  async function release(covenantId, evidenceHash, context = {}) {
+  async function release(covenantId, completedAt, evidenceHash, context = {}) {
     if (!isBytes32(covenantId) || !isBytes32(evidenceHash)) {
       throw new UniversalIssuerError("release_evidence_invalid", 422);
     }
-    const evidence = { covenantId, observedAt: BigInt(Math.floor(now() / 1_000)), evidenceHash };
+    const evidence = {
+      covenantId,
+      completedAt: BigInt(seconds(completedAt, "release_completion_time")),
+      observedAt: BigInt(Math.floor(now() / 1_000)),
+      evidenceHash,
+    };
     return attestedWrite({
       functionName: "release",
       digestFunctionName: "releaseEvidenceDigest",
       action: "release",
       evidence,
       context,
+    });
+  }
+
+  async function emergencyRelease(covenantId, completedAt, evidenceHash, context = {}) {
+    if (!isBytes32(covenantId) || !isBytes32(evidenceHash)) {
+      throw new UniversalIssuerError("release_evidence_invalid", 422);
+    }
+    const evidence = {
+      covenantId,
+      completedAt: BigInt(seconds(completedAt, "release_completion_time")),
+      observedAt: BigInt(Math.floor(now() / 1_000)),
+      evidenceHash,
+    };
+    return attestedWrite({
+      functionName: "emergencyRelease",
+      digestFunctionName: "emergencyReleaseEvidenceDigest",
+      action: "release",
+      evidence,
+      context,
+      recovery: true,
     });
   }
 
@@ -285,18 +332,37 @@ export function createUniversalIssuer({
     });
   }
 
+  async function emergencyMarkPayoutDue(covenantId, breachEvidenceHash, context = {}) {
+    const evidence = {
+      covenantId,
+      observedAt: BigInt(Math.floor(now() / 1_000)),
+      evidenceHash: breachEvidenceHash,
+    };
+    return attestedWrite({
+      functionName: "emergencyMarkPayoutDue",
+      digestFunctionName: "emergencyBreachEvidenceDigest",
+      action: "breach",
+      evidence,
+      context,
+      recovery: true,
+    });
+  }
+
   async function settleNetLoss(
     covenantId,
     escrowRefundAtomic,
     otherRecoveryAtomic,
+    recoveryFinalized,
     recoveryEvidenceHash,
     context = {},
   ) {
+    if (recoveryFinalized !== true) throw new UniversalIssuerError("recovery_not_final", 422);
     const evidence = {
       covenantId,
       escrowRefundAtomic: BigInt(escrowRefundAtomic),
       otherRecoveryAtomic: BigInt(otherRecoveryAtomic),
       observedAt: BigInt(Math.floor(now() / 1_000)),
+      recoveryFinalized: true,
       recoveryEvidenceHash,
     };
     return attestedWrite({
@@ -308,15 +374,45 @@ export function createUniversalIssuer({
     });
   }
 
+  async function emergencySettleNetLoss(
+    covenantId,
+    escrowRefundAtomic,
+    otherRecoveryAtomic,
+    recoveryFinalized,
+    recoveryEvidenceHash,
+    context = {},
+  ) {
+    if (recoveryFinalized !== true) throw new UniversalIssuerError("recovery_not_final", 422);
+    const evidence = {
+      covenantId,
+      escrowRefundAtomic: BigInt(escrowRefundAtomic),
+      otherRecoveryAtomic: BigInt(otherRecoveryAtomic),
+      observedAt: BigInt(Math.floor(now() / 1_000)),
+      recoveryFinalized: true,
+      recoveryEvidenceHash,
+    };
+    return attestedWrite({
+      functionName: "emergencySettleNetLoss",
+      digestFunctionName: "emergencySettlementEvidenceDigest",
+      action: "settlement",
+      evidence,
+      context,
+      recovery: true,
+    });
+  }
+
   return {
     issue,
     previewCovenantId,
     getCovenant,
     release,
+    emergencyRelease,
     startClock,
     expireUnstarted,
     markPayoutDue,
+    emergencyMarkPayoutDue,
     settleNetLoss,
+    emergencySettleNetLoss,
     relayer: account.address,
   };
 }

@@ -8,30 +8,104 @@ import {CoverageManager} from "../../src/CoverageManager.sol";
 
 abstract contract CoverageEvidenceTestBase is Test {
     CoverageEvidenceVerifier internal evidenceVerifier;
+    CoverageEvidenceVerifier internal recoveryEvidenceVerifier;
     address internal evidenceSignerOne;
     address internal evidenceSignerTwo;
+    address internal evidenceSignerThree;
+    address internal evidenceSignerFour;
+    address internal evidenceSignerFive;
     uint256 internal evidenceSignerKeyOne;
     uint256 internal evidenceSignerKeyTwo;
+    uint256 internal evidenceSignerKeyThree;
+    uint256 internal evidenceSignerKeyFour;
+    uint256 internal evidenceSignerKeyFive;
+    address internal recoveryEvidenceSignerOne;
+    address internal recoveryEvidenceSignerTwo;
+    address internal recoveryEvidenceSignerThree;
+    address internal recoveryEvidenceSignerFour;
+    address internal recoveryEvidenceSignerFive;
+    uint256 internal recoveryEvidenceSignerKeyOne;
+    uint256 internal recoveryEvidenceSignerKeyTwo;
+    uint256 internal recoveryEvidenceSignerKeyThree;
+    uint256 internal recoveryEvidenceSignerKeyFour;
+    uint256 internal recoveryEvidenceSignerKeyFive;
 
     function _setUpEvidenceVerifier() internal {
         (evidenceSignerOne, evidenceSignerKeyOne) = makeAddrAndKey("evidence-signer-one");
         (evidenceSignerTwo, evidenceSignerKeyTwo) = makeAddrAndKey("evidence-signer-two");
-        address[] memory signers = new address[](2);
+        (evidenceSignerThree, evidenceSignerKeyThree) = makeAddrAndKey("evidence-signer-three");
+        (evidenceSignerFour, evidenceSignerKeyFour) = makeAddrAndKey("evidence-signer-four");
+        (evidenceSignerFive, evidenceSignerKeyFive) = makeAddrAndKey("evidence-signer-five");
+        address[] memory signers = new address[](5);
         signers[0] = evidenceSignerOne;
         signers[1] = evidenceSignerTwo;
-        evidenceVerifier = new CoverageEvidenceVerifier(signers, 2);
+        signers[2] = evidenceSignerThree;
+        signers[3] = evidenceSignerFour;
+        signers[4] = evidenceSignerFive;
+        evidenceVerifier = new CoverageEvidenceVerifier(signers, 3);
+
+        (recoveryEvidenceSignerOne, recoveryEvidenceSignerKeyOne) = makeAddrAndKey("recovery-evidence-signer-one");
+        (recoveryEvidenceSignerTwo, recoveryEvidenceSignerKeyTwo) = makeAddrAndKey("recovery-evidence-signer-two");
+        (recoveryEvidenceSignerThree, recoveryEvidenceSignerKeyThree) = makeAddrAndKey("recovery-evidence-signer-three");
+        (recoveryEvidenceSignerFour, recoveryEvidenceSignerKeyFour) = makeAddrAndKey("recovery-evidence-signer-four");
+        (recoveryEvidenceSignerFive, recoveryEvidenceSignerKeyFive) = makeAddrAndKey("recovery-evidence-signer-five");
+        address[] memory recoverySigners = new address[](5);
+        recoverySigners[0] = recoveryEvidenceSignerOne;
+        recoverySigners[1] = recoveryEvidenceSignerTwo;
+        recoverySigners[2] = recoveryEvidenceSignerThree;
+        recoverySigners[3] = recoveryEvidenceSignerFour;
+        recoverySigners[4] = recoveryEvidenceSignerFive;
+        recoveryEvidenceVerifier = new CoverageEvidenceVerifier(recoverySigners, 3);
+    }
+
+    function _recoverySignatures(bytes32 digest) internal view returns (bytes[] memory signatures) {
+        signatures = _orderedThresholdSignatures(
+            digest,
+            recoveryEvidenceSignerOne,
+            recoveryEvidenceSignerKeyOne,
+            recoveryEvidenceSignerTwo,
+            recoveryEvidenceSignerKeyTwo,
+            recoveryEvidenceSignerThree,
+            recoveryEvidenceSignerKeyThree
+        );
     }
 
     function _signatures(bytes32 digest) internal view returns (bytes[] memory signatures) {
-        bytes memory first = _signature(evidenceSignerKeyOne, digest);
-        bytes memory second = _signature(evidenceSignerKeyTwo, digest);
-        signatures = new bytes[](2);
-        if (evidenceSignerOne < evidenceSignerTwo) {
-            signatures[0] = first;
-            signatures[1] = second;
-        } else {
-            signatures[0] = second;
-            signatures[1] = first;
+        signatures = _orderedThresholdSignatures(
+            digest,
+            evidenceSignerOne,
+            evidenceSignerKeyOne,
+            evidenceSignerTwo,
+            evidenceSignerKeyTwo,
+            evidenceSignerThree,
+            evidenceSignerKeyThree
+        );
+    }
+
+    function _orderedThresholdSignatures(
+        bytes32 digest,
+        address signerOne,
+        uint256 keyOne,
+        address signerTwo,
+        uint256 keyTwo,
+        address signerThree,
+        uint256 keyThree
+    ) private pure returns (bytes[] memory signatures) {
+        address[] memory signerAddresses = new address[](3);
+        signerAddresses[0] = signerOne;
+        signerAddresses[1] = signerTwo;
+        signerAddresses[2] = signerThree;
+        signatures = new bytes[](3);
+        signatures[0] = _signature(keyOne, digest);
+        signatures[1] = _signature(keyTwo, digest);
+        signatures[2] = _signature(keyThree, digest);
+        for (uint256 left; left < signerAddresses.length; ++left) {
+            for (uint256 right = left + 1; right < signerAddresses.length; ++right) {
+                if (signerAddresses[right] < signerAddresses[left]) {
+                    (signerAddresses[left], signerAddresses[right]) = (signerAddresses[right], signerAddresses[left]);
+                    (signatures[left], signatures[right]) = (signatures[right], signatures[left]);
+                }
+            }
         }
     }
 

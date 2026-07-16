@@ -941,6 +941,7 @@ export function createHandler(dependencies = {}) {
           try {
             await getUniversalIssuer().release(
               universalCovenant.covenantId,
+              new Date(now()).toISOString(),
               `0x${sha256("COVERAGE_ISSUANCE_ABORTED")}`,
             );
             await ledger.release(compensationPending);
@@ -981,6 +982,7 @@ export function createHandler(dependencies = {}) {
         try {
           await getUniversalIssuer().release(
             universalCovenant.covenantId,
+            new Date(now()).toISOString(),
             `0x${sha256("COVERAGE_FEE_NOT_SETTLED")}`,
           );
           await ledger.release(compensationPending);

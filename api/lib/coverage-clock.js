@@ -22,11 +22,22 @@ export function observeOkxA2AClock({ task, deadline, now = Date.now() }) {
       : { action: "hold", reason: "accepted_job_within_sla" };
   }
   if (RECOVERY_STATUSES.has(status)) {
-    return {
-      action: "release",
-      reason: RECOVERY_STATUSES.get(status),
-      recoveryFinalized: [7, 9].includes(status),
-    };
+    const resolvedAt = task.completedAt || task.submittedAt || task.updatedAt;
+    if (!resolvedAt) return { action: "hold", reason: "terminal_status_timestamp_unavailable" };
+    const resolvedAtMs = timestamp(resolvedAt, "terminal_status_timestamp");
+    return resolvedAtMs <= deadlineMs
+      ? {
+        action: "release",
+        reason: RECOVERY_STATUSES.get(status),
+        recoveryFinalized: [7, 9].includes(status),
+        resolvedAt,
+      }
+      : {
+        action: "mark_payout_due",
+        reason: `${RECOVERY_STATUSES.get(status)}_after_deadline`,
+        recoveryFinalized: [7, 9].includes(status),
+        resolvedAt,
+      };
   }
   if ([2, 3, 4, 6].includes(status)) {
     const deliveredAt = task.submittedAt || task.completedAt;
@@ -52,13 +63,18 @@ export function observeRelayClock({ covenant, relayReceipt, now = Date.now() }) 
       evidenceHash: relayReceipt.requestId,
     };
   }
-  if (covenant?.state !== "active") return { action: "hold", reason: "covenant_not_active" };
+  if (!["active", "payout_due"].includes(covenant?.state)) {
+    return { action: "hold", reason: "covenant_not_active" };
+  }
   if (relayReceipt?.clock?.delivered && relayReceipt.clock.completedWithinSla) {
     return {
       action: "release",
       reason: "provider_response_delivered_within_sla",
       deliveredAt: relayReceipt.clock.completedAt,
     };
+  }
+  if (covenant.state === "payout_due") {
+    return { action: "hold", reason: "payout_due_challenge_or_terminal_settlement_pending" };
   }
   const deadlineMs = timestamp(covenant.deadline, "coverage_deadline");
   return now > deadlineMs

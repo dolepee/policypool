@@ -21,7 +21,11 @@ assert.equal(observeOkxA2AClock({
   deadline,
 }).reason, "service_delivered_after_deadline");
 assert.equal(observeOkxA2AClock({ task: { status: 2 }, deadline }).reason, "delivery_timestamp_unavailable");
-assert.equal(observeOkxA2AClock({ task: { status: 9 }, deadline }).recoveryFinalized, true);
+assert.equal(observeOkxA2AClock({
+  task: { status: 9, completedAt: "2026-07-16T12:04:30.000Z" },
+  deadline,
+}).recoveryFinalized, true);
+assert.equal(observeOkxA2AClock({ task: { status: 9 }, deadline }).reason, "terminal_status_timestamp_unavailable");
 
 const jobId = `0x${"44".repeat(32)}`;
 const relayReceipt = {
@@ -42,6 +46,14 @@ assert.equal(observeRelayClock({
   covenant: { state: "active", targetJobId: jobId, deadline },
   relayReceipt,
 }).action, "release");
+assert.equal(observeRelayClock({
+  covenant: { state: "payout_due", targetJobId: jobId, deadline },
+  relayReceipt,
+}).action, "release");
+assert.equal(observeRelayClock({
+  covenant: { state: "payout_due", targetJobId: jobId, deadline },
+  relayReceipt: { ...relayReceipt, clock: { ...relayReceipt.clock, delivered: false, completedWithinSla: false } },
+}).reason, "payout_due_challenge_or_terminal_settlement_pending");
 assert.equal(observeRelayClock({
   covenant: { state: "active", targetJobId: jobId, deadline },
   relayReceipt: { ...relayReceipt, clock: { ...relayReceipt.clock, delivered: false, completedWithinSla: false } },

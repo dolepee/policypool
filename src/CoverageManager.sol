@@ -24,6 +24,10 @@ interface ICoverageEvidenceVerifier {
         view
         returns (bytes32 digest);
     function attestationDigest(address manager, bytes32 action, bytes32 payloadHash) external view returns (bytes32);
+    function threshold() external view returns (uint8);
+    function signerCount() external view returns (uint256);
+    function signerAt(uint256 index) external view returns (address);
+    function isSigner(address signer) external view returns (bool);
 }
 
 /// @notice Provider-first-loss covenant lifecycle for objectively verifiable agent jobs.
@@ -39,8 +43,21 @@ contract CoverageManager {
     error PolicyNotCoverable();
     error ProviderMismatch();
     error RecoveryEvidenceRequired();
+    error RecoveryNotFinal();
+    error EvidenceStale();
     error EvidenceAlreadyConsumed();
+    error EmergencyResolutionNotReady();
+    error EvidenceVerifierCollision();
+    error EvidenceTopologyInvalid();
+    error EvidenceSignerOverlap();
+    error SettlementChallengeActive();
     error Reentrancy();
+
+    uint256 public constant SETTLEMENT_EVIDENCE_MAX_AGE = 10 minutes;
+    uint256 public constant SETTLEMENT_CHALLENGE_PERIOD = 24 hours;
+    uint256 public constant EMERGENCY_EVIDENCE_DELAY = 30 days;
+    uint256 public constant MIN_EVIDENCE_SIGNERS = 5;
+    uint256 public constant MIN_EVIDENCE_THRESHOLD = 3;
 
     bytes32 public constant ISSUE_ACTION = keccak256("POLICYPOOL_ISSUE");
     bytes32 public constant START_CLOCK_ACTION = keccak256("POLICYPOOL_START_CLOCK");
@@ -54,11 +71,11 @@ contract CoverageManager {
     bytes32 public constant CLOCK_EVIDENCE_TYPEHASH =
         keccak256("ClockEvidence(bytes32 covenantId,uint64 startedAt,bytes32 evidenceHash)");
     bytes32 public constant RELEASE_EVIDENCE_TYPEHASH =
-        keccak256("ReleaseEvidence(bytes32 covenantId,uint64 observedAt,bytes32 evidenceHash)");
+        keccak256("ReleaseEvidence(bytes32 covenantId,uint64 completedAt,uint64 observedAt,bytes32 evidenceHash)");
     bytes32 public constant BREACH_EVIDENCE_TYPEHASH =
         keccak256("BreachEvidence(bytes32 covenantId,uint64 observedAt,bytes32 evidenceHash)");
     bytes32 public constant SETTLEMENT_EVIDENCE_TYPEHASH = keccak256(
-        "SettlementEvidence(bytes32 covenantId,uint128 escrowRefundAtomic,uint128 otherRecoveryAtomic,uint64 observedAt,bytes32 recoveryEvidenceHash)"
+        "SettlementEvidence(bytes32 covenantId,uint128 escrowRefundAtomic,uint128 otherRecoveryAtomic,uint64 observedAt,bool recoveryFinalized,bytes32 recoveryEvidenceHash)"
     );
 
     enum CovenantState {
@@ -92,6 +109,7 @@ contract CoverageManager {
 
     struct ReleaseEvidence {
         bytes32 covenantId;
+        uint64 completedAt;
         uint64 observedAt;
         bytes32 evidenceHash;
     }
@@ -107,6 +125,7 @@ contract CoverageManager {
         uint128 escrowRefundAtomic;
         uint128 otherRecoveryAtomic;
         uint64 observedAt;
+        bool recoveryFinalized;
         bytes32 recoveryEvidenceHash;
     }
 
@@ -123,6 +142,8 @@ contract CoverageManager {
         uint64 deadline;
         uint64 enrollmentExpiresAt;
         uint64 payoutDueAt;
+        uint64 completedAt;
+        uint64 recoveryObservedAt;
         uint32 slaSeconds;
         uint8 payoutBasis;
         uint8 clockMode;
@@ -131,11 +152,13 @@ contract CoverageManager {
         bytes32 acceptanceEvidenceHash;
         bytes32 breachEvidenceHash;
         bytes32 recoveryEvidenceHash;
+        bool recoveryFinalized;
     }
 
     IPolicyRegistryView public immutable policyRegistry;
     IProviderBondManager public immutable bondVault;
     ICoverageEvidenceVerifier public immutable evidenceVerifier;
+    ICoverageEvidenceVerifier public immutable recoveryEvidenceVerifier;
 
     mapping(bytes32 covenantId => Covenant covenant) private covenants;
     mapping(bytes32 jobId => bytes32 covenantId) public coveredJobCovenant;
@@ -161,7 +184,11 @@ contract CoverageManager {
         bytes32 indexed covenantId, uint256 startedAt, uint256 deadline, bytes32 evidenceHash, bytes32 evidenceDigest
     );
     event CovenantReleased(
-        bytes32 indexed covenantId, uint256 observedAt, bytes32 evidenceHash, bytes32 evidenceDigest
+        bytes32 indexed covenantId,
+        uint256 completedAt,
+        uint256 observedAt,
+        bytes32 evidenceHash,
+        bytes32 evidenceDigest
     );
     event CovenantPayoutDue(
         bytes32 indexed covenantId, uint256 observedAt, bytes32 breachEvidenceHash, bytes32 evidenceDigest
@@ -171,9 +198,14 @@ contract CoverageManager {
         uint256 payoutAtomic,
         uint256 escrowRefundAtomic,
         uint256 otherRecoveryAtomic,
+        uint256 recoveryObservedAt,
+        bool recoveryFinalized,
         bytes32 recoveryEvidenceHash,
         bytes32 evidenceDigest,
         CovenantState finalState
+    );
+    event EmergencyEvidenceUsed(
+        bytes32 indexed covenantId, bytes32 indexed action, address indexed verifier, bytes32 evidenceDigest
     );
 
     modifier nonReentrant() {
@@ -183,13 +215,24 @@ contract CoverageManager {
         entered = 1;
     }
 
-    constructor(address policyRegistry_, address bondVault_, address evidenceVerifier_) {
-        if (policyRegistry_ == address(0) || bondVault_ == address(0) || evidenceVerifier_ == address(0)) {
+    constructor(
+        address policyRegistry_,
+        address bondVault_,
+        address evidenceVerifier_,
+        address recoveryEvidenceVerifier_
+    ) {
+        if (
+            policyRegistry_ == address(0) || bondVault_ == address(0) || evidenceVerifier_ == address(0)
+                || recoveryEvidenceVerifier_ == address(0)
+        ) {
             revert ZeroAddress();
         }
+        if (evidenceVerifier_ == recoveryEvidenceVerifier_) revert EvidenceVerifierCollision();
         policyRegistry = IPolicyRegistryView(policyRegistry_);
         bondVault = IProviderBondManager(bondVault_);
         evidenceVerifier = ICoverageEvidenceVerifier(evidenceVerifier_);
+        recoveryEvidenceVerifier = ICoverageEvidenceVerifier(recoveryEvidenceVerifier_);
+        _validateEvidenceTopology();
     }
 
     function getCovenant(bytes32 covenantId_) external view returns (Covenant memory) {
@@ -227,7 +270,13 @@ contract CoverageManager {
 
     function hashReleaseEvidence(ReleaseEvidence memory evidence) public pure returns (bytes32) {
         return keccak256(
-            abi.encode(RELEASE_EVIDENCE_TYPEHASH, evidence.covenantId, evidence.observedAt, evidence.evidenceHash)
+            abi.encode(
+                RELEASE_EVIDENCE_TYPEHASH,
+                evidence.covenantId,
+                evidence.completedAt,
+                evidence.observedAt,
+                evidence.evidenceHash
+            )
         );
     }
 
@@ -245,6 +294,7 @@ contract CoverageManager {
                 evidence.escrowRefundAtomic,
                 evidence.otherRecoveryAtomic,
                 evidence.observedAt,
+                evidence.recoveryFinalized,
                 evidence.recoveryEvidenceHash
             )
         );
@@ -270,6 +320,21 @@ contract CoverageManager {
         return evidenceVerifier.attestationDigest(address(this), SETTLEMENT_ACTION, hashSettlementEvidence(evidence));
     }
 
+    function emergencyReleaseEvidenceDigest(ReleaseEvidence calldata evidence) external view returns (bytes32) {
+        return recoveryEvidenceVerifier.attestationDigest(address(this), RELEASE_ACTION, hashReleaseEvidence(evidence));
+    }
+
+    function emergencyBreachEvidenceDigest(BreachEvidence calldata evidence) external view returns (bytes32) {
+        return recoveryEvidenceVerifier.attestationDigest(address(this), BREACH_ACTION, hashBreachEvidence(evidence));
+    }
+
+    function emergencySettlementEvidenceDigest(SettlementEvidence calldata evidence) external view returns (bytes32) {
+        return
+            recoveryEvidenceVerifier.attestationDigest(
+                address(this), SETTLEMENT_ACTION, hashSettlementEvidence(evidence)
+            );
+    }
+
     function issue(IssueEvidence calldata evidence, bytes[] calldata signatures)
         external
         nonReentrant
@@ -284,7 +349,8 @@ contract CoverageManager {
         if (covenants[id].state != CovenantState.None) revert CovenantAlreadyExists();
         if (coveredJobCovenant[evidence.jobId] != bytes32(0)) revert JobAlreadyCovered();
 
-        bytes32 digest = _consumeEvidence(ISSUE_ACTION, hashIssueEvidence(evidence), signatures);
+        bytes32 digest =
+            _consumeEvidence(evidenceVerifier, ISSUE_ACTION, hashIssueEvidence(evidence), signatures, false, id);
         coveredJobCovenant[evidence.jobId] = id;
         _storeCovenant(id, evidence, payoutBasis, clockMode, slaSeconds, deadline);
         bondVault.lock(id, evidence.provider, evidence.coverageCapAtomic);
@@ -298,7 +364,9 @@ contract CoverageManager {
             evidence.startedAt < covenant.issuedAt || evidence.startedAt > block.timestamp
                 || block.timestamp > covenant.enrollmentExpiresAt || evidence.evidenceHash == bytes32(0)
         ) revert InvalidCovenant();
-        bytes32 digest = _consumeEvidence(START_CLOCK_ACTION, hashClockEvidence(evidence), signatures);
+        bytes32 digest = _consumeEvidence(
+            evidenceVerifier, START_CLOCK_ACTION, hashClockEvidence(evidence), signatures, false, evidence.covenantId
+        );
         covenant.startAt = evidence.startedAt;
         covenant.deadline = evidence.startedAt + covenant.slaSeconds;
         covenant.state = CovenantState.Active;
@@ -313,36 +381,32 @@ contract CoverageManager {
         if (block.timestamp <= covenant.enrollmentExpiresAt) revert DeadlineNotElapsed();
         covenant.state = CovenantState.Released;
         bondVault.release(id);
-        emit CovenantReleased(id, block.timestamp, keccak256("COVERAGE_CLOCK_NOT_STARTED"), bytes32(0));
+        emit CovenantReleased(id, 0, block.timestamp, keccak256("COVERAGE_CLOCK_NOT_STARTED"), bytes32(0));
     }
 
     function release(ReleaseEvidence calldata evidence, bytes[] calldata signatures) external nonReentrant {
+        _release(evidence, signatures, evidenceVerifier, false);
+    }
+
+    /// @notice Resolves an active covenant through a separately operated recovery quorum.
+    /// @dev The delay prevents the recovery quorum from competing with normal reconciliation.
+    function emergencyRelease(ReleaseEvidence calldata evidence, bytes[] calldata signatures) external nonReentrant {
         Covenant storage covenant = covenants[evidence.covenantId];
-        if (covenant.state != CovenantState.Active && covenant.state != CovenantState.PendingStart) {
-            revert CovenantNotActive();
-        }
-        if (
-            evidence.observedAt < covenant.issuedAt || evidence.observedAt > block.timestamp
-                || evidence.evidenceHash == bytes32(0)
-        ) revert InvalidCovenant();
-        bytes32 digest = _consumeEvidence(RELEASE_ACTION, hashReleaseEvidence(evidence), signatures);
-        covenant.state = CovenantState.Released;
-        bondVault.release(evidence.covenantId);
-        emit CovenantReleased(evidence.covenantId, evidence.observedAt, evidence.evidenceHash, digest);
+        _requireEmergencyReleaseDelay(covenant);
+        _release(evidence, signatures, recoveryEvidenceVerifier, true);
     }
 
     function markPayoutDue(BreachEvidence calldata evidence, bytes[] calldata signatures) external nonReentrant {
+        _markPayoutDue(evidence, signatures, evidenceVerifier, false);
+    }
+
+    function emergencyMarkPayoutDue(BreachEvidence calldata evidence, bytes[] calldata signatures)
+        external
+        nonReentrant
+    {
         Covenant storage covenant = covenants[evidence.covenantId];
-        if (covenant.state != CovenantState.Active) revert CovenantNotActive();
-        if (block.timestamp <= covenant.deadline || evidence.observedAt <= covenant.deadline) {
-            revert DeadlineNotElapsed();
-        }
-        if (evidence.observedAt > block.timestamp || evidence.evidenceHash == bytes32(0)) revert InvalidCovenant();
-        bytes32 digest = _consumeEvidence(BREACH_ACTION, hashBreachEvidence(evidence), signatures);
-        covenant.state = CovenantState.PayoutDue;
-        covenant.payoutDueAt = evidence.observedAt;
-        covenant.breachEvidenceHash = evidence.evidenceHash;
-        emit CovenantPayoutDue(evidence.covenantId, evidence.observedAt, evidence.evidenceHash, digest);
+        _requireEmergencyDelay(covenant, CovenantState.Active, covenant.deadline);
+        _markPayoutDue(evidence, signatures, recoveryEvidenceVerifier, true);
     }
 
     function settleNetLoss(SettlementEvidence calldata evidence, bytes[] calldata signatures)
@@ -350,14 +414,94 @@ contract CoverageManager {
         nonReentrant
         returns (uint256 payoutAtomic)
     {
+        payoutAtomic = _settleNetLoss(evidence, signatures, evidenceVerifier, false);
+    }
+
+    function emergencySettleNetLoss(SettlementEvidence calldata evidence, bytes[] calldata signatures)
+        external
+        nonReentrant
+        returns (uint256 payoutAtomic)
+    {
+        Covenant storage covenant = covenants[evidence.covenantId];
+        _requireEmergencyDelay(covenant, CovenantState.PayoutDue, covenant.deadline);
+        payoutAtomic = _settleNetLoss(evidence, signatures, recoveryEvidenceVerifier, true);
+    }
+
+    function _release(
+        ReleaseEvidence calldata evidence,
+        bytes[] calldata signatures,
+        ICoverageEvidenceVerifier verifier,
+        bool emergency
+    ) private {
+        Covenant storage covenant = covenants[evidence.covenantId];
+        if (
+            covenant.state != CovenantState.Active && covenant.state != CovenantState.PendingStart
+                && covenant.state != CovenantState.PayoutDue
+        ) {
+            revert CovenantNotActive();
+        }
+        uint64 releaseDeadline =
+            covenant.state == CovenantState.PendingStart ? covenant.enrollmentExpiresAt : covenant.deadline;
+        if (
+            evidence.completedAt < covenant.issuedAt || evidence.completedAt > releaseDeadline
+                || evidence.observedAt < evidence.completedAt || evidence.observedAt > block.timestamp
+                || evidence.evidenceHash == bytes32(0)
+        ) revert InvalidCovenant();
+        bytes32 digest = _consumeEvidence(
+            verifier, RELEASE_ACTION, hashReleaseEvidence(evidence), signatures, emergency, evidence.covenantId
+        );
+        covenant.completedAt = evidence.completedAt;
+        covenant.state = CovenantState.Released;
+        bondVault.release(evidence.covenantId);
+        emit CovenantReleased(
+            evidence.covenantId, evidence.completedAt, evidence.observedAt, evidence.evidenceHash, digest
+        );
+    }
+
+    function _markPayoutDue(
+        BreachEvidence calldata evidence,
+        bytes[] calldata signatures,
+        ICoverageEvidenceVerifier verifier,
+        bool emergency
+    ) private {
+        Covenant storage covenant = covenants[evidence.covenantId];
+        if (covenant.state != CovenantState.Active) revert CovenantNotActive();
+        if (block.timestamp <= covenant.deadline || evidence.observedAt <= covenant.deadline) {
+            revert DeadlineNotElapsed();
+        }
+        if (evidence.observedAt > block.timestamp || evidence.evidenceHash == bytes32(0)) revert InvalidCovenant();
+        bytes32 digest = _consumeEvidence(
+            verifier, BREACH_ACTION, hashBreachEvidence(evidence), signatures, emergency, evidence.covenantId
+        );
+        covenant.state = CovenantState.PayoutDue;
+        covenant.payoutDueAt = evidence.observedAt;
+        covenant.breachEvidenceHash = evidence.evidenceHash;
+        emit CovenantPayoutDue(evidence.covenantId, evidence.observedAt, evidence.evidenceHash, digest);
+    }
+
+    function _settleNetLoss(
+        SettlementEvidence calldata evidence,
+        bytes[] calldata signatures,
+        ICoverageEvidenceVerifier verifier,
+        bool emergency
+    ) private returns (uint256 payoutAtomic) {
         Covenant storage covenant = covenants[evidence.covenantId];
         if (covenant.state != CovenantState.PayoutDue) revert CovenantNotActive();
         if (evidence.recoveryEvidenceHash == bytes32(0)) revert RecoveryEvidenceRequired();
+        if (!evidence.recoveryFinalized) revert RecoveryNotFinal();
         if (evidence.observedAt < covenant.payoutDueAt || evidence.observedAt > block.timestamp) {
             revert InvalidCovenant();
         }
-        bytes32 digest = _consumeEvidence(SETTLEMENT_ACTION, hashSettlementEvidence(evidence), signatures);
+        if (block.timestamp > uint256(evidence.observedAt) + SETTLEMENT_EVIDENCE_MAX_AGE) revert EvidenceStale();
+        if (!emergency && block.timestamp <= uint256(covenant.payoutDueAt) + SETTLEMENT_CHALLENGE_PERIOD) {
+            revert SettlementChallengeActive();
+        }
+        bytes32 digest = _consumeEvidence(
+            verifier, SETTLEMENT_ACTION, hashSettlementEvidence(evidence), signatures, emergency, evidence.covenantId
+        );
         covenant.recoveryEvidenceHash = evidence.recoveryEvidenceHash;
+        covenant.recoveryObservedAt = evidence.observedAt;
+        covenant.recoveryFinalized = true;
 
         uint256 recovered = uint256(evidence.escrowRefundAtomic) + uint256(evidence.otherRecoveryAtomic);
         if (covenant.payoutBasis == 1) {
@@ -380,10 +524,31 @@ contract CoverageManager {
             payoutAtomic,
             evidence.escrowRefundAtomic,
             evidence.otherRecoveryAtomic,
+            evidence.observedAt,
+            evidence.recoveryFinalized,
             evidence.recoveryEvidenceHash,
             digest,
             covenant.state
         );
+    }
+
+    function _requireEmergencyReleaseDelay(Covenant storage covenant) private view {
+        if (covenant.state != CovenantState.Active && covenant.state != CovenantState.PayoutDue) {
+            revert CovenantNotActive();
+        }
+        if (covenant.deadline == 0 || block.timestamp <= uint256(covenant.deadline) + EMERGENCY_EVIDENCE_DELAY) {
+            revert EmergencyResolutionNotReady();
+        }
+    }
+
+    function _requireEmergencyDelay(Covenant storage covenant, CovenantState requiredState, uint64 anchor)
+        private
+        view
+    {
+        if (covenant.state != requiredState) revert CovenantNotActive();
+        if (anchor == 0 || block.timestamp <= uint256(anchor) + EMERGENCY_EVIDENCE_DELAY) {
+            revert EmergencyResolutionNotReady();
+        }
     }
 
     function _validateIssueInput(IssueEvidence calldata evidence) private view {
@@ -437,6 +602,8 @@ contract CoverageManager {
             deadline: deadline,
             enrollmentExpiresAt: evidence.enrollmentExpiresAt,
             payoutDueAt: 0,
+            completedAt: 0,
+            recoveryObservedAt: 0,
             slaSeconds: slaSeconds,
             payoutBasis: payoutBasis,
             clockMode: clockMode,
@@ -444,7 +611,8 @@ contract CoverageManager {
             payoutAtomic: 0,
             acceptanceEvidenceHash: evidence.acceptanceEvidenceHash,
             breachEvidenceHash: bytes32(0),
-            recoveryEvidenceHash: bytes32(0)
+            recoveryEvidenceHash: bytes32(0),
+            recoveryFinalized: false
         });
     }
 
@@ -466,12 +634,32 @@ contract CoverageManager {
         );
     }
 
-    function _consumeEvidence(bytes32 action, bytes32 payloadHash, bytes[] calldata signatures)
-        private
-        returns (bytes32 digest)
-    {
-        digest = evidenceVerifier.verify(action, payloadHash, signatures);
+    function _consumeEvidence(
+        ICoverageEvidenceVerifier verifier,
+        bytes32 action,
+        bytes32 payloadHash,
+        bytes[] calldata signatures,
+        bool emergency,
+        bytes32 covenantId_
+    ) private returns (bytes32 digest) {
+        digest = verifier.verify(action, payloadHash, signatures);
         if (consumedEvidenceDigest[digest]) revert EvidenceAlreadyConsumed();
         consumedEvidenceDigest[digest] = true;
+        if (emergency) emit EmergencyEvidenceUsed(covenantId_, action, address(verifier), digest);
+    }
+
+    function _validateEvidenceTopology() private view {
+        uint256 primaryCount = evidenceVerifier.signerCount();
+        uint256 recoveryCount = recoveryEvidenceVerifier.signerCount();
+        if (
+            primaryCount < MIN_EVIDENCE_SIGNERS || recoveryCount < MIN_EVIDENCE_SIGNERS
+                || evidenceVerifier.threshold() < MIN_EVIDENCE_THRESHOLD
+                || recoveryEvidenceVerifier.threshold() < MIN_EVIDENCE_THRESHOLD
+        ) revert EvidenceTopologyInvalid();
+        for (uint256 index; index < primaryCount; ++index) {
+            address signer = evidenceVerifier.signerAt(index);
+            if (signer == address(0)) revert EvidenceTopologyInvalid();
+            if (recoveryEvidenceVerifier.isSigner(signer)) revert EvidenceSignerOverlap();
+        }
     }
 }

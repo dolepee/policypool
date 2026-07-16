@@ -15,6 +15,8 @@ contract CoverageEvidenceVerifier {
     error InsufficientSignatures();
 
     uint256 public constant MAX_SIGNERS = 16;
+    uint256 public constant MIN_SIGNERS = 5;
+    uint256 public constant MIN_THRESHOLD = 3;
     uint256 private constant SECP256K1N_HALF = 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0;
     bytes32 private constant DOMAIN_TYPEHASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
@@ -32,7 +34,7 @@ contract CoverageEvidenceVerifier {
     constructor(address[] memory signers_, uint8 threshold_) {
         uint256 count = signers_.length;
         if (count > MAX_SIGNERS) revert TooManySigners();
-        if (threshold_ < 2 || threshold_ > count) revert InvalidThreshold();
+        if (count < MIN_SIGNERS || threshold_ < MIN_THRESHOLD || threshold_ > count) revert InvalidThreshold();
         for (uint256 index; index < count; ++index) {
             address signer = signers_[index];
             if (signer == address(0)) revert ZeroAddress();

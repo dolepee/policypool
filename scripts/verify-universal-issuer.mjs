@@ -14,6 +14,7 @@ const configuration = {
   ready: true,
   coverageManager: "0x4000000000000000000000000000000000000004",
   evidenceVerifier: "0x7000000000000000000000000000000000000007",
+  recoveryEvidenceVerifier: "0x8000000000000000000000000000000000000008",
 };
 const writes = [];
 const attestations = [];
@@ -40,6 +41,8 @@ const publicClient = {
       deadline: 3n,
       enrollmentExpiresAt: 4n,
       payoutDueAt: 5n,
+      completedAt: 0n,
+      recoveryObservedAt: 0n,
       slaSeconds: 300,
       payoutBasis: 1,
       clockMode: 1,
@@ -48,6 +51,7 @@ const publicClient = {
       acceptanceEvidenceHash: `0x${"04".repeat(32)}`,
       breachEvidenceHash: `0x${"00".repeat(32)}`,
       recoveryEvidenceHash: `0x${"00".repeat(32)}`,
+      recoveryFinalized: false,
     };
   },
 };
@@ -60,13 +64,14 @@ const walletClient = {
 const evidenceProvider = {
   async attest(request) {
     attestations.push(request);
-    return [`0x${"11".repeat(65)}`, `0x${"22".repeat(65)}`];
+    return [`0x${"11".repeat(65)}`, `0x${"22".repeat(65)}`, `0x${"33".repeat(65)}`];
   },
 };
 const issuer = createUniversalIssuer({
   configuration,
   account,
   evidenceProvider,
+  recoveryEvidenceProvider: evidenceProvider,
   publicClient,
   walletClient,
   now: () => Date.parse("2026-07-16T12:10:00.000Z"),
@@ -98,14 +103,15 @@ assert.equal(issued.covenantId, issuer.previewCovenantId({
 assert.equal(writes[0].request.functionName, "issue");
 assert.equal(writes[0].request.args[0].policyId, policyId);
 assert.equal(writes[0].request.args[0].coverageCapAtomic, 500000n);
-assert.equal(writes[0].request.args[1].length, 2);
+assert.equal(writes[0].request.args[1].length, 3);
 
 await issuer.startClock(issued.covenantId, "2026-07-16T12:00:10.000Z", `0x${"44".repeat(32)}`);
 await issuer.expireUnstarted(issued.covenantId);
 await issuer.markPayoutDue(issued.covenantId, `0x${"55".repeat(32)}`);
-await issuer.settleNetLoss(issued.covenantId, 400000n, 0n, `0x${"66".repeat(32)}`);
-await issuer.release(issued.covenantId, `0x${"77".repeat(32)}`);
+await issuer.settleNetLoss(issued.covenantId, 400000n, 0n, true, `0x${"66".repeat(32)}`);
+await issuer.release(issued.covenantId, "2026-07-16T12:09:00.000Z", `0x${"77".repeat(32)}`);
 assert.equal((await issuer.getCovenant(issued.covenantId)).state, 2);
+assert.equal((await issuer.getCovenant(issued.covenantId)).recoveryFinalized, false);
 assert.equal(attestations.length, 5);
 assert.deepEqual(attestations.map((item) => item.action), ["issue", "start_clock", "breach", "settlement", "release"]);
 for (const attestation of attestations) {

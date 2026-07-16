@@ -14,12 +14,12 @@ const calls = [];
 const client = createEvidenceAttestationClient({
   url: "https://evidence.example/attest",
   token: "test-token",
-  threshold: 2,
+  threshold: 3,
   fetchImpl: async (url, options) => {
     calls.push({ url, options, body: JSON.parse(options.body) });
     return new Response(JSON.stringify({
       digest,
-      signatures: [`0x${"22".repeat(65)}`, `0x${"33".repeat(65)}`],
+      signatures: [`0x${"22".repeat(65)}`, `0x${"33".repeat(65)}`, `0x${"44".repeat(65)}`],
     }), { status: 200, headers: { "content-type": "application/json" } });
   },
 });
@@ -31,7 +31,7 @@ const signatures = await client.attest({
   context: { acceptanceTxHash: `0x${"44".repeat(32)}` },
   domain,
 });
-assert.equal(signatures.length, 2);
+assert.equal(signatures.length, 3);
 assert.equal(calls[0].url, "https://evidence.example/attest");
 assert.equal(calls[0].options.headers.authorization, "Bearer test-token");
 assert.equal(calls[0].body.evidence.coverageCapAtomic, "500000");
@@ -41,10 +41,10 @@ assert.deepEqual(calls[0].body.domain, domain);
 const invalid = createEvidenceAttestationClient({
   url: "https://evidence.example/attest",
   token: "test-token",
-  threshold: 2,
+  threshold: 3,
   fetchImpl: async () => new Response(JSON.stringify({
     digest: `0x${"44".repeat(32)}`,
-    signatures: [`0x${"22".repeat(65)}`, `0x${"33".repeat(65)}`],
+    signatures: [`0x${"22".repeat(65)}`, `0x${"33".repeat(65)}`, `0x${"44".repeat(65)}`],
   }), { status: 200 }),
 });
 await assert.rejects(
@@ -53,7 +53,7 @@ await assert.rejects(
 );
 
 assert.throws(
-  () => createEvidenceAttestationClient({ url: "http://evidence.example", token: "test", threshold: 2 }),
+  () => createEvidenceAttestationClient({ url: "http://evidence.example", token: "test", threshold: 3 }),
   (error) => error instanceof EvidenceAttestationError && error.code === "evidence_attestation_url_invalid",
 );
 await assert.rejects(
@@ -65,11 +65,11 @@ await assert.rejects(
   (error) => error instanceof EvidenceAttestationError && error.code === "evidence_attestation_domain_invalid",
 );
 assert.throws(
-  () => createEvidenceAttestationClient({ url: "https://evidence.example", token: "", threshold: 2 }),
+  () => createEvidenceAttestationClient({ url: "https://evidence.example", token: "", threshold: 3 }),
   (error) => error instanceof EvidenceAttestationError && error.code === "evidence_attestation_token_missing",
 );
 assert.throws(
-  () => createEvidenceAttestationClient({ url: "https://evidence.example", token: "test", threshold: 1 }),
+  () => createEvidenceAttestationClient({ url: "https://evidence.example", token: "test", threshold: 2 }),
   (error) => error instanceof EvidenceAttestationError && error.code === "evidence_attestation_threshold_invalid",
 );
 

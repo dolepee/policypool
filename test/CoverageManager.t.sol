@@ -61,6 +61,19 @@ contract PassiveBondManager {
 
 contract StaticEvidenceVerifier {
     bytes32 internal constant DIGEST = keccak256("static-evidence-digest");
+    uint8 public immutable threshold;
+    address[] private signers;
+    mapping(address signer => bool authorized) public isSigner;
+
+    constructor(CoverageEvidenceVerifier source) {
+        threshold = source.threshold();
+        uint256 count = source.signerCount();
+        for (uint256 index; index < count; ++index) {
+            address signer = source.signerAt(index);
+            signers.push(signer);
+            isSigner[signer] = true;
+        }
+    }
 
     function verify(bytes32, bytes32, bytes[] calldata) external pure returns (bytes32) {
         return DIGEST;
@@ -68,6 +81,14 @@ contract StaticEvidenceVerifier {
 
     function attestationDigest(address, bytes32, bytes32) external pure returns (bytes32) {
         return DIGEST;
+    }
+
+    function signerCount() external view returns (uint256) {
+        return signers.length;
+    }
+
+    function signerAt(uint256 index) external view returns (address) {
+        return signers[index];
     }
 }
 
@@ -93,7 +114,9 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
         vault = new ProviderBondVault(address(asset), address(this), 8 days);
         identity = new MockAgentIdentityRegistry();
         registry = new AgentPolicyRegistry(address(identity), address(vault), address(this), 500_000, 7 days);
-        manager = new CoverageManager(address(registry), address(vault), address(evidenceVerifier));
+        manager = new CoverageManager(
+            address(registry), address(vault), address(evidenceVerifier), address(recoveryEvidenceVerifier)
+        );
         vault.initializeManager(address(manager));
 
         identity.setOwner(3808, provider);
@@ -113,7 +136,10 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
         _release(
             manager,
             CoverageManager.ReleaseEvidence({
-                covenantId: id, observedAt: uint64(block.timestamp), evidenceHash: keccak256("JOB_COMPLETED")
+                covenantId: id,
+                completedAt: uint64(block.timestamp),
+                observedAt: uint64(block.timestamp),
+                evidenceHash: keccak256("JOB_COMPLETED")
             })
         );
         assertEq(vault.availableBond(provider), 5_000_000);
@@ -200,8 +226,11 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
             escrowRefundAtomic: 500_000,
             otherRecoveryAtomic: 0,
             observedAt: uint64(block.timestamp),
+            recoveryFinalized: true,
             recoveryEvidenceHash: keccak256("FULL_REFUND")
         });
+        vm.warp(block.timestamp + manager.SETTLEMENT_CHALLENGE_PERIOD() + 1);
+        truthful.observedAt = uint64(block.timestamp);
         bytes[] memory signatures = _signatures(manager.settlementEvidenceDigest(truthful));
         CoverageManager.SettlementEvidence memory forged = truthful;
         forged.escrowRefundAtomic = 0;
@@ -224,8 +253,12 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
     function testManagerRejectsReentryFromImmutableBondDependency() public {
         ReentryPolicyRegistry reentryRegistry = new ReentryPolicyRegistry(provider);
         ReentryBondManager reentryVault = new ReentryBondManager();
-        CoverageManager reentryManager =
-            new CoverageManager(address(reentryRegistry), address(reentryVault), address(evidenceVerifier));
+        CoverageManager reentryManager = new CoverageManager(
+            address(reentryRegistry),
+            address(reentryVault),
+            address(evidenceVerifier),
+            address(recoveryEvidenceVerifier)
+        );
         reentryVault.setManager(reentryManager);
         CoverageManager.IssueEvidence memory evidence = CoverageManager.IssueEvidence({
             policyId: keccak256("reentry-policy"),
@@ -249,9 +282,11 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
     function testManagerRejectsReusedEvidenceDigestAcrossDifferentJobs() public {
         ReentryPolicyRegistry simpleRegistry = new ReentryPolicyRegistry(provider);
         PassiveBondManager simpleVault = new PassiveBondManager();
-        StaticEvidenceVerifier staticVerifier = new StaticEvidenceVerifier();
-        CoverageManager simpleManager =
-            new CoverageManager(address(simpleRegistry), address(simpleVault), address(staticVerifier));
+        StaticEvidenceVerifier staticVerifier = new StaticEvidenceVerifier(evidenceVerifier);
+        StaticEvidenceVerifier recoveryStaticVerifier = new StaticEvidenceVerifier(recoveryEvidenceVerifier);
+        CoverageManager simpleManager = new CoverageManager(
+            address(simpleRegistry), address(simpleVault), address(staticVerifier), address(recoveryStaticVerifier)
+        );
         CoverageManager.IssueEvidence memory first = CoverageManager.IssueEvidence({
             policyId: keccak256("static-policy"),
             observedFingerprint: FINGERPRINT,
@@ -379,8 +414,9 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
         bytes32 activeId = _issue(
             manager, _issueEvidence(policyId, FINGERPRINT, keccak256("release-branches"), buyer, 500_000, 500_000)
         );
-        CoverageManager.ReleaseEvidence memory releaseEvidence =
-            CoverageManager.ReleaseEvidence({covenantId: activeId, observedAt: 0, evidenceHash: keccak256("release")});
+        CoverageManager.ReleaseEvidence memory releaseEvidence = CoverageManager.ReleaseEvidence({
+            covenantId: activeId, completedAt: 0, observedAt: 0, evidenceHash: keccak256("release")
+        });
         vm.expectRevert(CoverageManager.InvalidCovenant.selector);
         manager.release(releaseEvidence, new bytes[](0));
         releaseEvidence.observedAt = uint64(block.timestamp + 1);
@@ -416,6 +452,7 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
             escrowRefundAtomic: 0,
             otherRecoveryAtomic: 0,
             observedAt: payoutDueAt - 1,
+            recoveryFinalized: true,
             recoveryEvidenceHash: keccak256("recovery")
         });
         vm.expectRevert(CoverageManager.InvalidCovenant.selector);
@@ -438,7 +475,9 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
             bytes32(0)
         );
         assertNotEq(
-            manager.hashReleaseEvidence(CoverageManager.ReleaseEvidence(JOB_ID, uint64(block.timestamp), FINGERPRINT)),
+            manager.hashReleaseEvidence(
+                CoverageManager.ReleaseEvidence(JOB_ID, uint64(block.timestamp), uint64(block.timestamp), FINGERPRINT)
+            ),
             bytes32(0)
         );
         assertNotEq(
@@ -447,7 +486,7 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
         );
         assertNotEq(
             manager.hashSettlementEvidence(
-                CoverageManager.SettlementEvidence(JOB_ID, 1, 2, uint64(block.timestamp), FINGERPRINT)
+                CoverageManager.SettlementEvidence(JOB_ID, 1, 2, uint64(block.timestamp), true, FINGERPRINT)
             ),
             bytes32(0)
         );
@@ -470,6 +509,7 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
             escrowRefundAtomic: 0,
             otherRecoveryAtomic: 0,
             observedAt: uint64(block.timestamp),
+            recoveryFinalized: true,
             recoveryEvidenceHash: bytes32(0)
         });
         vm.expectRevert(CoverageManager.RecoveryEvidenceRequired.selector);
@@ -558,6 +598,9 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
         internal
         returns (uint256)
     {
+        uint256 settlementOpensAt =
+            uint256(manager.getCovenant(id).payoutDueAt) + manager.SETTLEMENT_CHALLENGE_PERIOD() + 1;
+        if (block.timestamp < settlementOpensAt) vm.warp(settlementOpensAt);
         return _settle(
             manager,
             CoverageManager.SettlementEvidence({
@@ -565,6 +608,7 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
                 escrowRefundAtomic: refund,
                 otherRecoveryAtomic: recovery,
                 observedAt: uint64(block.timestamp),
+                recoveryFinalized: true,
                 recoveryEvidenceHash: evidenceHash
             })
         );

@@ -113,6 +113,24 @@ await ledger.transitionUniversal({
 }, ["pending_start"]);
 covenantStates.get(compensated.covenantId).state = 1;
 
+const correctedBreach = await seed({
+  id: "6",
+  state: "payout_due",
+  clockMode: "verified_acceptance",
+  deadline: "2026-07-16T12:59:00.000Z",
+  enrollmentClosedAt: "2026-07-16T12:55:00.000Z",
+  publicTaskReference: "405669",
+});
+tasks.set("405669", {
+  publicTaskId: "405669",
+  publicUrl: "https://www.okx.ai/tasks/405669",
+  jobId: correctedBreach.jobId,
+  status: 2,
+  submittedAt: "2026-07-16T12:58:30.000Z",
+  completedAt: null,
+  stale: false,
+});
+
 const issuer = {
   async getCovenant(covenantId) {
     const value = covenantStates.get(covenantId);
@@ -150,16 +168,17 @@ const reconciler = createUniversalReconciler({
 
 const result = await reconciler.reconcile();
 assert.equal(result.ok, true);
-assert.equal(result.checked, 5);
+assert.equal(result.checked, 6);
 assert.deepEqual(
   writes.map((write) => write.action).sort(),
-  ["expire", "payout_due", "release", "release", "release", "start"],
+  ["expire", "payout_due", "release", "release", "release", "release", "start"],
 );
 assert.equal((await ledger.get(relay.receiptId)).state, "released");
 assert.equal((await ledger.get(breach.receiptId)).state, "payout_due");
 assert.equal((await ledger.get(delivered.receiptId)).state, "released");
 assert.equal((await ledger.get(expired.receiptId)).state, "released");
 assert.equal(await ledger.get(compensated.receiptId), null);
+assert.equal((await ledger.get(correctedBreach.receiptId)).state, "released");
 
 const before = writes.length;
 const replay = await reconciler.reconcile();

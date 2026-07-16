@@ -18,7 +18,7 @@ Public enrollment remains blocked until:
 - no unresolved Critical or High source finding remains;
 - evidence signers are operated across genuinely independent failure domains;
 - a qualified independent human Solidity audit is complete;
-- a new six-contract stack is deployed flag-off and bytecode-verified;
+- a new seven-contract stack is deployed flag-off and bytecode-verified;
 - fresh house pilots prove release, full payout, and recovery-reduced payout.
 
 ## Scope
@@ -69,7 +69,7 @@ The original `CoverageManager` trusted one operator to supply every fact that de
 Source remediation:
 
 - removed manager ownership, operator storage, role updates, and `onlyOperator` execution;
-- added immutable `CoverageEvidenceVerifier` with a minimum 2-of-N threshold and a 16-signer cap;
+- added immutable primary and recovery `CoverageEvidenceVerifier` instances, each enforcing at least five signers and a threshold of three;
 - bound EIP-712 attestations to chain ID, verifier, destination manager, action, and exact payload;
 - required ordered, unique, authorized, low-`s` signatures and rejected malformed domains;
 - consumed each evidence digest once in the manager;
@@ -100,6 +100,47 @@ The original covenant ID included policy, job, and buyer but lacked permanent jo
 
 Regression: `testCannotCoverSameJobAcrossPolicyVersions`.
 
+### H-03: Stale settlement evidence could overpay after a later escrow refund
+
+Severity: High
+
+Status: Remediated in source, not deployed
+
+The first quorum design accepted any recovery observation at or after `payoutDueAt`, even if it was broadcast much later. A recovery snapshot truthfully showing zero refund could therefore be signed, followed by an out-of-band marketplace refund, followed by a stale full coverage payout.
+
+Source remediation:
+
+- `SettlementEvidence` signs an explicit `recoveryFinalized` flag and nonzero recovery-evidence hash;
+- settlement rejects nonterminal recovery and evidence observed more than ten minutes before execution;
+- the runtime refuses to request settlement signatures unless recovery is explicitly final;
+- settlement stores and emits the terminal recovery observation time and finality;
+- normal settlement cannot execute during the 24-hour provisional-breach challenge period.
+
+Residual: terminal marketplace recovery is verified by the evidence quorum rather than derived directly from an OKX settlement contract. Attesters must independently prove that no later escrow refund can occur.
+
+Regression proofs: `testStaleZeroRecoverySettlementCannotDoublePayAfterRefundWindow`, `testSettlementRequiresExplicitTerminalRecoveryAttestation`, and the full/partial recovery tests.
+
+### H-04: Primary quorum loss could strand provider bond
+
+Severity: High
+
+Status: Remediated for primary-quorum failure in source, not deployed
+
+The first quorum was immutable and every subjective terminal path depended on it. Loss of threshold availability could therefore leave an Active or PayoutDue covenant permanently locked.
+
+Source remediation:
+
+- a second immutable recovery verifier is wired into the manager;
+- each verifier enforces at least five signers and a threshold of three;
+- the manager constructor rejects every signer overlap between the primary and recovery sets;
+- the recovery quorum cannot release, mark breach, or settle until 30 days after the original covenant deadline;
+- primary signatures cannot authorize recovery actions because verifier address is part of the EIP-712 domain;
+- deployment and wiring scripts independently enforce and verify the disjoint topology.
+
+Residual: if both disjoint quorums lose threshold availability, a bond can still remain locked. There is intentionally no owner or provider-only reclaim because a deterministic unilateral recipient could defeat a valid unresolved buyer claim. External providers must receive this disclosure, and the qualified auditor must review the actual failure-domain topology.
+
+Regression proofs: `testRecoveryQuorumCannotActEarlyOrReusePrimarySignatures`, `testRecoveryQuorumCanFinishBreachAndTerminalSettlementAfterDelay`, and manager-construction overlap rejection.
+
 ### M-01: Vault owner could replace the manager
 
 Severity: Medium
@@ -128,6 +169,26 @@ The original manager relied on checks-effects-interactions, an immutable vault, 
 
 Regression: `testManagerRejectsReentryFromImmutableBondDependency`.
 
+### M-04: Release and breach ordering lacked an on-chain completion-time tiebreak
+
+Severity: Medium
+
+Status: Remediated in source, not deployed
+
+The first release evidence carried only an observation time. A post-deadline delivery could be released, and once breach evidence also existed the first transaction mined decided whether the provider bond returned or paid.
+
+Source remediation:
+
+- release evidence signs the authoritative completion time separately from observation time;
+- Active release requires `issuedAt <= completedAt <= deadline`;
+- the manager stores and emits `completedAt`;
+- breach is provisional for 24 hours, and a signed on-time completion can correct `PayoutDue` to `Released` during that period;
+- normal settlement is blocked until the challenge period closes.
+
+Residual: the quorum still determines whether the supplied completion timestamp is authoritative. A colluding threshold remains the oracle trust boundary.
+
+Regression proofs: `testLateCompletionCannotRaceAndBeatBreach`, `testOnTimeCompletionCanStillBeRelayedAfterDeadline`, `testOnTimeCompletionCanCorrectProvisionalBreachDuringChallenge`, and `testSettlementCannotBeatReleaseDuringChallengePeriod`.
+
 ### L-01: Relay signatures lacked deployment domain separation
 
 Severity: Low
@@ -140,9 +201,9 @@ Relay receipts now use EIP-712 and bind chain ID plus verifier address. Reusing 
 
 Severity: Operational deployment blocker; High if misconfigured
 
-Status: Open by design
+Status: Reduced by disjoint recovery quorum; oracle integrity remains open by design
 
-The source cryptographically requires a threshold, but security depends on the deployment placing signer keys in independent failure domains and requiring each signer to verify raw evidence. If one operator controls enough keys, the original H-01 risk reappears operationally. If too many signers are unavailable, subjective transitions halt.
+The source cryptographically requires a 3-of-5 primary quorum plus a signer-disjoint 3-of-5 recovery quorum. Security still depends on placing every key in an independent failure domain and requiring each signer to verify raw evidence. If one operator controls a threshold, the original H-01 risk reappears operationally. If the primary threshold is unavailable, recovery may act after 30 days; if both thresholds are unavailable, subjective transitions halt.
 
 Required before external bonds:
 
@@ -183,10 +244,11 @@ Tooling:
 
 Relevant static-analysis dispositions:
 
-- Slither analyzed 43 contracts with 101 detectors and returned 26 raw results. No manager/verifier custody bypass remained after the checks-effects-interactions cleanup.
+- Slither analyzed 43 contracts with 101 detectors and returned 29 raw results. No manager/verifier custody bypass remained after the checks-effects-interactions cleanup.
 - `ProviderBondVault.depositFor` is `nonReentrant`, verifies exact balance delta, and rejects false-return and fee-on-transfer assets. A malicious callback test confirms rollback.
 - Manager calls cross immutable verifier/vault dependencies. Every state-changing manager entry point is `nonReentrant`, manager state is written before the vault call, and dependency failure reverts the complete transaction.
 - Signature loops are bounded by `MAX_SIGNERS = 16`; ordering also prevents duplicate signer credit.
+- The manager's constructor-time signer-topology loop makes bounded calls to the two immutable verifiers. It is capped by the verifier's 16-signer maximum and fails deployment closed on a dependency revert, weak topology, or signer overlap.
 - Timestamp checks are intentional protocol inputs.
 - Low-level token calls support optional-return tokens and reject false returns, transfer failure, and balance-delta mismatch.
 - ECDSA recovery validates length, low `s`, recovery ID, nonzero signer, authorization, ordering, domain, and replay.
@@ -196,17 +258,17 @@ No production credential is intentionally tracked. The local dirty `lib/v4-core`
 
 ## Verification Results
 
-- clean `forge test --summary`: 75 passed, 0 failed
+- clean `forge test --summary`: 84 tests passed
 - `AgentPolicyRegistry` branch coverage: 100% (`23/23`)
 - `ProviderBondVault` branch coverage: 100% (`29/29`)
 - `CoverageEvidenceVerifier` branch coverage: 100% (`13/13`)
-- `CoverageManager` branch coverage: 96.30% (`26/27`)
+- `CoverageManager` branch coverage: 94.87% (`37/39`)
 - `OkxA2AClockAdapter` branch coverage: 100% (`6/6`)
 - `RelayReceiptVerifier` branch coverage: 100% (`8/8`)
 - `npm run agent:gate-v04`: pass
 - npm production vulnerabilities: 0
 
-The remaining manager branch is unreachable under `enrollmentWindowSeconds <= slaSeconds`: an acceptance-clock deadline cannot already be elapsed while its shorter enrollment window remains open.
+The two uncovered manager branches are defensive states excluded by construction: an acceptance-clock deadline cannot already be elapsed while its shorter enrollment window remains open under `enrollmentWindowSeconds <= slaSeconds`, and an `Active` or `PayoutDue` covenant cannot enter emergency resolution with an unset deadline.
 
 The complete JavaScript/runtime/release gate and final Slither rerun passed on the candidate worktree. They must be rerun after any reviewer-requested source change. These results do not turn this document into an independent audit.
 
@@ -214,7 +276,7 @@ The complete JavaScript/runtime/release gate and final Slither rerun passed on t
 
 Redeployment is required. The remediated manager constructor adds the evidence verifier, removes the operator model, changes every lifecycle ABI, and hardens relay domains. The old vault is permanently bound to its old manager, so the stack cannot be partially upgraded.
 
-The next deployment must create six contracts flag-off: vault, registry, evidence verifier, manager, A2A adapter, and relay verifier. It must then verify bytecode and immutable wiring before any pilot.
+The next deployment must create a seven-contract stack flag-off: vault, registry, primary evidence verifier, disjoint recovery evidence verifier, manager, A2A adapter, and relay verifier. It must then verify bytecode, both 3-of-5 signer sets, zero signer overlap, and immutable wiring before any pilot.
 
 No production endpoint, OKX listing, feature flag, scheduler, existing contract, or fund balance is changed by this source remediation.
 
@@ -227,5 +289,6 @@ Claude and the qualified independent auditor should attempt to disprove:
 3. that underlying evidence is recomputed rather than trusted from the relayer;
 4. that settlement recovery values and the fixed buyer cannot be substituted;
 5. that reentrancy or malicious immutable dependencies cannot create a partial lifecycle state;
-6. that the six-contract deployment and signer topology preserve the reviewed assumptions;
+6. that the seven-contract deployment and disjoint signer topology preserve the reviewed assumptions;
 7. that a fresh recovery-reduced pilot pays only net loss on X Layer.
+8. that stale recovery evidence, late completion, release-versus-breach ordering, and primary-quorum loss cannot recreate the hostile findings above.

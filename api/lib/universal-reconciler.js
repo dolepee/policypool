@@ -122,7 +122,9 @@ export function createUniversalReconciler({
     const covenantId = record.universalCovenant.covenantId;
     if (action === "release") {
       const reasonHash = evidenceHash({ action, receiptId: record.receiptId, ...details });
-      if (!dryRun) await issuer.release(covenantId, reasonHash, details);
+      const completedAt = details.deliveredAt || details.completedAt || details.resolvedAt;
+      if (!completedAt) throw new Error("release_completion_time_unavailable");
+      if (!dryRun) await issuer.release(covenantId, completedAt, reasonHash, details);
       const updated = transition(record, "released", details.reason, { ...details, reasonHash }, now());
       if (!dryRun) await ledger.transitionUniversal(updated, [record.state]);
       return { receiptId: record.receiptId, from: record.state, to: "released", reason: details.reason };
@@ -154,10 +156,15 @@ export function createUniversalReconciler({
             receiptId: original.receiptId,
             reason: original.compensation?.reason || "coverage_fee_not_settled",
           };
-          await issuer.release(covenantId, evidenceHash(compensationEvidence), {
+          await issuer.release(
+            covenantId,
+            original.compensation?.createdAt || new Date(now()).toISOString(),
+            evidenceHash(compensationEvidence),
+            {
             compensationEvidence,
             record: original,
-          });
+            },
+          );
         }
       } else if (![0, 3].includes(Number(onchain.state))) {
         throw new Error(`compensation_covenant_state_unsafe:${onchain.state}`);
@@ -176,7 +183,9 @@ export function createUniversalReconciler({
     const synced = await syncOnchain(original, { issuer, ledger, dryRun, now: now() });
     let record = synced.record;
     const changes = synced.change ? [synced.change] : [];
-    if (!["pending_start", "active"].includes(record.state)) return { changes, hold: "terminal_or_inactive" };
+    if (!["pending_start", "active", "payout_due"].includes(record.state)) {
+      return { changes, hold: "terminal_or_inactive" };
+    }
 
     if (record.state === "pending_start") {
       const relayReceipt = await store.getLatestRelayReceiptForJob(record.targetOrder.jobId);
@@ -252,6 +261,13 @@ export function createUniversalReconciler({
         deliveredAt: task.submittedAt || task.completedAt || null,
         source: task.publicUrl || "X Layer task escrow current status",
       };
+    }
+    if (record.state === "payout_due") {
+      if (observed.action === "release") {
+        changes.push(await apply(record, "release", { ...evidence, ...observed }, dryRun));
+        return { changes, hold: null };
+      }
+      return { changes, hold: "payout_due_challenge_or_terminal_settlement_pending" };
     }
     if (observed.action === "release" || observed.action === "mark_payout_due") {
       changes.push(await apply(record, observed.action, { ...evidence, ...observed }, dryRun));

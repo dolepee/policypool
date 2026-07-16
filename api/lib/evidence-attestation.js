@@ -58,7 +58,7 @@ export function createEvidenceAttestationClient({
   const authorization = String(token || "").trim();
   const required = Number(threshold);
   if (!authorization) throw new EvidenceAttestationError("evidence_attestation_token_missing");
-  if (!Number.isSafeInteger(required) || required < 2) {
+  if (!Number.isSafeInteger(required) || required < 3) {
     throw new EvidenceAttestationError("evidence_attestation_threshold_invalid");
   }
   if (typeof fetchImpl !== "function") throw new EvidenceAttestationError("evidence_attestation_fetch_unavailable");
