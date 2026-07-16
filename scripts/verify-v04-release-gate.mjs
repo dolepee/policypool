@@ -11,6 +11,10 @@ const [
   issuer,
   evidenceClient,
   relay,
+  providerRelay,
+  providerPolicyStore,
+  chain,
+  universalPolicy,
   enrollment,
   manifest,
   deployment,
@@ -29,6 +33,10 @@ const [
   read("api/lib/universal-issuer.js"),
   read("api/lib/evidence-attestation.js"),
   read("src/adapters/RelayReceiptVerifier.sol"),
+  read("api/lib/provider-relay.js"),
+  read("api/lib/provider-policy-store.js"),
+  read("api/lib/chain.js"),
+  read("api/lib/universal-policy.js"),
   read("api/lib/provider-enrollment.js"),
   read("api/universal-manifest.js"),
   read("script/DeployAgentCoverageV04.s.sol"),
@@ -87,6 +95,20 @@ assert.match(issuer, /recoveryFinalized !== true/);
 assert.match(issuer, /completedAt:\s*BigInt\(seconds\(completedAt/);
 assert.match(evidenceClient, /evidence_attestation_domain_invalid/);
 assert.match(relay, /EIP712Domain\(string name,string version,uint256 chainId,address verifyingContract\)/);
+assert.match(providerRelay, /lookup:\s*createPinnedLookup\(record\)/);
+assert.match(providerRelay, /servername:\s*endpoint\.hostname/);
+assert.match(providerRelay, /rejectUnauthorized:\s*true/);
+assert.match(providerRelay, /await chain\.verifyProviderPaymentAuthorization/);
+assert.match(providerRelay, /authorizationNonce:\s*authorization\.authorization\.nonce/);
+assert.match(providerRelay, /provider_payment_authorization_already_used/);
+assert.match(providerRelay, /source:\s*"policypool_relay_verified_x402_settlement"/);
+assert.doesNotMatch(providerRelay, /paymentHeaderPresent/);
+assert.match(providerPolicyStore, /reserveRelayExecution/);
+assert.match(providerPolicyStore, /commitRelayExecution/);
+assert.match(providerPolicyStore, /releaseRelayExecution/);
+assert.match(chain, /event AuthorizationUsed\(address indexed authorizer, bytes32 indexed nonce\)/);
+assert.match(chain, /verifyProviderPaymentAuthorization/);
+assert.match(universalPolicy, /servicePriceAtomic:\s*servicePriceAtomic\.toString\(\)/);
 assert.match(enrollment, /provider_premium_not_supported_v04/);
 assert.match(manifest, /sharedReserveForNewProviders:\s*false/);
 assert.match(manifest, /requires_live_quote_time_owner_fingerprint_policy_and_bond_revalidation/);
@@ -133,9 +155,13 @@ assert.match(documentation, /30-day delayed recovery quorum/);
 assert.match(securityNotes, /stale recovery observation/i);
 assert.match(securityNotes, /on-time completion/i);
 assert.match(securityNotes, /both evidence quorums/i);
+assert.match(securityNotes, /header presence could start an unpaid relay clock/i);
+assert.match(securityNotes, /DNS rebinding could bypass the provider relay SSRF check/i);
 assert.match(auditReport, /H-03: Stale settlement evidence could overpay after a later escrow refund/);
 assert.match(auditReport, /M-04: Release and breach ordering lacked an on-chain completion-time tiebreak/);
 assert.match(auditReport, /H-04: Primary quorum loss could strand provider bond/);
+assert.match(auditReport, /H-05: Header presence could start an unpaid relay clock/);
+assert.match(auditReport, /H-06: DNS rebinding could bypass the provider relay SSRF check/);
 assert.ok(
   vercel.routes.some((route) => route.src === "/providers/enroll" && route.dest === "/web/enroll.html"),
   "provider enrollment route must stay explicit",

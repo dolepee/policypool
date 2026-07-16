@@ -141,6 +141,42 @@ Residual: if both disjoint quorums lose threshold availability, a bond can still
 
 Regression proofs: `testRecoveryQuorumCannotActEarlyOrReusePrimarySignatures`, `testRecoveryQuorumCanFinishBreachAndTerminalSettlementAfterDelay`, and manager-construction overlap rejection.
 
+### H-05: Header presence could start an unpaid relay clock
+
+Severity: High / P1 runtime
+
+Status: Fixed in source, not deployed
+
+The provider relay previously treated any nonempty `payment-signature` or `x-payment` header followed by a non-402 upstream response as proof that the provider was funded. A fabricated header could therefore create a signed relay clock and feed later breach evidence without any provider payment.
+
+Source remediation:
+
+- exact x402 v2 requirements must match the live listed price, enrolled provider wallet, X Layer USD₮0 asset, and token EIP-712 domain;
+- the relay verifies the buyer's EIP-3009 authorization signature and its payee, value, validity window, and nonce before forwarding;
+- the provider's settlement response must identify a confirmed transaction containing the exact `Transfer` and matching `AuthorizationUsed` nonce;
+- the authorization ID and relay grant are independently reserved and consumed, preventing reuse under another grant;
+- a missing or invalid proof creates no clock and releases pending reservations for a safe retry.
+
+Regression: `npm run agent:verify-relay` rejects malformed headers, wrong requirements, wrong signers, missing settlement proof, and a settled authorization replayed with a fresh grant. It accepts only a signature-valid authorization bound to its on-chain settlement nonce.
+
+### H-06: DNS rebinding could bypass the provider relay SSRF check
+
+Severity: High / P1 runtime
+
+Status: Fixed in source, not deployed
+
+The relay resolved and screened an enrolled provider hostname, then passed the hostname to `fetch`, which could perform a second DNS lookup. A rebinding hostname could return a public address during validation and a private address during connection.
+
+Source remediation:
+
+- every DNS answer is screened and any private or special-use result fails the request;
+- the outbound HTTPS request uses a custom lookup pinned to one of the screened addresses;
+- the original hostname remains the TLS SNI, certificate-verification, and HTTP host identity;
+- redirects are rejected, so a provider cannot redirect the relay to an unvalidated destination;
+- response-size and timeout bounds still apply to the pinned request.
+
+Regression: the relay gate verifies the exact screened address set passed to transport, exercises the pinned lookup, and rejects private IPv4, IPv4-mapped IPv6, and multicast IPv6 destinations. The v0.4 release gate statically requires pinned lookup plus TLS hostname verification.
+
 ### M-01: Vault owner could replace the manager
 
 Severity: Medium

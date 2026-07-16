@@ -1,3 +1,4 @@
+import { authorizationTypes } from "@x402/evm";
 import {
   createPublicClient,
   decodeAbiParameters,
@@ -16,6 +17,9 @@ const ERC20_ABI = parseAbi([
   "function balanceOf(address account) view returns (uint256)",
 ]);
 const TRANSFER_EVENT = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
+const AUTHORIZATION_USED_EVENT = parseAbiItem(
+  "event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)",
+);
 const JOB_ABI = parseAbi([
   "function getJobStatus(bytes32 jobId) view returns (uint8)",
 ]);
@@ -305,12 +309,62 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
     });
   }
 
-  async function verifyTransfer({ txHash, from, to, amountAtomic }) {
+  async function verifyProviderPaymentAuthorization({
+    payer,
+    asset,
+    name,
+    version,
+    authorization,
+    signature,
+  }) {
+    let valid;
+    try {
+      valid = await publicClient.verifyTypedData({
+        address: getAddress(payer),
+        domain: {
+          name,
+          version,
+          chainId: XLAYER.id,
+          verifyingContract: getAddress(asset),
+        },
+        types: authorizationTypes,
+        primaryType: "TransferWithAuthorization",
+        message: {
+          from: getAddress(authorization.from),
+          to: getAddress(authorization.to),
+          value: BigInt(authorization.value),
+          validAfter: BigInt(authorization.validAfter),
+          validBefore: BigInt(authorization.validBefore),
+          nonce: authorization.nonce,
+        },
+        signature,
+      });
+    } catch {
+      valid = false;
+    }
+    if (!valid) throw new EvidenceError("provider_payment_signature_invalid");
+    return true;
+  }
+
+  async function verifyTransfer({
+    txHash,
+    from,
+    to,
+    amountAtomic,
+    asset = PAYMENT.asset,
+    authorizationNonce,
+  }) {
     if (!isBytes32(txHash)) throw new EvidenceError("invalid_transfer_tx_hash");
+    let expectedAsset;
+    try {
+      expectedAsset = getAddress(asset);
+    } catch {
+      throw new EvidenceError("invalid_transfer_asset");
+    }
     const receipt = await getReceipt(txHash);
     if (receipt.status !== "success") throw new EvidenceError("transfer_tx_reverted");
     const transfer = receipt.logs.find((log) => {
-      if (log.address.toLowerCase() !== PAYMENT.asset.toLowerCase()) return false;
+      if (log.address.toLowerCase() !== expectedAsset.toLowerCase()) return false;
       try {
         const decoded = decodeEventLog({ abi: [TRANSFER_EVENT], data: log.data, topics: log.topics });
         return decoded.eventName === "Transfer"
@@ -322,13 +376,32 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
       }
     });
     if (!transfer) throw new EvidenceError("verified_transfer_event_missing");
+    if (authorizationNonce) {
+      const authorizationUsed = receipt.logs.find((log) => {
+        if (log.address.toLowerCase() !== expectedAsset.toLowerCase()) return false;
+        try {
+          const decoded = decodeEventLog({
+            abi: [AUTHORIZATION_USED_EVENT],
+            data: log.data,
+            topics: log.topics,
+          });
+          return decoded.eventName === "AuthorizationUsed"
+            && decoded.args.authorizer.toLowerCase() === from.toLowerCase()
+            && decoded.args.nonce.toLowerCase() === authorizationNonce.toLowerCase();
+        } catch {
+          return false;
+        }
+      });
+      if (!authorizationUsed) throw new EvidenceError("provider_payment_authorization_event_missing");
+    }
     return {
       txHash,
       blockNumber: receipt.blockNumber.toString(),
-      asset: PAYMENT.asset,
+      asset: expectedAsset,
       from: getAddress(from),
       to: getAddress(to),
       amountAtomic: String(amountAtomic),
+      authorizationNonce: authorizationNonce || null,
     };
   }
 
@@ -336,11 +409,20 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
     getJobStatus,
     getReserveBalance,
     resolveTargetOrderEvidence,
+    verifyProviderPaymentAuthorization,
     verifySettlement: ({ txHash, payer, amountAtomic }) => verifyTransfer({
       txHash,
       from: payer,
       to: PAYMENT.payTo,
       amountAtomic,
+    }),
+    verifyProviderSettlement: ({ txHash, payer, payTo, asset, amountAtomic, authorizationNonce }) => verifyTransfer({
+      txHash,
+      from: payer,
+      to: payTo,
+      asset,
+      amountAtomic,
+      authorizationNonce,
     }),
     verifyPayout: ({ txHash, buyer, amountAtomic }) => verifyTransfer({
       txHash,

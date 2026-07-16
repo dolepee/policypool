@@ -38,7 +38,7 @@ This is a permissioned oracle model, not trustless marketplace verification. A c
 5. The manager enforces the provider-signed maximum cap and exact enrollment window; quorum evidence cannot widen either.
 6. A covenant cap cannot exceed the target-job value, provider-signed cap, configured global cap, or available provider bond.
 7. Shared-reserve exposure is disabled. New v0.4 covenants lock provider first-loss capital only.
-8. A paid relay grant is short-lived, bound to one covenant, job, buyer, agent, and service, and permits at most one paid provider execution.
+8. A paid relay grant is short-lived, bound to one covenant, job, buyer, agent, and service, and permits at most one paid provider execution. A relay clock starts only after the buyer's EIP-3009 authorization is signature-verified, the exact USD₮0 transfer and authorization nonce are proven in the settlement transaction, and that authorization is permanently consumed.
 9. Settlement failure cannot erase the on-chain lock. A durable `compensation_required` record remains until reconciliation releases it.
 10. Issuance, clock start, subjective release, breach, and settlement require threshold-attested evidence. The runtime relayer cannot perform any of them alone.
 11. A full marketplace refund cannot stack with a net-loss payout. Recovery amounts are part of the signed settlement payload.
@@ -47,6 +47,7 @@ This is a permissioned oracle model, not trustless marketplace verification. A c
 14. Net-loss settlement requires terminal recovery evidence observed within ten minutes of execution.
 15. Breach is provisional for a 24-hour challenge period. A quorum-attested completion at or before the original deadline can correct `PayoutDue` to `Released` before settlement.
 16. The primary and 30-day delayed recovery quorums each require at least 3-of-5 signers and share no signer address.
+17. A2MCP provider DNS is resolved once, every returned address must be public, and the outbound TLS connection is pinned to one of those checked addresses while preserving hostname and certificate verification.
 
 ## Contracts
 
@@ -88,7 +89,7 @@ This is a permissioned oracle model, not trustless marketplace verification. A c
 
 ### Clock adapters
 
-`OkxA2AClockAdapter` holds timing-ambiguous delivery statuses until historical delivery timing is available. `RelayReceiptVerifier` uses EIP-712 signatures bound to chain ID and verifier address; relay receipts alone cannot move bonds because the manager separately requires quorum evidence.
+`OkxA2AClockAdapter` holds timing-ambiguous delivery statuses until historical delivery timing is available. The A2MCP relay rejects redirects and private or special-use destinations, pins the checked IP at connection time, verifies the buyer's token-domain EIP-3009 signature, and proves the exact `Transfer` plus `AuthorizationUsed` nonce before creating a clock. `RelayReceiptVerifier` uses EIP-712 signatures bound to chain ID and verifier address; relay receipts alone cannot move bonds because the manager separately requires quorum evidence.
 
 The contracts are intentionally non-upgradeable. Security changes require a complete redeployment. A qualified independent human audit remains mandatory before third-party capital is accepted.
 
@@ -187,7 +188,7 @@ Production remains v0.3, `/api/manifest` remains the active contract, universal 
 
 ## Internal Audit Checkpoint
 
-The July 16 internal reviews and remediation are recorded in [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md). The original High single-operator finding is remediated in source. The later hostile review's stale-settlement, release-ordering, and quorum-loss findings are also remediated in source with terminal recovery plus 10-minute settlement-evidence freshness, a 24-hour challenge period with signed completion time, and a 30-day delayed recovery quorum. The candidate suite passes 85 Foundry tests.
+The July 16 internal reviews and remediation are recorded in [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md). The original High single-operator finding is remediated in source. The later hostile review's stale-settlement, release-ordering, and quorum-loss findings are also remediated in source with terminal recovery plus 10-minute settlement-evidence freshness, a 24-hour challenge period with signed completion time, and a 30-day delayed recovery quorum. GitHub Codex's runtime review then found and prompted remediation of unpaid header-only relay clocks and DNS rebinding between endpoint validation and connection. The candidate suite passes 85 Foundry tests, and the runtime relay gate covers the two additional findings.
 
 Core branch coverage:
 

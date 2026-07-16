@@ -10,6 +10,9 @@ function serviceKey(agentId, serviceId) {
   return `${normalizedId(agentId)}:${normalizedId(serviceId)}`;
 }
 
+const RELAY_GRANT_RESERVATION_TTL_SECONDS = 15 * 60;
+const RELAY_GRANT_CLAIM_TTL_SECONDS = 24 * 60 * 60;
+
 export class MemoryProviderPolicyStore {
   constructor() {
     this.policies = new Map();
@@ -19,6 +22,7 @@ export class MemoryProviderPolicyStore {
     this.relayReceipts = new Map();
     this.latestRelayByJob = new Map();
     this.relayGrantClaims = new Map();
+    this.relayPaymentClaims = new Map();
   }
 
   async savePolicy(input) {
@@ -86,10 +90,51 @@ export class MemoryProviderPolicyStore {
     return receiptId ? this.getRelayReceipt(receiptId) : null;
   }
 
-  async claimRelayGrant(grantId, requestId) {
-    const current = this.relayGrantClaims.get(String(grantId));
-    if (current) return false;
-    this.relayGrantClaims.set(String(grantId), requestId);
+  async reserveRelayExecution(grantId, paymentId, requestId) {
+    const grantKey = String(grantId);
+    const paymentKey = String(paymentId);
+    if (this.relayGrantClaims.has(grantKey)) return "grant_used";
+    if (this.relayPaymentClaims.has(paymentKey)) return "payment_used";
+    const pending = { requestId, state: "pending" };
+    this.relayGrantClaims.set(grantKey, pending);
+    this.relayPaymentClaims.set(paymentKey, pending);
+    return "reserved";
+  }
+
+  async commitRelayExecution(grantId, paymentId, requestId) {
+    const grantKey = String(grantId);
+    const paymentKey = String(paymentId);
+    const grant = this.relayGrantClaims.get(grantKey);
+    const payment = this.relayPaymentClaims.get(paymentKey);
+    if (
+      !grant
+      || !payment
+      || grant.requestId !== requestId
+      || payment.requestId !== requestId
+      || grant.state !== "pending"
+      || payment.state !== "pending"
+    ) return false;
+    const consumed = { requestId, state: "consumed" };
+    this.relayGrantClaims.set(grantKey, consumed);
+    this.relayPaymentClaims.set(paymentKey, consumed);
+    return true;
+  }
+
+  async releaseRelayExecution(grantId, paymentId, requestId) {
+    const grantKey = String(grantId);
+    const paymentKey = String(paymentId);
+    const grant = this.relayGrantClaims.get(grantKey);
+    const payment = this.relayPaymentClaims.get(paymentKey);
+    if (
+      !grant
+      || !payment
+      || grant.requestId !== requestId
+      || payment.requestId !== requestId
+      || grant.state !== "pending"
+      || payment.state !== "pending"
+    ) return false;
+    this.relayGrantClaims.delete(grantKey);
+    this.relayPaymentClaims.delete(paymentKey);
     return true;
   }
 }
@@ -184,10 +229,59 @@ export class RedisProviderPolicyStore {
     return receiptId ? this.getRelayReceipt(String(receiptId)) : null;
   }
 
-  async claimRelayGrant(grantId, requestId) {
-    const key = this.key("relay-grant", String(grantId));
-    const created = await this.redis.set(key, requestId, { nx: true, ex: 24 * 60 * 60 });
-    return created === "OK";
+  async reserveRelayExecution(grantId, paymentId, requestId) {
+    const grantKey = this.key("relay-grant", String(grantId));
+    const paymentKey = this.key("relay-payment", String(paymentId));
+    const result = await this.redis.eval(
+      `
+        if redis.call("EXISTS", KEYS[1]) == 1 then return 1 end
+        if redis.call("EXISTS", KEYS[2]) == 1 then return 2 end
+        redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
+        redis.call("SET", KEYS[2], ARGV[1], "EX", ARGV[2])
+        return 0
+      `,
+      [grantKey, paymentKey],
+      [`pending:${requestId}`, String(RELAY_GRANT_RESERVATION_TTL_SECONDS)],
+    );
+    if (Number(result) === 1) return "grant_used";
+    if (Number(result) === 2) return "payment_used";
+    return "reserved";
+  }
+
+  async commitRelayExecution(grantId, paymentId, requestId) {
+    const grantKey = this.key("relay-grant", String(grantId));
+    const paymentKey = this.key("relay-payment", String(paymentId));
+    const result = await this.redis.eval(
+      `
+        if redis.call("GET", KEYS[1]) == ARGV[1] and redis.call("GET", KEYS[2]) == ARGV[1] then
+          redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3])
+          redis.call("SET", KEYS[2], ARGV[2])
+          return 1
+        end
+        return 0
+      `,
+      [grantKey, paymentKey],
+      [`pending:${requestId}`, `consumed:${requestId}`, String(RELAY_GRANT_CLAIM_TTL_SECONDS)],
+    );
+    return Number(result) === 1;
+  }
+
+  async releaseRelayExecution(grantId, paymentId, requestId) {
+    const grantKey = this.key("relay-grant", String(grantId));
+    const paymentKey = this.key("relay-payment", String(paymentId));
+    const result = await this.redis.eval(
+      `
+        if redis.call("GET", KEYS[1]) == ARGV[1] and redis.call("GET", KEYS[2]) == ARGV[1] then
+          redis.call("DEL", KEYS[1])
+          redis.call("DEL", KEYS[2])
+          return 1
+        end
+        return 0
+      `,
+      [grantKey, paymentKey],
+      [`pending:${requestId}`],
+    );
+    return Number(result) === 1;
   }
 }
 

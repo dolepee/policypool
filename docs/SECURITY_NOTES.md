@@ -87,6 +87,25 @@ Third-party capital remains blocked until the remediated source receives indepen
 
 Residual: terminal recovery and completion time are facts attested by permissioned quorums, not facts derived directly from OKX contracts. Threshold collusion remains capable of false attestation. If both quorums become unavailable, no privileged reclaim path exists because any deterministic unilateral recipient would sacrifice either the buyer or provider.
 
+### Provider-relay payment and network findings remediated in source
+
+GitHub Codex found two High/P1 runtime paths after the Solidity review:
+
+- Header presence could start an unpaid relay clock. The relay treated any nonempty payment header followed by a non-402 provider response as funded, so a fabricated header could create clock evidence without a provider payment.
+- DNS rebinding could bypass the provider relay SSRF check. The relay validated one DNS lookup but let the later fetch resolve the hostname again, allowing the checked public address and connected private address to differ.
+
+Source remediation:
+
+- the relay decodes exact x402 v2 requirements and requires the live listed service price, enrolled provider wallet, X Layer USD₮0 asset, and authentic token domain;
+- the buyer's EIP-3009 authorization fields and signature are verified before forwarding;
+- a successful provider response must carry settlement metadata whose X Layer transaction proves both the exact USD₮0 `Transfer` and matching `AuthorizationUsed` nonce;
+- the signed authorization is permanently consumed, independently of the short-lived one-use relay grant, so an old payment cannot start another covenant clock;
+- missing or invalid settlement proof releases only the pending reservations and creates no clock;
+- all resolved provider addresses must be public, and the HTTPS connection uses a pinned checked address while preserving the original hostname for SNI, certificate verification, and `Host`;
+- redirects remain disabled and request, response, and timeout limits remain enforced.
+
+Regression: `npm run agent:verify-relay` rejects malformed headers, wrong amounts, wrong signers, absent settlement evidence, authorization replay under a fresh grant, private DNS, and unpinned connection metadata. It proves that only a signature-valid, nonce-bound, on-chain-verified provider payment creates a relay clock.
+
 ### Static analysis
 
 Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 29 raw results and no unclassified v0.4 manager/verifier custody bypass. Relevant warning dispositions are:

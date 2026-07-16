@@ -1,7 +1,8 @@
 import { createPublicClient, defineChain, http, parseAbi } from "viem";
-import { XLAYER } from "./config.js";
+import { PAYMENT, XLAYER } from "./config.js";
 import { fetchOkxAgentPage, findOkxAgentService } from "./okx-agent-page.js";
 import { universalConfiguration } from "./universal-config.js";
+import { parseUsdtAtomic } from "./utils.js";
 
 const REGISTRY_ABI = parseAbi([
   "function isCoverable(bytes32 policyId, bytes32 observedFingerprint) view returns (bool)",
@@ -71,6 +72,8 @@ export function createUniversalPolicyResolver({
     if (service.fingerprint.toLowerCase() !== record.serviceFingerprint.toLowerCase()) {
       throw new UniversalPolicyError("target_service_fingerprint_changed");
     }
+    const servicePriceAtomic = parseUsdtAtomic(service.price, PAYMENT.decimals);
+    if (servicePriceAtomic <= 0n) throw new UniversalPolicyError("target_service_price_invalid");
     const [coverable, availableBondAtomic] = await Promise.all([
       client.readContract({
         address: configuration.policyRegistry,
@@ -95,6 +98,8 @@ export function createUniversalPolicyResolver({
       serviceName: service.name,
       serviceType: service.serviceType,
       serviceEndpoint: service.endpoint,
+      servicePriceUSDT: service.price,
+      servicePriceAtomic: servicePriceAtomic.toString(),
       serviceFingerprint: service.fingerprint,
       publishedScope: [record.scope.deliveryPromise, record.scope.objectiveBreach],
       requiredInputs: [],
