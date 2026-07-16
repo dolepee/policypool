@@ -50,7 +50,7 @@ The original manager let one hot operator choose the job, buyer, acceptance, rel
 
 The remediated source removes the manager owner/operator role and introduces `CoverageEvidenceVerifier`:
 
-- issuance, relay-clock start, release, breach, and settlement require a minimum 3-of-5 EIP-712 evidence quorum;
+- issuance, relay-clock start, release, breach, and settlement require an exact 3-of-5 EIP-712 evidence quorum;
 - every signature is bound to chain ID, verifier, manager, action, and exact payload;
 - evidence digests are single-use;
 - signatures must be unique, authorized, and sorted by recovered address;
@@ -81,9 +81,9 @@ Third-party capital remains blocked until the remediated source receives indepen
 
 - A stale recovery observation can no longer be held and broadcast after a later marketplace refund. Settlement requires a signed terminal-recovery flag, a nonzero evidence hash, and an observation no more than ten minutes old.
 - Release binds the authoritative completion timestamp and rejects completion after the covenant deadline. The contract stores that timestamp for later inspection.
-- A breach is provisional for 24 hours. During that challenge period, quorum-attested proof of an on-time completion can move `PayoutDue` to `Released`; neither the primary nor emergency settlement path can win by transaction ordering alone.
+- A breach is provisional for 24 hours measured from the mined `PayoutDue` transition, not from a potentially held observation. During that challenge period, quorum-attested proof of an on-time completion can move `PayoutDue` to `Released`; neither the primary nor emergency settlement path can win by transaction ordering alone.
 - Loss of the primary quorum no longer makes resolution impossible by itself. A contract-enforced, signer-disjoint recovery quorum may release, breach, or settle after 30 days.
-- The manager constructor rejects fewer than five signers, thresholds below three, and any signer overlap between the primary and recovery quorums. Deployment scripts repeat these checks and the release gate verifies them.
+- The manager requires exactly five signers and threshold three in each verifier and rejects any signer overlap between the primary and recovery quorums. Deployment scripts repeat these checks, reject role reuse and noncanonical X Layer parameters before broadcast, and the release gate verifies them.
 
 Residual: terminal recovery and completion time are facts attested by permissioned quorums, not facts derived directly from OKX contracts. Threshold collusion remains capable of false attestation. If both quorums become unavailable, no privileged reclaim path exists because any deterministic unilateral recipient would sacrifice either the buyer or provider.
 
@@ -154,12 +154,12 @@ Every signed relay receipt now includes the grant's covenant ID. Its durable ato
 
 ### Static analysis
 
-Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 31 raw results and no unclassified v0.4 manager/verifier custody bypass. Relevant warning dispositions are:
+Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 33 raw results and no unclassified v0.4 manager/verifier custody bypass. Relevant warning dispositions are:
 
 - `ProviderBondVault.depositFor` performs an external token call before crediting the bond. The function is protected by its `nonReentrant` guard, requires the exact vault balance delta, and rejects false-return and fee-on-transfer assets. A malicious callback test confirms re-entry fails and the outer deposit rolls back.
 - `CoverageManager` calls immutable verifier and vault dependencies. Every state-changing entry point is `nonReentrant`, state is written before the vault call, and any dependency revert rolls back the full transaction.
 - `CoverageEvidenceVerifier` loops over at most 16 signatures and rejects duplicate, unordered, unauthorized, malformed, high-`s`, and cross-domain attestations.
-- `CoverageManager` validates primary/recovery signer separation with bounded constructor-time calls to immutable verifier contracts. The loop is capped by each verifier's 16-signer maximum, runs only during deployment, and fails deployment closed on any dependency revert or overlap.
+- `CoverageManager` validates exact 3-of-5 primary/recovery topology with bounded constructor-time calls to immutable verifier contracts. It fails deployment closed on any dependency revert, topology drift, or overlap.
 - Timestamp comparisons are intentional inputs to policy expiry, enrollment windows, withdrawal delay, SLA clocks, and objective breach eligibility. X Layer timestamp/sequencer integrity remains an external dependency.
 - Low-level token calls support both boolean-return and no-return ERC-20 implementations. False returns, transfer failure, fee-on-transfer behavior, zero amounts, and outbound-transfer rollback are covered by adversarial tests.
 - Inline assembly is limited to ECDSA recovery. Signature length, recovery ID, high-`s`, zero signer, wrong signer, ordering, threshold, expiry, nonce replay, and digest replay paths are covered.
@@ -169,16 +169,16 @@ Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 31 raw re
 
 ### Adversarial coverage gate
 
-The remediated custody/state-transition suite passes 88 Foundry tests and includes executable hostile regressions for stale settlement, terminal recovery, late completion, provisional-breach correction, primary and emergency challenge-period ordering, quorum separation, delayed recovery, primary and recovery-quorum expired-unused fee cancellation, and uncertain issuance reconciliation.
+The remediated custody/state-transition suite passes 90 Foundry tests and includes executable hostile regressions for stale settlement, held breach evidence, terminal recovery, late completion, provisional-breach correction, primary and emergency challenge-period ordering, quorum separation, delayed recovery, exact outbound token transfers, primary and recovery-quorum expired-unused fee cancellation, and uncertain issuance reconciliation.
 
 - `AgentPolicyRegistry`: `100%` (`23/23`);
-- `ProviderBondVault`: `100%` (`29/29`);
+- `ProviderBondVault`: `100%` (`30/30`);
 - `CoverageEvidenceVerifier`: `100%` (`13/13`);
-- `CoverageManager`: `94.87%` (`37/39`);
+- `CoverageManager`: `93.33%` (`42/45`);
 - `OkxA2AClockAdapter`: `100%` (`6/6`);
 - `RelayReceiptVerifier`: `100%` (`8/8`).
 
-The two uncovered manager branches are defensive states excluded by construction: an A2A deadline cannot already be elapsed while its shorter enrollment window remains open under `enrollmentWindowSeconds <= slaSeconds`, and an `Active` or `PayoutDue` covenant cannot enter emergency resolution with an unset deadline.
+The three reported uncovered manager branches are defensive paths: Foundry does not attribute the explicit reentrancy regression to the guard branch, an A2A deadline cannot already be elapsed while its shorter enrollment window remains open under `enrollmentWindowSeconds <= slaSeconds`, and an `Active` or `PayoutDue` covenant cannot enter emergency resolution with an unset deadline.
 
 These results verify the implemented source changes. They do not authorize public deposits, validate the old deployment, prove signer independence, or replace an independent audit.
 

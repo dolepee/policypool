@@ -236,6 +236,38 @@ contract V04AdversarialBranchesTest is CoverageEvidenceTestBase {
         assertEq(badVault.account(provider).queuedWithdrawal, 500_000);
     }
 
+    function testVaultRejectsTaxedOutboundWithdrawalAndSlash() public {
+        ConfigurableBondAsset taxedAsset = new ConfigurableBondAsset();
+        ProviderBondVault taxedVault = new ProviderBondVault(address(taxedAsset), address(this), 8 days);
+        taxedVault.initializeManager(address(this));
+        taxedAsset.mint(provider, 1_000_000);
+        vm.startPrank(provider);
+        taxedAsset.approve(address(taxedVault), type(uint256).max);
+        taxedVault.deposit(1_000_000);
+        taxedVault.requestWithdrawal(250_000);
+        vm.stopPrank();
+        vm.warp(block.timestamp + 8 days);
+        taxedAsset.configureTransfer(false, 1);
+
+        vm.prank(provider);
+        vm.expectRevert(ProviderBondVault.FeeOnTransferUnsupported.selector);
+        taxedVault.executeWithdrawal();
+        assertEq(taxedVault.account(provider).balance, 1_000_000);
+        assertEq(taxedVault.account(provider).queuedWithdrawal, 250_000);
+        assertEq(taxedAsset.balanceOf(provider), 0);
+
+        vm.prank(provider);
+        taxedVault.cancelWithdrawal();
+        bytes32 covenant = keccak256("taxed-outbound-covenant");
+        taxedVault.lock(covenant, provider, 500_000);
+        vm.expectRevert(ProviderBondVault.FeeOnTransferUnsupported.selector);
+        taxedVault.slash(covenant, buyer, 500_000);
+        (,, bool active) = taxedVault.covenantLocks(covenant);
+        assertTrue(active);
+        assertEq(taxedVault.account(provider).locked, 500_000);
+        assertEq(taxedAsset.balanceOf(buyer), 0);
+    }
+
     function testRegistryRejectsInvalidConstructionAndCapitalBounds() public {
         vm.expectRevert(AgentPolicyRegistry.ZeroAddress.selector);
         new AgentPolicyRegistry(address(0), address(vault), address(this), 500_000, 7 days);
@@ -378,6 +410,26 @@ contract V04AdversarialBranchesTest is CoverageEvidenceTestBase {
         vm.expectRevert(CoverageManager.EvidenceTopologyInvalid.selector);
         new CoverageManager(
             address(registry), address(vault), address(zeroSignerVerifier), address(recoveryEvidenceVerifier)
+        );
+
+        address[] memory tooManySigners = new address[](6);
+        for (uint256 index; index < tooManySigners.length; ++index) {
+            tooManySigners[index] = address(uint160(300 + index));
+        }
+        TopologyEvidenceVerifier oversizedVerifier = new TopologyEvidenceVerifier(tooManySigners, 3);
+        vm.expectRevert(CoverageManager.EvidenceTopologyInvalid.selector);
+        new CoverageManager(
+            address(registry), address(vault), address(oversizedVerifier), address(recoveryEvidenceVerifier)
+        );
+
+        address[] memory highThresholdSigners = new address[](5);
+        for (uint256 index; index < highThresholdSigners.length; ++index) {
+            highThresholdSigners[index] = address(uint160(400 + index));
+        }
+        TopologyEvidenceVerifier highThresholdVerifier = new TopologyEvidenceVerifier(highThresholdSigners, 4);
+        vm.expectRevert(CoverageManager.EvidenceTopologyInvalid.selector);
+        new CoverageManager(
+            address(registry), address(vault), address(highThresholdVerifier), address(recoveryEvidenceVerifier)
         );
         assertEq(address(manager.evidenceVerifier()), address(evidenceVerifier));
         assertEq(address(manager.recoveryEvidenceVerifier()), address(recoveryEvidenceVerifier));

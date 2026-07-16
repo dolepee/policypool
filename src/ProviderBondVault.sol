@@ -208,9 +208,18 @@ contract ProviderBondVault {
     }
 
     function _safeTransfer(address to, uint256 amount) private {
+        uint256 vaultBalanceBefore = asset.balanceOf(address(this));
+        uint256 recipientBalanceBefore = asset.balanceOf(to);
         (bool success, bytes memory result) =
             address(asset).call(abi.encodeWithSelector(IBondAsset.transfer.selector, to, amount));
         if (!success || (result.length != 0 && !abi.decode(result, (bool)))) revert TokenTransferFailed();
+        uint256 vaultBalanceAfter = asset.balanceOf(address(this));
+        uint256 recipientBalanceAfter = asset.balanceOf(to);
+        if (
+            vaultBalanceAfter > vaultBalanceBefore || vaultBalanceBefore - vaultBalanceAfter != amount
+                || recipientBalanceAfter < recipientBalanceBefore
+                || recipientBalanceAfter - recipientBalanceBefore != amount
+        ) revert FeeOnTransferUnsupported();
     }
 
     function _safeTransferFrom(address from, address to, uint256 amount) private {

@@ -262,6 +262,31 @@ contract V04FreshnessAndRecoveryTest is CoverageEvidenceTestBase {
         assertEq(uint256(manager.getCovenant(id).state), uint256(CoverageManager.CovenantState.Paid));
     }
 
+    function testHeldBreachEvidenceCannotConsumeChallengeWindow() public {
+        bytes32 id = _issueDefault();
+        uint64 deadline = manager.getCovenant(id).deadline;
+        vm.warp(uint256(deadline) + 1);
+
+        CoverageManager.BreachEvidence memory heldBreach = CoverageManager.BreachEvidence({
+            covenantId: id, observedAt: uint64(block.timestamp), evidenceHash: keccak256("HELD_VALID_BREACH")
+        });
+        bytes[] memory heldSignatures = _signatures(manager.breachEvidenceDigest(heldBreach));
+
+        vm.warp(block.timestamp + manager.SETTLEMENT_CHALLENGE_PERIOD() + 1);
+        manager.markPayoutDue(heldBreach, heldSignatures);
+        uint64 committedAt = uint64(block.timestamp);
+        assertEq(manager.getCovenant(id).payoutDueAt, committedAt);
+
+        CoverageManager.SettlementEvidence memory immediate = _settlement(id, 0, 0, true, "FRESH_TERMINAL_RECOVERY");
+        bytes[] memory immediateSignatures = _signatures(manager.settlementEvidenceDigest(immediate));
+        vm.expectRevert(CoverageManager.SettlementChallengeActive.selector);
+        manager.settleNetLoss(immediate, immediateSignatures);
+
+        vm.warp(uint256(committedAt) + manager.SETTLEMENT_CHALLENGE_PERIOD() + 1);
+        immediate.observedAt = uint64(block.timestamp);
+        assertEq(_settle(manager, immediate), 500_000);
+    }
+
     function _issueDefault() internal returns (bytes32 id) {
         bytes32 jobId = keccak256(abi.encode("freshness-job", ++jobNonce));
         CoverageManager.IssueEvidence memory evidence = CoverageManager.IssueEvidence({

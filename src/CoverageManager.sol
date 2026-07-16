@@ -60,8 +60,8 @@ contract CoverageManager {
     uint256 public constant MAX_FEE_AUTHORIZATION_WINDOW = 15 minutes;
     uint256 public constant SETTLEMENT_CHALLENGE_PERIOD = 24 hours;
     uint256 public constant EMERGENCY_EVIDENCE_DELAY = 30 days;
-    uint256 public constant MIN_EVIDENCE_SIGNERS = 5;
-    uint256 public constant MIN_EVIDENCE_THRESHOLD = 3;
+    uint256 public constant REQUIRED_EVIDENCE_SIGNERS = 5;
+    uint256 public constant REQUIRED_EVIDENCE_THRESHOLD = 3;
 
     bytes32 public constant ISSUE_ACTION = keccak256("POLICYPOOL_ISSUE");
     bytes32 public constant START_CLOCK_ACTION = keccak256("POLICYPOOL_START_CLOCK");
@@ -567,7 +567,10 @@ contract CoverageManager {
             verifier, BREACH_ACTION, hashBreachEvidence(evidence), signatures, emergency, evidence.covenantId
         );
         covenant.state = CovenantState.PayoutDue;
-        covenant.payoutDueAt = evidence.observedAt;
+        // The challenge must begin when the provisional breach is committed on chain.
+        // A relayer may hold valid evidence, so its older observation timestamp cannot
+        // be allowed to consume part or all of the provider's correction window.
+        covenant.payoutDueAt = uint64(block.timestamp);
         covenant.breachEvidenceHash = evidence.evidenceHash;
         emit CovenantPayoutDue(evidence.covenantId, evidence.observedAt, evidence.evidenceHash, digest);
     }
@@ -793,9 +796,9 @@ contract CoverageManager {
         uint256 primaryCount = evidenceVerifier.signerCount();
         uint256 recoveryCount = recoveryEvidenceVerifier.signerCount();
         if (
-            primaryCount < MIN_EVIDENCE_SIGNERS || recoveryCount < MIN_EVIDENCE_SIGNERS
-                || evidenceVerifier.threshold() < MIN_EVIDENCE_THRESHOLD
-                || recoveryEvidenceVerifier.threshold() < MIN_EVIDENCE_THRESHOLD
+            primaryCount != REQUIRED_EVIDENCE_SIGNERS || recoveryCount != REQUIRED_EVIDENCE_SIGNERS
+                || evidenceVerifier.threshold() != REQUIRED_EVIDENCE_THRESHOLD
+                || recoveryEvidenceVerifier.threshold() != REQUIRED_EVIDENCE_THRESHOLD
         ) revert EvidenceTopologyInvalid();
         for (uint256 index; index < primaryCount; ++index) {
             address signer = evidenceVerifier.signerAt(index);

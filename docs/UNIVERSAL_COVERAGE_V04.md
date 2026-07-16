@@ -18,7 +18,7 @@ The original manager gave one hot operator authority over the job, buyer, accept
 
 Every subjective lifecycle action now requires an immutable threshold evidence quorum:
 
-- Each `CoverageEvidenceVerifier` is contractually restricted to at least five signers and a 3-of-5 threshold.
+- The manager accepts exactly five signers and threshold three in each `CoverageEvidenceVerifier`.
 - The digest binds the current chain, verifier, destination manager, action, and exact payload.
 - The manager consumes each digest once and rejects replay.
 - Signatures must be unique and sorted by recovered signer address.
@@ -46,7 +46,7 @@ This is a permissioned oracle model, not trustless marketplace verification. A c
 13. Every state-changing manager entry point has an explicit reentrancy guard.
 14. Net-loss settlement requires terminal recovery evidence observed within ten minutes of execution.
 15. Breach is provisional for a 24-hour challenge period. A quorum-attested completion at or before the original deadline can correct `PayoutDue` to `Released` before settlement.
-16. The primary and 30-day delayed recovery quorums each require at least 3-of-5 signers and share no signer address.
+16. The primary and 30-day delayed recovery quorums each require exactly 3-of-5 signers and share no signer address.
 17. A2MCP provider DNS is resolved once, every returned address must be public, and the outbound TLS connection is pinned to one of those checked addresses while preserving hostname and certificate verification.
 
 ## Contracts
@@ -83,7 +83,7 @@ This is a permissioned oracle model, not trustless marketplace verification. A c
 - Allows permissionless execution only after valid quorum authorization.
 - Prevents duplicate job coverage and double recovery.
 - Stores the attested completion and terminal-recovery observation timestamps on chain.
-- Enforces completion at or before the covenant deadline, 10-minute settlement-evidence freshness, terminal recovery, and a 24-hour challenge period before either settlement path.
+- Enforces completion at or before the covenant deadline, 10-minute settlement-evidence freshness, terminal recovery, and a 24-hour challenge period measured from the mined provisional-breach transition before either settlement path.
 - Allows a completely disjoint recovery quorum to release or settle after a 30-day delay without giving an owner or relayer a custody bypass.
 - Keeps objective `expireUnstarted` permissionless after the on-chain enrollment deadline.
 
@@ -188,12 +188,12 @@ Production remains v0.3, `/api/manifest` remains the active contract, universal 
 
 ## Internal Audit Checkpoint
 
-The July 16 internal reviews and remediation are recorded in [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md). The original High single-operator finding is remediated in source. The later hostile review's stale-settlement, release-ordering, and quorum-loss findings are also remediated in source with terminal recovery plus 10-minute settlement-evidence freshness, a 24-hour challenge period with signed completion time, and a 30-day delayed recovery quorum. GitHub Codex's runtime reviews then prompted remediation of unpaid header-only relay clocks, DNS rebinding between endpoint validation and connection, provider-payment payer substitution, unpaid relay receipt pointer replacement, non-atomic paid-receipt persistence, expiring consumed grant claims, incomplete enrollment-confirmation binding, the missing payout-due settlement path, and post-deadline fee-failure bond lock. The candidate suite passes 88 Foundry tests; runtime gates now cover full on-chain enrollment-term binding, grant-buyer-bound paid relay proof with atomic durable reconciliation indexing, terminal settlement, challenge holds, uncertain issuance reconciliation, and primary plus recovery-quorum expired-unused fee cancellation.
+The July 16 internal reviews and remediation are recorded in [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md). The original High single-operator finding is remediated in source. The later hostile review's stale-settlement, release-ordering, and quorum-loss findings are also remediated in source with terminal recovery plus 10-minute settlement-evidence freshness, a 24-hour challenge period with signed completion time, and a 30-day delayed recovery quorum. GitHub Codex's runtime reviews then prompted remediation of unpaid header-only relay clocks, DNS rebinding between endpoint validation and connection, provider-payment payer substitution, unpaid relay receipt pointer replacement, non-atomic paid-receipt persistence, expiring consumed grant claims, incomplete enrollment-confirmation binding, the missing payout-due settlement path, and post-deadline fee-failure bond lock. The final internal pass additionally anchors the challenge to the mined breach transition, rejects outbound short transfers, and makes the canonical X Layer deployment plus exact 3-of-5 role topology fail before broadcast. The candidate suite passes 90 Foundry tests; runtime gates cover full on-chain enrollment-term binding, grant-buyer-bound paid relay proof with atomic durable reconciliation indexing, terminal settlement, challenge holds, uncertain issuance reconciliation, and primary plus recovery-quorum expired-unused fee cancellation.
 
 Core branch coverage:
 
 - `AgentPolicyRegistry`: `100%` (`23/23`)
-- `ProviderBondVault`: `100%` (`29/29`)
+- `ProviderBondVault`: `100%` (`30/30`)
 - `CoverageEvidenceVerifier`: `100%` (`13/13`)
 - `CoverageManager`: `93.33%` (`42/45`)
 - `OkxA2AClockAdapter`: `100%` (`6/6`)

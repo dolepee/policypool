@@ -336,6 +336,23 @@ Source remediation:
 
 Regression: `scripts/verify-universal-reconciler.mjs` creates a replacement pending covenant for the same job while only the old covenant receipt exists and proves the replacement remains `pending_start` with `relay_clock_not_started`.
 
+### H-16: Held breach evidence could consume the correction window
+
+Severity: High
+
+Status: Fixed in source, not deployed
+
+The first challenge implementation stored the signed breach observation time as `payoutDueAt`. A relayer could hold a valid breach quorum for 24 hours, submit it later, and immediately settle with fresh recovery evidence. That defeated the promised period in which an on-time completion can correct a provisional breach.
+
+Source remediation:
+
+- `payoutDueAt` is now the timestamp at which the breach transition is mined;
+- the signed observation time remains evidence of when the breach was observed but cannot age the on-chain challenge;
+- reconciliation reads the authoritative on-chain `payoutDueAt` before requesting settlement;
+- primary and recovery settlement both enforce the full 24 hours from that committed transition.
+
+Regression: `testHeldBreachEvidenceCannotConsumeChallengeWindow` holds otherwise-valid breach signatures beyond 24 hours, submits them, and proves immediate settlement still reverts until the newly committed challenge closes.
+
 ### M-01: Vault owner could replace the manager
 
 Severity: Medium
@@ -383,6 +400,36 @@ Source remediation:
 Residual: the quorum still determines whether the supplied completion timestamp is authoritative. A colluding threshold remains the oracle trust boundary.
 
 Regression proofs: `testLateCompletionCannotRaceAndBeatBreach`, `testOnTimeCompletionCanStillBeRelayedAfterDeadline`, `testOnTimeCompletionCanCorrectProvisionalBreachDuringChallenge`, and `testSettlementCannotBeatReleaseDuringChallengePeriod`.
+
+### M-05: Outbound short-transfer tokens could underpay withdrawals or slashes
+
+Severity: Medium
+
+Status: Fixed in source, not deployed
+
+Deposits already required the vault to receive the exact amount, but outbound withdrawal and slash calls trusted a successful ERC-20 return value. A taxed or otherwise short-transfer token could debit the provider's full internal balance while the provider or buyer received less.
+
+Every outbound transfer now verifies both exact vault debit and exact recipient credit. Any mismatch reverts the token transfer and all preceding vault accounting atomically.
+
+Regression: `testVaultRejectsTaxedOutboundWithdrawalAndSlash` proves both withdrawal and buyer slash roll back balances, queued withdrawal, and covenant lock when the token withholds one atomic unit.
+
+### M-06: Deployment checks allowed configuration drift and partial wiring
+
+Severity: Medium / operational deployment blocker
+
+Status: Fixed in source, not deployed
+
+The initial scripts verified core contract links but did not reject the wrong chain, canonical token, identity registry, task escrow, bond/SLA constants, role reuse, or a signer topology that differed from the documented exact 3-of-5 model. Constructor reverts could also occur after earlier deployment transactions had already landed.
+
+Source remediation:
+
+- the deployment script validates X Layer chain `196`, USD₮0, the canonical ERC-8004 registry, OKX task escrow, bond floor, SLA ceiling, exact disjoint 3-of-5 quorums, nonzero unique signers, and role separation before the first broadcast;
+- the cold owner is mandatory and cannot silently default to the deployer;
+- deployer, cold owner, relay signer, monitor, primary signers, and recovery signers cannot occupy conflicting ongoing roles;
+- the wire script independently reads every immutable link and parameter from chain before accepting ownership or setting the monitor;
+- both scripts compile under the normal and coverage compiler profiles.
+
+Residual: byte-level source verification and a read-only post-deployment state audit remain mandatory. Script success alone is not proof that an explorer or RPC endpoint serves the reviewed bytecode.
 
 ### L-01: Relay signatures lacked deployment domain separation
 
@@ -449,11 +496,12 @@ Tooling:
 
 Relevant static-analysis dispositions:
 
-- Slither analyzed 43 contracts with 101 detectors and returned 29 raw results. No manager/verifier custody bypass remained after the checks-effects-interactions cleanup.
+- Slither analyzed 43 contracts with 101 detectors and returned 33 raw results. No manager/verifier custody bypass remained after the checks-effects-interactions cleanup.
 - `ProviderBondVault.depositFor` is `nonReentrant`, verifies exact balance delta, and rejects false-return and fee-on-transfer assets. A malicious callback test confirms rollback.
+- Vault withdrawal and slash also verify the exact vault debit and recipient credit. Slither's balance-read/reentrancy warning is covered by the vault guard, exact post-call deltas, and rollback regressions.
 - Manager calls cross immutable verifier/vault dependencies. Every state-changing manager entry point is `nonReentrant`, manager state is written before the vault call, and dependency failure reverts the complete transaction.
 - Signature loops are bounded by `MAX_SIGNERS = 16`; ordering also prevents duplicate signer credit.
-- The manager's constructor-time signer-topology loop makes bounded calls to the two immutable verifiers. It is capped by the verifier's 16-signer maximum and fails deployment closed on a dependency revert, weak topology, or signer overlap.
+- The manager's constructor-time signer-topology loop makes bounded calls to the two immutable verifiers. The manager requires exactly five signers and threshold three for each verifier and fails deployment closed on a dependency revert, topology drift, or signer overlap.
 - Timestamp checks are intentional protocol inputs.
 - Low-level token calls support optional-return tokens and reject false returns, transfer failure, and balance-delta mismatch.
 - ECDSA recovery validates length, low `s`, recovery ID, nonzero signer, authorization, ordering, domain, and replay.
@@ -463,17 +511,19 @@ No production credential is intentionally tracked. The local dirty `lib/v4-core`
 
 ## Verification Results
 
-- clean `forge test --summary`: 87 tests passed
+- clean `forge test --summary`: 90 tests passed
 - `AgentPolicyRegistry` branch coverage: 100% (`23/23`)
-- `ProviderBondVault` branch coverage: 100% (`29/29`)
+- `ProviderBondVault` branch coverage: 100% (`30/30`)
 - `CoverageEvidenceVerifier` branch coverage: 100% (`13/13`)
-- `CoverageManager` branch coverage: 94.87% (`37/39`)
+- `CoverageManager` branch coverage: 93.33% (`42/45`)
 - `OkxA2AClockAdapter` branch coverage: 100% (`6/6`)
 - `RelayReceiptVerifier` branch coverage: 100% (`8/8`)
 - `npm run agent:gate-v04`: pass
 - npm production vulnerabilities: 0
+- no-broadcast X Layer deployment simulation with canonical parameters and exact disjoint 3-of-5 quorums: pass
+- negative deployment simulation with a 4-of-5 primary threshold: rejected before broadcast with `InvalidDeploymentConfiguration`
 
-The two uncovered manager branches are defensive states excluded by construction: an acceptance-clock deadline cannot already be elapsed while its shorter enrollment window remains open under `enrollmentWindowSeconds <= slaSeconds`, and an `Active` or `PayoutDue` covenant cannot enter emergency resolution with an unset deadline.
+The three reported uncovered manager branches are defensive paths: Foundry does not attribute the explicit reentrancy regression to the guard branch, an acceptance-clock deadline cannot already be elapsed while its shorter enrollment window remains open under `enrollmentWindowSeconds <= slaSeconds`, and an `Active` or `PayoutDue` covenant cannot enter emergency resolution with an unset deadline.
 
 The complete JavaScript/runtime/release gate and final Slither rerun passed on the candidate worktree. They must be rerun after any reviewer-requested source change. These results do not turn this document into an independent audit.
 
@@ -496,4 +546,5 @@ Claude and the qualified independent auditor should attempt to disprove:
 5. that reentrancy or malicious immutable dependencies cannot create a partial lifecycle state;
 6. that the seven-contract deployment and disjoint signer topology preserve the reviewed assumptions;
 7. that a fresh recovery-reduced pilot pays only net loss on X Layer.
-8. that stale recovery evidence, late completion, release-versus-breach ordering, and primary-quorum loss cannot recreate the hostile findings above.
+8. that stale or held breach and recovery evidence, late completion, release-versus-breach ordering, and primary-quorum loss cannot recreate the hostile findings above;
+9. that outbound token behavior and deployment configuration cannot silently weaken the reviewed custody or signer assumptions.

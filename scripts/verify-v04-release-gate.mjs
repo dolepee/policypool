@@ -75,6 +75,7 @@ assert.match(manager, /mapping\(bytes32 evidenceDigest => bool consumed\) public
 assert.match(manager, /function settleNetLoss[\s\S]*external[\s\S]*nonReentrant/);
 assert.match(manager, /SETTLEMENT_EVIDENCE_MAX_AGE = 10 minutes/);
 assert.match(manager, /SETTLEMENT_CHALLENGE_PERIOD = 24 hours/);
+assert.match(manager, /covenant\.payoutDueAt = uint64\(block\.timestamp\)/);
 assert.match(manager, /EMERGENCY_EVIDENCE_DELAY = 30 days/);
 assert.match(manager, /evidence\.recoveryFinalized/);
 assert.match(manager, /evidence\.completedAt > releaseDeadline/);
@@ -87,6 +88,8 @@ assert.match(manager, /coveredJobCovenant\[covenant\.jobId\] = bytes32\(0\)/);
 assert.match(manager, /CANCELLATION_EVIDENCE_MAX_AGE = 10 minutes/);
 assert.match(manager, /recoveryEvidenceVerifier\.isSigner\(signer\)/);
 assert.match(manager, /revert EvidenceSignerOverlap\(\)/);
+assert.match(manager, /primaryCount != REQUIRED_EVIDENCE_SIGNERS/);
+assert.match(manager, /evidenceVerifier\.threshold\(\) != REQUIRED_EVIDENCE_THRESHOLD/);
 assert.doesNotMatch(manager, /onlyOperator|setOperator|address public operator|address public owner/);
 assert.match(evidenceVerifier, /MIN_SIGNERS = 5/);
 assert.match(evidenceVerifier, /MIN_THRESHOLD = 3/);
@@ -95,6 +98,7 @@ assert.match(evidenceVerifier, /attestationDigest\(msg\.sender, action, payloadH
 assert.doesNotMatch(evidenceVerifier, /onlyOwner|setSigner|transferOwnership/);
 assert.match(vault, /function initializeManager\(address nextManager\) external onlyOwner/);
 assert.doesNotMatch(vault, /function setManager\(/);
+assert.match(vault, /recipientBalanceAfter - recipientBalanceBefore != amount/);
 assert.match(issuer, /createEvidenceAttestationClient/);
 assert.match(issuer, /POLICYPOOL_RELAYER_PRIVATE_KEY/);
 assert.doesNotMatch(issuer, /POLICYPOOL_MANAGER_PRIVATE_KEY/);
@@ -170,12 +174,30 @@ assert.ok(
     < deployment.indexOf("vault.transferOwnership(config.owner)"),
   "bond manager must be wired before optional owner handoff",
 );
-assert.match(wiring, /evidenceVerifier\.signerCount\(\) != evidenceSigners\.length/);
-assert.match(wiring, /evidenceVerifier\.signerAt\(index\) != evidenceSigners\[index\]/);
-assert.match(wiring, /recoveryEvidenceVerifier\.signerCount\(\) != recoveryEvidenceSigners\.length/);
-assert.match(wiring, /recoveryEvidenceSigners\[index\] == evidenceSigners\[primaryIndex\]/);
+assert.match(wiring, /deployed\.evidenceVerifier\.signerCount\(\) != roles\.evidenceSigners\.length/);
+assert.match(wiring, /deployed\.evidenceVerifier\.signerAt\(index\) != roles\.evidenceSigners\[index\]/);
+assert.match(
+  wiring,
+  /deployed\.recoveryEvidenceVerifier\.signerCount\(\) != roles\.recoveryEvidenceSigners\.length/,
+);
+assert.match(wiring, /roles\.recoveryEvidenceSigners\[index\] == roles\.evidenceSigners\[primaryIndex\]/);
 assert.match(deployment, /new CoverageEvidenceVerifier\(config\.recoveryEvidenceSigners/);
 assert.match(deployment, /_requireDisjointEvidenceQuorums/);
+assert.match(deployment, /block\.chainid != XLAYER_CHAIN_ID/);
+assert.match(deployment, /config\.identityRegistry != OKX_AGENT_IDENTITY_REGISTRY/);
+assert.match(deployment, /config\.paymentAsset != XLAYER_USDT0/);
+assert.match(deployment, /_requireRoleOutsideQuorums/);
+assert.match(deployment, /config\.evidenceSigners\.length != V04_EVIDENCE_SIGNER_COUNT/);
+assert.match(deployment, /config\.evidenceThreshold != V04_EVIDENCE_THRESHOLD/);
+assert.match(deployment, /config\.owner == deployer/);
+assert.match(deployment, /_validateEvidenceQuorum/);
+assert.match(wiring, /address\(deployed\.vault\.asset\(\)\) != XLAYER_USDT0/);
+assert.match(wiring, /address\(deployed\.registry\.identityRegistry\(\)\) != OKX_AGENT_IDENTITY_REGISTRY/);
+assert.match(wiring, /address\(deployed\.a2a\.taskEscrow\(\)\) != OKX_TASK_ESCROW/);
+assert.match(wiring, /_requireRoleSeparation/);
+assert.match(wiring, /monitor == address\(0\)/);
+assert.match(wiring, /roles\.evidenceSigners\.length != V04_EVIDENCE_SIGNER_COUNT/);
+assert.match(wiring, /roles\.evidenceThreshold != V04_EVIDENCE_THRESHOLD/);
 for (const line of [
   "POLICYPOOL_UNIVERSAL_ENABLED=false",
   "POLICYPOOL_SHARED_COVERAGE_ENABLED=false",
