@@ -150,6 +150,19 @@ Production deployment `dpl_6h8MXHN5oWfEr8JHdyARLhP1oudm` was aliased to `https:/
 
 This checkpoint does not satisfy the independent Solidity audit gate. Third-party bonds and public enrollment remain prohibited.
 
+## Controlled Mainnet Pilot
+
+The two-path house pilot completed on X Layer on 2026-07-16. It used only PolicyPool-controlled wallets and `0.5 USD₮0` of provider bond, is labeled controlled and house-funded, and is excluded from revenue, external usage, and organic traction claims.
+
+- Policy: `0x1f9b305f5f5f8e3da7d1604841ac4504c147b0052c0f96c347eec1efc8619e31`.
+- Release covenant: `0x0720c4daefa787dc3760a430e25d0b8d04b5e9348e078a98b748ada1da71c9b9`; final on-chain state `Released` (`3`); the full bond lock returned to available capacity.
+- Breach covenant: `0x3866b4dd515c77c02f253e9c47811b66bc845d2da3dc987258ddce4c30efe898`; final on-chain state `Paid` (`5`); payout `500000` atomic USD₮0.
+- Net-loss settlement: `0x96590b055dc400c57b8087e220e08f292741563d631c68b6ba3cc9a0d00c0af0`; the receipt is successful and its ERC-20 transfer moves exactly `0.5 USD₮0` from the bond vault to the separate controlled buyer.
+- Recovery inputs were zero escrow refund, zero other recovery, and a nonzero evidence hash. No shared reserve was used.
+- After settlement the provider bond is zero and the policy fails closed as not coverable.
+
+Do not rerun or fund this pilot again. The next release gate is independent Solidity review, followed by a separately authorized bounded rollout; the completed house proof does not authorize third-party capital.
+
 ## Release Gates
 
 ```bash
