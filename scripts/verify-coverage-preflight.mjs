@@ -178,6 +178,56 @@ assert.equal(eligible.json().paidRequest.bodyMayBeOmittedOnReplay, true);
 assert.match(eligible.json().quote.token, /^ppq_[a-f0-9]{32}\.[a-f0-9]{64}$/);
 assert.equal(eligible.json().coverage.enrollmentClosesAt, "2026-07-11T14:01:00.000Z");
 
+const universalPolicy = {
+  agentId: "3465",
+  agentName: "External Provider",
+  providerWallet: "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7",
+  serviceIds: ["30019"],
+  serviceName: "Market Claim Evidence Pack",
+  serviceType: "A2A",
+  publishedScope: ["Verify a public token market claim with evidence and source links."],
+  allowedKeywords: ["verify", "public", "token", "market", "claim", "evidence", "source"],
+  slaSeconds: 300,
+  enrollmentWindowSeconds: 120,
+  maxCoverageAtomic: "500000",
+  providerAvailableBondAtomic: "1000000",
+  payoutBasis: "provider_bonded_sla_credit",
+  clockMode: "verified_acceptance",
+  coverageStatus: "active",
+  policyHash: `onchain:0x${"8".repeat(64)}`,
+  onchainPolicyId: `0x${"8".repeat(64)}`,
+  exclusions: [],
+};
+const universalChain = {
+  ...chain,
+  async getReserveBalance() {
+    throw new Error("shared reserve must not be read for provider-funded coverage");
+  },
+};
+const universal = await callHandler(createCoveragePreflightHandler({
+  chain: universalChain,
+  ledger,
+  policyResolver: { async resolve() { return { policy: universalPolicy, source: "v0.4_provider_enrollment_registry" }; } },
+  taskFetcher: async () => task,
+  now: () => Date.parse("2026-07-11T10:02:00.000Z"),
+  quoteSecret: QUOTE_SECRET,
+}), {
+  method: "POST",
+  headers: { host: "policypool.test", "x-forwarded-for": "203.0.113.45" },
+  body: {
+    targetAgent: "3465",
+    targetServiceId: "30019",
+    taskReference: task.publicUrl,
+    requestedCoverageUSDT: "0.5",
+  },
+});
+assert.equal(universal.statusCode, 200);
+assert.equal(universal.json().version, "0.4.0");
+assert.equal(universal.json().coverage.fundingSource, "provider_first_loss_bond");
+assert.equal(universal.json().coverage.providerBondAvailableUSDT, "1");
+assert.equal(universal.json().coverage.sharedReserveUsed, false);
+assert.equal(universal.json().coverage.reserveBalanceUSDT, null);
+
 const nestedEligible = await callHandler(handler, {
   method: "POST",
   headers: { host: "policypool.test" },

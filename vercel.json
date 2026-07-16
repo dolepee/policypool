@@ -44,6 +44,10 @@
       "dest": "/web/providers.html"
     },
     {
+      "src": "/providers/enroll",
+      "dest": "/web/enroll.html"
+    },
+    {
       "src": "/hook",
       "dest": "/web/index.html"
     },

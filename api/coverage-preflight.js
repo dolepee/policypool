@@ -8,15 +8,18 @@ import {
   QuoteValidationError,
 } from "./lib/quote.js";
 import {
-  findPublishedPolicy,
   listPublishedPolicies,
   policyCoverageCapAtomic,
 } from "./lib/policy-registry.js";
+import { createCoveragePolicyResolver } from "./lib/policy-resolution.js";
+import { UniversalPolicyError } from "./lib/universal-policy.js";
+import { createRateLimiter, enforceRateLimit } from "./lib/rate-limit.js";
 import { evaluateGuard } from "./covered-job-receipt.js";
 import { clean, formatUsdtAtomic, header, parseUsdtAtomic, sendJson } from "./lib/utils.js";
 
 const INPUT_ALIASES = {
   targetAgent: ["targetAgent", "agent", "agentId", "serviceId", "targetService"],
+  targetServiceId: ["targetServiceId", "listedServiceId"],
   taskReference: ["taskReference", "taskUrl", "okxTask", "publicTaskId", "jobUrl"],
   requestedCoverageUSDT: ["requestedCoverageUSDT", "coverageCapUSDT", "capUSDT", "coverageAmountUSDT"],
 };
@@ -74,6 +77,7 @@ function readInput(req) {
   const requested = readAlias(INPUT_ALIASES.requestedCoverageUSDT, 40) || "1";
   return {
     targetAgent: readAlias(INPUT_ALIASES.targetAgent),
+    targetServiceId: readAlias(INPUT_ALIASES.targetServiceId, 40),
     taskReference: readAlias(INPUT_ALIASES.taskReference, 300),
     requestedCoverageAtomic: parseUsdtAtomic(requested, PAYMENT.decimals),
   };
@@ -115,7 +119,9 @@ export function createCoveragePreflightHandler(dependencies = {}) {
   let runtimeChain = dependencies.chain;
   let runtimeLedger = dependencies.ledger;
   let runtimeQuoteService = dependencies.quoteService;
+  let runtimePolicyResolver = dependencies.policyResolver;
   const taskFetcher = dependencies.taskFetcher || fetchOkxTaskPage;
+  const limiter = dependencies.limiter || createRateLimiter();
   const now = dependencies.now || (() => Date.now());
   const getChain = () => (runtimeChain ||= createChainService());
   const getLedger = () => (runtimeLedger ||= createLedger());
@@ -126,6 +132,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
     randomId: dependencies.quoteRandomId,
     ttlSeconds: dependencies.quoteTtlSeconds,
   }));
+  const getPolicyResolver = () => (runtimePolicyResolver ||= createCoveragePolicyResolver(dependencies));
 
   return async function handler(req, res) {
     if (req.method === "OPTIONS") return sendJson(res, 200, { ok: true });
@@ -139,6 +146,14 @@ export function createCoveragePreflightHandler(dependencies = {}) {
     if (req.method !== "GET" && req.method !== "POST") {
       return sendJson(res, 405, { ok: false, error: "method_not_allowed", charged: false });
     }
+
+    const limited = await enforceRateLimit(req, res, limiter, {
+      scope: "coverage-preflight",
+      subject: req.body?.targetAgent || req.query?.targetAgent || "",
+      limit: 30,
+      windowSeconds: 60,
+    });
+    if (limited) return sendJson(res, 429, limited);
 
     const input = readInput(req);
     if (!input.targetAgent && !input.taskReference) {
@@ -166,7 +181,19 @@ export function createCoveragePreflightHandler(dependencies = {}) {
       return decline(res, "requested_coverage_below_minimum");
     }
 
-    const policy = findPublishedPolicy(input.targetAgent);
+    let policy;
+    let policySource;
+    try {
+      ({ policy, source: policySource } = await getPolicyResolver().resolve(
+        input.targetAgent,
+        input.targetServiceId,
+      ));
+    } catch (error) {
+      if (error instanceof UniversalPolicyError) {
+        return sendJson(res, error.status, { ok: false, error: error.code, charged: false });
+      }
+      return sendJson(res, 503, { ok: false, error: "coverage_policy_resolution_failed", charged: false });
+    }
     if (!policy) {
       return sendJson(res, 422, {
         ok: false,
@@ -233,34 +260,45 @@ export function createCoveragePreflightHandler(dependencies = {}) {
       targetAcceptanceTxHash: evidence.acceptanceTxHash,
       jobDescription: task.description,
       requestedCoverageAtomic: input.requestedCoverageAtomic,
+      targetServiceId: input.targetServiceId,
+      targetTaskReference: task.publicTaskId,
     };
     const guard = evaluateGuard(guardInput, policy);
     if (guard.verdict !== "ALLOW") return decline(res, guard.reason, { task, targetOrder });
 
-    let reserveBalanceAtomic;
-    let liabilityStats;
-    try {
-      [reserveBalanceAtomic, liabilityStats] = await Promise.all([
-        getChain().getReserveBalance(),
-        getLedger().stats(),
-      ]);
-    } catch {
-      return sendJson(res, 503, { ok: false, error: "coverage_capacity_unavailable", charged: false });
+    const providerFunded = Boolean(policy.onchainPolicyId);
+    let reserveBalanceAtomic = 0n;
+    let committedAtomic = 0n;
+    let availableAtomic = 0n;
+    if (!providerFunded) {
+      try {
+        const [reserveBalance, liabilityStats] = await Promise.all([
+          getChain().getReserveBalance(),
+          getLedger().stats(),
+        ]);
+        reserveBalanceAtomic = reserveBalance;
+        committedAtomic = BigInt(liabilityStats.committedAtomic);
+        availableAtomic = reserveBalanceAtomic > committedAtomic
+          ? reserveBalanceAtomic - committedAtomic
+          : 0n;
+      } catch {
+        return sendJson(res, 503, { ok: false, error: "coverage_capacity_unavailable", charged: false });
+      }
     }
-
-    const committedAtomic = BigInt(liabilityStats.committedAtomic);
-    const availableAtomic = reserveBalanceAtomic > committedAtomic
-      ? reserveBalanceAtomic - committedAtomic
-      : 0n;
+    const policyCapacityAtomic = providerFunded
+      ? BigInt(policy.providerAvailableBondAtomic || 0)
+      : availableAtomic;
     const coverageCapAtomic = minBigInt(
       input.requestedCoverageAtomic,
       BigInt(targetOrder.amountAtomic),
       policyCoverageCapAtomic(policy, COVERAGE.maxAtomic),
       BigInt(COVERAGE.maxAtomic),
-      availableAtomic,
+      policyCapacityAtomic,
     );
     if (coverageCapAtomic < BigInt(COVERAGE.minAtomic)) {
-      return decline(res, "insufficient_uncommitted_reserve", {
+      return decline(res, policy.providerAvailableBondAtomic
+        ? "insufficient_provider_bond_capacity"
+        : "insufficient_uncommitted_reserve", {
         task,
         reserve: {
           balanceUSDT: formatUsdtAtomic(reserveBalanceAtomic, PAYMENT.decimals),
@@ -270,20 +308,25 @@ export function createCoveragePreflightHandler(dependencies = {}) {
       });
     }
 
-    const deadlineMs = Date.parse(targetOrder.acceptedAt) + policy.slaSeconds * 1000;
-    if (!Number.isFinite(deadlineMs) || deadlineMs <= now()) {
+    const acceptanceMs = Date.parse(targetOrder.acceptedAt);
+    const deadlineMs = policy.clockMode === "policypool_relay"
+      ? null
+      : acceptanceMs + policy.slaSeconds * 1000;
+    if (deadlineMs !== null && (!Number.isFinite(deadlineMs) || deadlineMs <= now())) {
       return decline(res, "registered_policy_sla_already_elapsed", { task, targetOrder });
     }
-    const enrollmentDeadlineMs = Date.parse(targetOrder.acceptedAt) + policy.enrollmentWindowSeconds * 1000;
+    const enrollmentDeadlineMs = acceptanceMs + policy.enrollmentWindowSeconds * 1000;
     if (!Number.isFinite(enrollmentDeadlineMs) || enrollmentDeadlineMs <= now()) {
       return decline(res, "coverage_enrollment_window_closed", { task, targetOrder });
     }
 
     const requestBody = {
       targetAgent: `${policy.agentName}#${policy.agentId}`,
+      targetServiceId: policy.serviceIds[0],
       targetJobId: task.jobId,
       targetCreationTxHash: evidence.creationTxHash,
       targetAcceptanceTxHash: evidence.acceptanceTxHash,
+      targetTaskReference: task.publicTaskId,
       jobDescription: task.description,
       requestedCoverageUSDT: formatUsdtAtomic(coverageCapAtomic, PAYMENT.decimals),
     };
@@ -295,7 +338,9 @@ export function createCoveragePreflightHandler(dependencies = {}) {
         buyer: targetOrder.buyer,
         policyHash: policy.policyHash,
         source: "verified_preflight",
-        deadline: new Date(Math.min(deadlineMs, enrollmentDeadlineMs)).toISOString(),
+        deadline: new Date(deadlineMs === null
+          ? enrollmentDeadlineMs
+          : Math.min(deadlineMs, enrollmentDeadlineMs)).toISOString(),
       });
     } catch (error) {
       if (error instanceof QuoteValidationError) {
@@ -309,7 +354,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
 
     return sendJson(res, 200, {
       ok: true,
-      version: "0.3.0",
+      version: providerFunded ? "0.4.0" : "0.3.0",
       eligible: true,
       charged: false,
       generatedAt: new Date(now()).toISOString(),
@@ -327,6 +372,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
         processingStart: policy.processingStart || "verified target-job acceptance",
         enrollmentWindowSeconds: policy.enrollmentWindowSeconds,
         exclusions: policy.exclusions || [],
+        registrySource: policySource,
       },
       evidence: {
         source: "OKX.AI public task page plus X Layer task escrow events",
@@ -334,14 +380,22 @@ export function createCoveragePreflightHandler(dependencies = {}) {
         verifiedTargetOrder: targetOrder,
       },
       coverage: {
-        deadline: new Date(deadlineMs).toISOString(),
+        deadline: deadlineMs === null ? null : new Date(deadlineMs).toISOString(),
+        clockState: deadlineMs === null ? "pending_provider_relay_start" : "started_at_verified_acceptance",
         enrollmentClosesAt: new Date(enrollmentDeadlineMs).toISOString(),
         capAtomic: coverageCapAtomic.toString(),
         capUSDT: formatUsdtAtomic(coverageCapAtomic, PAYMENT.decimals),
         serviceFeeUSDT: formatUsdtAtomic(PAYMENT.amountAtomic, PAYMENT.decimals),
-        reserveBalanceUSDT: formatUsdtAtomic(reserveBalanceAtomic, PAYMENT.decimals),
-        committedUSDT: formatUsdtAtomic(committedAtomic, PAYMENT.decimals),
-        availableUSDT: formatUsdtAtomic(availableAtomic, PAYMENT.decimals),
+        fundingSource: providerFunded ? "provider_first_loss_bond" : "shared_reserve",
+        providerBondAvailableUSDT: providerFunded
+          ? formatUsdtAtomic(policyCapacityAtomic, PAYMENT.decimals)
+          : null,
+        reserveBalanceUSDT: providerFunded
+          ? null
+          : formatUsdtAtomic(reserveBalanceAtomic, PAYMENT.decimals),
+        committedUSDT: providerFunded ? null : formatUsdtAtomic(committedAtomic, PAYMENT.decimals),
+        availableUSDT: providerFunded ? null : formatUsdtAtomic(availableAtomic, PAYMENT.decimals),
+        sharedReserveUsed: !providerFunded,
         finalReservationRecheckedAtSettlement: true,
       },
       quote: {

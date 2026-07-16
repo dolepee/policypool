@@ -8,6 +8,7 @@
     { "source": "/ledger", "destination": "/ledger.html" },
     { "source": "/proof", "destination": "/proof.html" },
     { "source": "/providers", "destination": "/providers.html" },
+    { "source": "/providers/enroll", "destination": "/enroll.html" },
     { "source": "/simulate", "destination": "/index.html" },
     { "source": "/console", "destination": "/index.html" },
     { "source": "/registry", "destination": "/index.html" },

@@ -7,10 +7,14 @@ import {
   PaymentVerificationError,
 } from "./lib/payment.js";
 import {
-  findPublishedPolicy,
   listPublishedPolicies,
   policyCoverageCapAtomic,
 } from "./lib/policy-registry.js";
+import { createCoveragePolicyResolver } from "./lib/policy-resolution.js";
+import { UniversalPolicyError } from "./lib/universal-policy.js";
+import { createUniversalIssuer, UniversalIssuerError } from "./lib/universal-issuer.js";
+import { createRelayGrantService, RelayGrantError } from "./lib/relay-grant.js";
+import { createRateLimiter, enforceRateLimit } from "./lib/rate-limit.js";
 import {
   createQuoteService,
   extractQuoteToken,
@@ -40,9 +44,11 @@ const FORBIDDEN_PATTERNS = [
 
 const INPUT_ALIASES = {
   targetAgent: ["targetAgent", "agent", "agentId", "serviceId", "targetService"],
+  targetServiceId: ["targetServiceId", "listedServiceId"],
   targetJobId: ["targetJobId", "jobId", "taskId"],
   targetCreationTxHash: ["targetCreationTxHash", "creationTxHash", "jobCreationTxHash"],
   targetAcceptanceTxHash: ["targetAcceptanceTxHash", "acceptanceTxHash", "jobAcceptanceTxHash"],
+  targetTaskReference: ["targetTaskReference", "taskReference", "publicTaskId", "taskUrl"],
   jobDescription: ["jobDescription", "job", "task", "prompt", "description", "scope"],
   requestedDeadline: ["deadline", "dueAt", "expiresAt"],
   requestedCoverageUSDT: ["requestedCoverageUSDT", "coverageCapUSDT", "capUSDT", "coverageAmountUSDT"],
@@ -67,6 +73,10 @@ const OUTPUT_SCHEMA = {
           type: "string",
           description: "The accepted OKX.AI job id (bytes32).",
         },
+        targetServiceId: {
+          type: "string",
+          description: "Required for v0.4 provider-enrolled policies; the live OKX.AI service id.",
+        },
         targetCreationTxHash: {
           type: "string",
           description: "X Layer transaction that created the target job and binds its buyer wallet.",
@@ -74,6 +84,10 @@ const OUTPUT_SCHEMA = {
         targetAcceptanceTxHash: {
           type: "string",
           description: "X Layer transaction that moved the target job from created to accepted.",
+        },
+        targetTaskReference: {
+          type: "string",
+          description: "Optional OKX.AI public task id or URL used to verify delivery timing during reconciliation.",
         },
         jobDescription: {
           type: "string",
@@ -194,9 +208,11 @@ function readInput(req, authoritativeBody = null) {
   const requested = readAlias(records, INPUT_ALIASES.requestedCoverageUSDT, 40) || "1";
   return {
     targetAgent: readAlias(records, INPUT_ALIASES.targetAgent),
+    targetServiceId: readAlias(records, INPUT_ALIASES.targetServiceId, 40),
     targetJobId: readAlias(records, INPUT_ALIASES.targetJobId, 80),
     targetCreationTxHash: readAlias(records, INPUT_ALIASES.targetCreationTxHash, 80),
     targetAcceptanceTxHash: readAlias(records, INPUT_ALIASES.targetAcceptanceTxHash, 80),
+    targetTaskReference: readAlias(records, INPUT_ALIASES.targetTaskReference, 300),
     jobDescription: readAlias(records, INPUT_ALIASES.jobDescription),
     requestedDeadline: readAlias(records, INPUT_ALIASES.requestedDeadline, 80),
     requestedCoverageAtomic: parseUsdtAtomic(String(requested), PAYMENT.decimals),
@@ -214,9 +230,11 @@ function isBodylessRequest(req) {
 function requestBodyFromInput(input) {
   return {
     targetAgent: input.targetAgent,
+    targetServiceId: input.targetServiceId,
     targetJobId: input.targetJobId,
     targetCreationTxHash: input.targetCreationTxHash,
     targetAcceptanceTxHash: input.targetAcceptanceTxHash,
+    targetTaskReference: input.targetTaskReference,
     jobDescription: input.jobDescription,
     requestedCoverageUSDT: formatUsdtAtomic(input.requestedCoverageAtomic, PAYMENT.decimals),
   };
@@ -300,18 +318,24 @@ function buildReceipt({
   coverageDeadline,
   coverageEnrollmentClosesAt,
   quote,
+  universalCovenant = null,
+  relayGrantPayload = null,
 }) {
   const issued = guard.verdict === "ALLOW";
+  const providerFunded = Boolean(policy?.onchainPolicyId);
+  const pendingClock = issued && policy?.clockMode === "policypool_relay";
   const draft = {
     protocol: "PolicyPool Agent Coverage",
-    version: "0.3.0",
+    version: policy?.onchainPolicyId ? "0.4.0" : "0.3.0",
     receiptId,
     generatedAt,
     outcome: issued
       ? {
         type: "ISSUED",
-        status: "coverage_active",
-        reason: "registered_policy_matched_and_target_job_acceptance_verified",
+        status: pendingClock ? "coverage_pending_provider_clock" : "coverage_active",
+        reason: pendingClock
+          ? "provider_bond_locked_and_waiting_for_relay_clock"
+          : "registered_policy_matched_and_target_job_acceptance_verified",
       }
       : {
         type: "DECLINED",
@@ -332,6 +356,9 @@ function buildReceipt({
       slaSeconds: policy.slaSeconds,
       publishedScope: policy.publishedScope,
       maxCoverageAtomic: policyCoverageCapAtomic(policy, COVERAGE.maxAtomic).toString(),
+      providerAvailableBondAtomic: policy.providerAvailableBondAtomic || null,
+      payoutBasis: policy.payoutBasis || "legacy_reserve_covenant",
+      clockMode: policy.clockMode || "verified_acceptance",
       coverageStatus: policy.coverageStatus || "active",
       clockSource: policy.clockSource || "verified_acceptance_block",
       processingStart: policy.processingStart || "verified target-job acceptance",
@@ -353,6 +380,17 @@ function buildReceipt({
       coverageCapAtomic: coverageCapAtomic.toString(),
       coverageCapUSDT: formatUsdtAtomic(coverageCapAtomic, PAYMENT.decimals),
       objectiveBreachRules: OBJECTIVE_BREACH_RULES,
+      onchain: universalCovenant,
+    } : null,
+    providerRelay: pendingClock ? {
+      endpoint: "https://policypool.vercel.app/api/provider-relay",
+      grantId: relayGrantPayload?.grantId || null,
+      grantExpiresAt: relayGrantPayload?.expiresAt || null,
+      grantBoundTo: ["covenant", "target job", "buyer", "agent", "service"],
+      request: {
+        method: "POST",
+        required: ["relayGrant", "agentId", "serviceId", "targetJobId", "providerRequest"],
+      },
     } : null,
     guard: {
       ...guard,
@@ -369,7 +407,7 @@ function buildReceipt({
       expiresAt: quote.expiresAt,
       canonicalRequestRecovered: true,
     } : null,
-    reserve: {
+    reserve: providerFunded ? null : {
       chain: XLAYER.name,
       chainId: XLAYER.id,
       wallet: COVERAGE.reserveWallet,
@@ -378,6 +416,21 @@ function buildReceipt({
       balanceUSDTAtDecision: formatUsdtAtomic(reserveBalanceAtomic, PAYMENT.decimals),
       publicUrl: COVERAGE.publicUrl,
     },
+    providerBond: providerFunded ? {
+      chain: XLAYER.name,
+      chainId: XLAYER.id,
+      provider: policy.providerWallet,
+      asset: PAYMENT.asset,
+      availableAtomicBeforeLock: policy.providerAvailableBondAtomic,
+      availableUSDTBeforeLock: formatUsdtAtomic(
+        BigInt(policy.providerAvailableBondAtomic || 0),
+        PAYMENT.decimals,
+      ),
+      lockedAtomic: coverageCapAtomic.toString(),
+      covenantId: universalCovenant?.covenantId || null,
+      custody: "provider_first_loss_bond_vault",
+      sharedReserveUsed: false,
+    } : null,
     servicePayment: {
       verified: true,
       settled: true,
@@ -399,19 +452,29 @@ function buildReceipt({
   return { ...draft, receiptHash: receiptHash(draft) };
 }
 
-function respondWithRecord(res, record) {
+function respondWithRecord(res, record, relayGrantService = null) {
   if (record.paymentResponseHeader) {
     res.setHeader("PAYMENT-RESPONSE", record.paymentResponseHeader);
     res.setHeader("X-PAYMENT-RESPONSE", record.paymentResponseHeader);
   }
+  let receipt = record.receipt;
+  if (record.relayGrantPayload && relayGrantService?.tokenForPayload && receipt?.providerRelay) {
+    receipt = {
+      ...receipt,
+      providerRelay: {
+        ...receipt.providerRelay,
+        grantToken: relayGrantService.tokenForPayload(record.relayGrantPayload),
+      },
+    };
+  }
   return sendJson(res, 200, {
     ok: true,
-    version: "0.3.0",
+    version: record.receipt?.version || "0.3.0",
     agent: "PolicyPool",
     service: "Covered Job Receipt",
     mode: "api_service",
     idempotentReplay: Boolean(record.replayed),
-    receipt: record.receipt,
+    receipt,
   });
 }
 
@@ -443,6 +506,10 @@ export function createHandler(dependencies = {}) {
   let runtimeLedger = dependencies.ledger;
   let runtimePayment = dependencies.payment;
   let runtimeQuoteService = dependencies.quoteService;
+  let runtimePolicyResolver = dependencies.policyResolver;
+  let runtimeUniversalIssuer = dependencies.universalIssuer;
+  let runtimeRelayGrantService = dependencies.relayGrantService;
+  const limiter = dependencies.limiter || createRateLimiter();
   const now = dependencies.now || (() => Date.now());
   const getChain = () => (runtimeChain ||= createChainService());
   const getLedger = () => (runtimeLedger ||= createLedger());
@@ -454,6 +521,14 @@ export function createHandler(dependencies = {}) {
     randomId: dependencies.quoteRandomId,
     ttlSeconds: dependencies.quoteTtlSeconds,
   }));
+  const getPolicyResolver = () => (runtimePolicyResolver ||= createCoveragePolicyResolver(dependencies));
+  const getUniversalIssuer = () => (runtimeUniversalIssuer ||= createUniversalIssuer(dependencies));
+  const getRelayGrantService = () => (runtimeRelayGrantService ||= createRelayGrantService(dependencies));
+  const respond = (res, record) => respondWithRecord(
+    res,
+    record,
+    record.relayGrantPayload ? getRelayGrantService() : null,
+  );
 
   return async function handler(req, res) {
     if (req.method === "OPTIONS") return sendJson(res, 200, { ok: true });
@@ -470,6 +545,13 @@ export function createHandler(dependencies = {}) {
     }
 
     const paymentSignature = header(req, "payment-signature");
+    const limited = await enforceRateLimit(req, res, limiter, {
+      scope: paymentSignature ? "coverage-paid" : "coverage-quote",
+      subject: req.body?.targetAgent || req.query?.targetAgent || "",
+      limit: paymentSignature ? 120 : 30,
+      windowSeconds: 60,
+    });
+    if (limited) return sendJson(res, 429, limited);
     let ledger = null;
     let payment = null;
     let paymentId = "";
@@ -493,7 +575,15 @@ export function createHandler(dependencies = {}) {
       try {
         const existingPayment = await ledger.findByPaymentId(paymentId);
         if (existingPayment?.receipt) {
-          return respondWithRecord(res, { ...existingPayment, replayed: true });
+          return respond(res, { ...existingPayment, replayed: true });
+        }
+        if (existingPayment?.state === "compensation_required") {
+          return sendJson(res, 503, {
+            ok: false,
+            error: "provider_bond_release_pending_retry",
+            charged: false,
+            receiptId: existingPayment.receiptId,
+          });
         }
       } catch (error) {
         return sendJson(res, 503, {
@@ -544,7 +634,21 @@ export function createHandler(dependencies = {}) {
     }
 
     const targetAgent = input.targetAgent;
-    const policy = targetAgent ? findPublishedPolicy(targetAgent) : null;
+    let policy = null;
+    let policySource = null;
+    if (targetAgent) {
+      try {
+        ({ policy, source: policySource } = await getPolicyResolver().resolve(
+          targetAgent,
+          input.targetServiceId,
+        ));
+      } catch (error) {
+        if (error instanceof UniversalPolicyError) {
+          return sendJson(res, error.status, { ok: false, error: error.code, charged: false });
+        }
+        return sendJson(res, 503, { ok: false, error: "coverage_policy_resolution_failed", charged: false });
+      }
+    }
     if (targetAgent && !policy) {
       return sendJson(res, 422, {
         ok: false,
@@ -556,6 +660,19 @@ export function createHandler(dependencies = {}) {
 
     if (quote?.policyHash && quote.policyHash !== policy?.policyHash) {
       return sendJson(res, 409, { ok: false, error: "coverage_quote_policy_changed", charged: false });
+    }
+    if (policy?.onchainPolicyId) {
+      try {
+        getUniversalIssuer();
+        if (policy.clockMode === "policypool_relay") getRelayGrantService();
+      } catch (error) {
+        const recognized = error instanceof UniversalIssuerError || error instanceof RelayGrantError;
+        return sendJson(res, recognized ? error.status : 503, {
+          ok: false,
+          error: recognized ? error.code : "universal_issuance_feature_gated",
+          charged: false,
+        });
+      }
     }
     if (!targetAgent && req.method === "GET" && !paymentSignature) {
       return paymentRequired(req, res);
@@ -636,14 +753,18 @@ export function createHandler(dependencies = {}) {
     let coverageDeadline = null;
     let coverageEnrollmentClosesAt = null;
 
-    try {
-      reserveBalanceAtomic = await getChain().getReserveBalance();
-    } catch {
-      return sendJson(res, 503, {
-        ok: false,
-        error: "reserve_balance_unavailable",
-        charged: false,
-      });
+    if (policy.onchainPolicyId) {
+      reserveBalanceAtomic = 0n;
+    } else {
+      try {
+        reserveBalanceAtomic = await getChain().getReserveBalance();
+      } catch {
+        return sendJson(res, 503, {
+          ok: false,
+          error: "reserve_balance_unavailable",
+          charged: false,
+        });
+      }
     }
 
     if (guard.verdict === "ALLOW") {
@@ -655,15 +776,20 @@ export function createHandler(dependencies = {}) {
           buyer: verified.payer,
           policy,
         });
+        if (input.targetTaskReference) {
+          targetOrder = { ...targetOrder, publicTaskReference: input.targetTaskReference };
+        }
         const acceptedAtMs = Date.parse(targetOrder.acceptedAt);
         if (!Number.isFinite(acceptedAtMs)) {
           guard = { verdict: "BLOCK", reason: "target_acceptance_timestamp_invalid" };
         } else {
-          const coverageDeadlineMs = acceptedAtMs + policy.slaSeconds * 1000;
+          const coverageDeadlineMs = policy.clockMode === "policypool_relay"
+            ? null
+            : acceptedAtMs + policy.slaSeconds * 1000;
           const enrollmentDeadlineMs = acceptedAtMs + policy.enrollmentWindowSeconds * 1000;
-          coverageDeadline = new Date(coverageDeadlineMs).toISOString();
+          coverageDeadline = coverageDeadlineMs === null ? null : new Date(coverageDeadlineMs).toISOString();
           coverageEnrollmentClosesAt = new Date(enrollmentDeadlineMs).toISOString();
-          if (coverageDeadlineMs <= now()) {
+          if (coverageDeadlineMs !== null && coverageDeadlineMs <= now()) {
             guard = { verdict: "BLOCK", reason: "registered_policy_sla_already_elapsed" };
           } else if (enrollmentDeadlineMs <= now()) {
             guard = { verdict: "BLOCK", reason: "coverage_enrollment_window_closed" };
@@ -675,6 +801,9 @@ export function createHandler(dependencies = {}) {
             BigInt(targetOrder.amountAtomic),
             policyCoverageCapAtomic(policy, COVERAGE.maxAtomic),
             BigInt(COVERAGE.maxAtomic),
+            policy.providerAvailableBondAtomic
+              ? BigInt(policy.providerAvailableBondAtomic)
+              : BigInt(COVERAGE.maxAtomic),
           );
           if (coverageCapAtomic < BigInt(COVERAGE.minAtomic)) {
             guard = { verdict: "BLOCK", reason: "verified_coverage_cap_below_minimum" };
@@ -706,6 +835,7 @@ export function createHandler(dependencies = {}) {
 
     const requestId = `sha256:${sha256({
       targetAgentId: policy?.agentId || input.targetAgent,
+      targetServiceId: input.targetServiceId || policy?.serviceIds?.[0] || null,
       targetJobId: input.targetJobId,
     })}`;
     const receiptId = `ppc-${requestId.slice(7, 23)}`;
@@ -714,18 +844,27 @@ export function createHandler(dependencies = {}) {
       ...input,
       requestedCoverageAtomic: input.requestedCoverageAtomic.toString(),
     };
+    let plannedUniversalCovenant = null;
+    if (policy.onchainPolicyId) {
+      plannedUniversalCovenant = {
+        covenantId: getUniversalIssuer().previewCovenantId({ policy, targetOrder }),
+        state: "planned",
+      };
+    }
     let pending = {
       receiptId,
       requestId,
       paymentId: verified.paymentId,
       state: "pending",
       createdAt,
-      liabilityAtomic: coverageCapAtomic.toString(),
+      liabilityAtomic: policy.onchainPolicyId ? "0" : coverageCapAtomic.toString(),
+      providerBondLiabilityAtomic: policy.onchainPolicyId ? coverageCapAtomic.toString() : "0",
       input: storedInput,
       guard,
       targetOrder,
       payer: verified.payer,
       quoteId: quote?.id || null,
+      universalCovenant: plannedUniversalCovenant,
     };
 
     let reservation;
@@ -749,7 +888,7 @@ export function createHandler(dependencies = {}) {
 
     if (reservation.status === "payment_exists") {
       const existing = await ledger.get(reservation.receiptId);
-      if (existing?.receipt) return respondWithRecord(res, { ...existing, replayed: true });
+      if (existing?.receipt) return respond(res, { ...existing, replayed: true });
       return sendJson(res, 409, { ok: false, error: "payment_is_already_processing", charged: false });
     }
     if (reservation.status === "request_exists") {
@@ -759,11 +898,103 @@ export function createHandler(dependencies = {}) {
       return sendJson(res, 503, { ok: false, error: "coverage_reservation_failed", charged: false });
     }
 
+    let universalCovenant = null;
+    let relayGrantPayload = null;
+    if (policy.onchainPolicyId) {
+      try {
+        universalCovenant = await getUniversalIssuer().issue({
+          policy,
+          targetOrder,
+          coverageCapAtomic,
+          enrollmentClosesAt: coverageEnrollmentClosesAt,
+        });
+        if (universalCovenant.covenantId.toLowerCase() !== plannedUniversalCovenant.covenantId.toLowerCase()) {
+          throw new UniversalIssuerError("coverage_manager_covenant_id_mismatch");
+        }
+        if (policy.clockMode === "policypool_relay") {
+          ({ payload: relayGrantPayload } = getRelayGrantService().issue({
+            covenantId: universalCovenant.covenantId,
+            targetJobId: targetOrder.jobId,
+            buyer: verified.payer,
+            agentId: policy.agentId,
+            serviceId: policy.serviceIds[0],
+            expiresAt: coverageEnrollmentClosesAt,
+          }));
+        }
+        pending = { ...pending, universalCovenant };
+        const attached = await ledger.transitionUniversal(pending, ["pending"]);
+        if (attached?.universalCovenant?.transactionHash !== universalCovenant.transactionHash) {
+          throw new UniversalIssuerError("coverage_manager_outbox_update_failed");
+        }
+      } catch (error) {
+        if (universalCovenant?.covenantId) {
+          const compensationPending = {
+            ...pending,
+            universalCovenant,
+            state: "compensation_required",
+            compensation: {
+              reason: "coverage_issuance_aborted",
+              createdAt: new Date(now()).toISOString(),
+            },
+          };
+          await ledger.transitionUniversal(compensationPending, ["pending"]).catch(() => undefined);
+          try {
+            await getUniversalIssuer().release(
+              universalCovenant.covenantId,
+              `0x${sha256("COVERAGE_ISSUANCE_ABORTED")}`,
+            );
+            await ledger.release(compensationPending);
+          } catch {
+            return sendJson(res, 503, {
+              ok: false,
+              error: "provider_bond_release_pending_retry",
+              charged: false,
+              receiptId,
+            });
+          }
+        } else {
+          await ledger.release(pending).catch(() => undefined);
+        }
+        return sendJson(res, error instanceof UniversalIssuerError ? error.status : 503, {
+          ok: false,
+          error: error instanceof UniversalIssuerError ? error.code : "provider_bond_lock_failed",
+          charged: false,
+        });
+      }
+    }
+
     let settlement;
     try {
       settlement = await payment.settle(verified, requirements);
     } catch (error) {
-      await ledger.release(pending).catch(() => undefined);
+      let compensationPending = pending;
+      if (universalCovenant?.covenantId) {
+        compensationPending = {
+          ...pending,
+          state: "compensation_required",
+          compensation: {
+            reason: "coverage_fee_not_settled",
+            createdAt: new Date(now()).toISOString(),
+          },
+        };
+        await ledger.transitionUniversal(compensationPending, ["pending"]).catch(() => undefined);
+        try {
+          await getUniversalIssuer().release(
+            universalCovenant.covenantId,
+            `0x${sha256("COVERAGE_FEE_NOT_SETTLED")}`,
+          );
+          await ledger.release(compensationPending);
+        } catch {
+          return sendJson(res, 503, {
+            ok: false,
+            error: "provider_bond_release_pending_retry",
+            charged: false,
+            receiptId,
+          });
+        }
+      } else {
+        await ledger.release(pending).catch(() => undefined);
+      }
       if (error instanceof PaymentVerificationError) return paymentRequired(req, res, error.code);
       return paymentRequired(req, res, "payment_settlement_failed");
     }
@@ -782,12 +1013,19 @@ export function createHandler(dependencies = {}) {
       coverageDeadline,
       coverageEnrollmentClosesAt,
       quote,
+      universalCovenant,
+      relayGrantPayload,
     });
     const finalRecord = {
       ...pending,
-      state: guard.verdict === "ALLOW" ? "active" : "declined",
+      state: guard.verdict === "ALLOW"
+        ? policy.clockMode === "policypool_relay" ? "pending_start" : "active"
+        : "declined",
       finalizedAt: new Date(now()).toISOString(),
-      liabilityAtomic: coverageCapAtomic.toString(),
+      liabilityAtomic: policy.onchainPolicyId ? "0" : coverageCapAtomic.toString(),
+      providerBondLiabilityAtomic: policy.onchainPolicyId ? coverageCapAtomic.toString() : "0",
+      universalCovenant,
+      relayGrantPayload,
       guard,
       settlement: {
         network: settlement.network,
@@ -812,7 +1050,7 @@ export function createHandler(dependencies = {}) {
         detail: error instanceof Error ? error.message : String(error),
       });
     }
-    return respondWithRecord(res, finalRecord);
+    return respond(res, finalRecord);
   };
 }
 

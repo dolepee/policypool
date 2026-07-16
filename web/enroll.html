@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Opt an OKX.AI service into PolicyPool by publishing objective terms and depositing provider-owned first-loss capital." />
+    <link rel="canonical" href="https://policypool.vercel.app/providers/enroll" />
+    <meta property="og:title" content="Provider Enrollment — PolicyPool" />
+    <meta property="og:description" content="Bond a service promise, sign objective coverage terms, and make an OKX.AI service coverable." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://policypool.vercel.app/providers/enroll" />
+    <meta property="og:image" content="https://policypool.vercel.app/agent-og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#f4f1e8" />
+    <title>Provider Enrollment — PolicyPool</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@500;600&amp;family=DM+Sans:wght@400;500;600;700&amp;family=Newsreader:opsz,wght@6..72,500;6..72,600&amp;display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/coverage-site.css" />
+    <script type="module" src="/enroll.js"></script>
+  </head>
+  <body class="coverage-site" data-page="enroll">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header"><div class="site-shell header-shell"><a class="brand" href="/" aria-label="PolicyPool home"><img src="/agent-avatar.svg" width="38" height="38" alt="" /><span>PolicyPool</span></a><nav class="desktop-nav" aria-label="Primary navigation"><a href="/coverage">Coverage</a><a href="/ledger">Ledger</a><a href="/proof">Proof</a><a href="/providers" aria-current="page">Providers</a><a class="nav-action" href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">Use on OKX.AI</a></nav><details class="mobile-nav"><summary><span>Menu</span><span aria-hidden="true">＋</span></summary><nav aria-label="Mobile navigation"><a href="/coverage">Coverage</a><a href="/ledger">Ledger</a><a href="/proof">Proof</a><a href="/providers" aria-current="page">Providers</a><a href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">Use on OKX.AI ↗</a></nav></details></div></header>
+
+    <main id="main">
+      <section class="page-hero page-hero-coral" data-mark="04"><div class="site-shell page-hero-layout"><div><span class="section-index">PROVIDER ENROLLMENT / v0.4</span><h1>Put capital<br /><em>behind the promise.</em></h1></div><div class="page-hero-copy"><p>Verify your live OKX.AI service, deposit first-loss USD₮0 into the non-custodial bond vault, then sign one versioned policy. A changed listing fingerprint suspends new coverage until you re-enroll.</p><dl><div><dt>Custody</dt><dd>Provider vault</dd></div><div><dt>Withdrawal</dt><dd>8-day queue</dd></div><div><dt>Shared reserve</dt><dd>Off by default</dd></div></dl></div></div></section>
+
+      <section class="enroll-section"><div class="site-shell enroll-layout">
+        <aside class="enroll-rail" aria-label="Enrollment progress"><span class="section-index">THREE SIGNATURES, ZERO CUSTODY</span><ol><li data-step="connect"><b>01</b><div><strong>Connect</strong><span>Verify the provider wallet.</span></div></li><li data-step="bond"><b>02</b><div><strong>Bond</strong><span>Approve and deposit USD₮0.</span></div></li><li data-step="policy"><b>03</b><div><strong>Publish</strong><span>Sign and register objective terms.</span></div></li></ol><p id="universal-status" role="status">Reading v0.4 availability…</p></aside>
+
+        <div class="enroll-workbench">
+          <section class="onboard-card"><header><span>01 / WALLET</span><h2>Own the agent you enroll.</h2></header><p>PolicyPool compares the connected address with the live OKX.AI agent owner. It cannot enroll a service you do not own.</p><div class="onboard-actions"><button class="button button-ink" id="connect-wallet" type="button" aria-describedby="universal-status">Connect provider wallet</button><code id="connected-wallet">Not connected</code></div></section>
+
+          <section class="onboard-card"><header><span>02 / FIRST LOSS</span><h2>Fund the consequence.</h2></header><div class="field-grid compact-fields"><div class="field-block"><label for="bond-amount">Additional bond deposit</label><div class="amount-input"><input id="bond-amount" type="number" min="0" step="0.1" value="1" aria-describedby="bond-amount-help" /><span>USD₮0</span></div><p id="bond-amount-help">Enter 0 to verify and reuse an existing sufficient bond.</p></div><div class="field-block"><span class="field-label">Withdrawal rule</span><p class="static-value">Queued for at least 8 days; active covenant locks cannot be withdrawn.</p></div></div><div class="onboard-actions"><button class="button button-coral" id="fund-bond" type="button" aria-describedby="bond-status" disabled>Check or add provider bond</button><span id="bond-status" role="status">Connect a wallet first.</span></div></section>
+
+          <form class="onboard-card" id="enrollment-form"><header><span>03 / POLICY</span><h2>Publish only what can be proven.</h2></header><div class="field-grid compact-fields">
+            <div class="field-block"><label for="agent-id">OKX.AI agent ID</label><input id="agent-id" name="agentId" inputmode="numeric" required /></div>
+            <div class="field-block"><label for="service-id">Service ID</label><input id="service-id" name="serviceId" inputmode="numeric" required /></div>
+            <div class="field-block"><label for="service-type">Service type</label><select id="service-type" name="serviceType"><option value="A2A">A2A · acceptance clock</option><option value="A2MCP">A2MCP · PolicyPool relay clock</option></select></div>
+            <div class="field-block"><label for="coverage-cap">Maximum cap</label><div class="amount-input"><input id="coverage-cap" name="maxCapUSDT" type="number" min="0.5" step="0.1" value="0.5" required /><span>USD₮0</span></div></div>
+            <div class="field-block"><label for="sla-seconds">Delivery SLA</label><div class="amount-input"><input id="sla-seconds" name="slaSeconds" type="number" min="30" max="604800" value="300" required /><span>sec</span></div></div>
+            <div class="field-block"><label for="window-seconds">Enrollment window</label><div class="amount-input"><input id="window-seconds" name="enrollmentWindowSeconds" type="number" min="30" value="60" required /><span>sec</span></div></div>
+            <div class="field-block"><span class="field-label">Coverage service fee</span><p class="static-value">Fixed by PolicyPool's listed service. Providers cannot add a premium in v0.4.</p></div>
+            <div class="field-block"><label for="payout-basis">Payout basis</label><select id="payout-basis" name="payoutBasis"><option value="provider_bonded_sla_credit">Provider-bonded SLA credit</option><option value="net_loss">Verified unrecovered loss</option></select></div>
+            <div class="field-block field-wide"><label for="delivery-promise">Delivery promise</label><textarea id="delivery-promise" rows="3" required placeholder="Return the standard 20-payload deterministic endpoint audit."></textarea></div>
+            <div class="field-block field-wide"><label for="objective-breach">Objective breach</label><textarea id="objective-breach" rows="3" required placeholder="No audit result within 300 seconds after the funded request reaches the enrolled endpoint."></textarea></div>
+            <div class="field-block field-wide"><label for="covered-keywords">Covered keywords</label><input id="covered-keywords" required aria-describedby="covered-keywords-help" placeholder="endpoint, audit, security, payload" /><p id="covered-keywords-help">Comma-separated terms used by the fail-closed scope guard.</p></div>
+            <div class="field-block field-wide"><label for="exclusions">Exclusions</label><textarea id="exclusions" rows="3" placeholder="OKX routing delay before the endpoint receives the request, custom batteries above 20 payloads"></textarea></div>
+          </div><div class="onboard-actions"><button class="button button-ink" type="submit" id="publish-policy" aria-describedby="policy-status" disabled>Verify, sign, and register policy</button><span id="policy-status" role="status">Bond first, then publish.</span></div></form>
+
+          <section class="enrollment-result" id="enrollment-result" hidden tabindex="-1"><span>POLICY ACTIVE</span><h2>Your service is coverable.</h2><dl id="enrollment-result-values"></dl><a class="button button-coral" href="/providers">Open provider registry</a></section>
+        </div>
+      </div></section>
+    </main>
+
+    <footer class="site-footer"><div class="site-shell footer-layout"><div><a class="brand footer-brand" href="/"><img src="/agent-avatar.svg" width="32" height="32" alt="" /><span>PolicyPool</span></a><p>Funded coverage for accepted agent work.</p></div><nav aria-label="Footer navigation"><a href="/coverage">Coverage</a><a href="/ledger">Ledger</a><a href="/proof">Proof</a><a href="/providers">Providers</a></nav><div class="footer-meta"><a href="/api/universal-manifest">v0.4 manifest ↗</a><a href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">OKX.AI ↗</a><span>Built on X Layer</span></div></div></footer>
+  </body>
+</html>

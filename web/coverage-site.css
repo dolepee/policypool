@@ -219,7 +219,7 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
 .request-guide i { color: var(--coral); font-style: normal; font-weight: 700; }
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; padding: 34px 26px; }
 .field-wide { grid-column: 1 / -1; }
-.field-block label { display: block; margin-bottom: 9px; font-weight: 700; }
+.field-block label, .field-label { display: block; margin-bottom: 9px; font-weight: 700; }
 .field-block input, .field-block select { width: 100%; min-height: 54px; border: 1px solid var(--line-strong); border-radius: 0; padding: 13px 14px; background: var(--paper); color: var(--ink); }
 .field-block input:focus, .field-block select:focus { border-color: var(--blue); outline: 2px solid var(--blue); outline-offset: 0; }
 .field-block input[aria-invalid="true"] { border-color: var(--danger); }
@@ -369,6 +369,11 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
 .command-card a { border-bottom: 1px solid currentColor; font-weight: 700; }
 
 .provider-registry { padding-top: 82px; background: var(--white); }
+.universal-provider-registry { padding-bottom: 20px; background: var(--ink); color: var(--white); }
+.universal-provider-registry .section-index { color: var(--mint); }
+.universal-provider-registry .split-heading > p { color: #bed0cd; }
+.universal-provider-registry .provider-card { color: var(--ink); }
+.universal-provider-registry .provider-card .policy-band { background: var(--mint-bright); }
 .provider-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
 .provider-card { min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--ink); background: var(--paper); transition: transform 180ms ease, box-shadow 180ms ease; }
 .provider-card:hover, .provider-card:focus-within { transform: translate(-4px, -4px); box-shadow: 8px 8px 0 var(--ink); }
@@ -401,6 +406,43 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
 .provider-cta h2 { margin-bottom: 18px; }
 .provider-cta p { max-width: 760px; margin: 0; color: #58342e; line-height: 1.6; }
 
+.enroll-section { padding: 82px 0 116px; background: var(--paper-deep); }
+.enroll-layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 34px; align-items: start; }
+.enroll-rail { position: sticky; top: 102px; padding: 25px; border: 1px solid var(--ink); background: var(--ink); color: var(--white); box-shadow: 8px 8px 0 var(--mint); }
+.enroll-rail .section-index { color: var(--mint); }
+.enroll-rail ol { display: grid; gap: 0; margin: 30px 0; padding: 0; list-style: none; }
+.enroll-rail li { display: grid; grid-template-columns: 34px 1fr; gap: 13px; padding: 17px 0; border-bottom: 1px solid rgba(255,255,255,0.18); }
+.enroll-rail li b { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid rgba(255,255,255,0.5); border-radius: 50%; font-family: var(--mono); font-size: 9px; }
+.enroll-rail li strong, .enroll-rail li span { display: block; }
+.enroll-rail li strong { margin-bottom: 3px; font-size: 13px; }
+.enroll-rail li span { color: #bed0cd; font-size: 11px; }
+.enroll-rail li.is-complete b { border-color: var(--mint); background: var(--mint); color: var(--ink); }
+.enroll-rail > p { margin: 0; color: #bed0cd; font-family: var(--mono); font-size: 10px; line-height: 1.55; }
+.enroll-rail > p[data-tone="success"] { color: var(--mint); }
+.enroll-workbench { display: grid; gap: 22px; }
+.onboard-card, .enrollment-result { border: 1px solid var(--ink); background: var(--white); }
+.onboard-card > header { display: grid; grid-template-columns: 150px 1fr; gap: 22px; align-items: baseline; padding: 25px 28px; border-bottom: 1px solid var(--ink); }
+.onboard-card > header span, .enrollment-result > span { font-family: var(--mono); font-size: 9px; text-transform: uppercase; }
+.onboard-card > header h2, .enrollment-result h2 { margin: 0; font-family: var(--serif); font-size: clamp(30px, 4vw, 44px); font-weight: 500; line-height: 1; }
+.onboard-card > p { max-width: 720px; margin: 0; padding: 25px 28px 0; color: var(--ink-soft); line-height: 1.6; }
+.compact-fields { padding: 28px; }
+.field-block textarea { width: 100%; min-height: 104px; resize: vertical; border: 1px solid var(--line-strong); border-radius: 0; padding: 13px 14px; background: var(--paper); color: var(--ink); font: inherit; line-height: 1.45; }
+.field-block textarea:focus { border-color: var(--blue); outline: 2px solid var(--blue); outline-offset: 0; }
+.static-value { min-height: 54px; margin: 0 !important; padding: 13px 14px; border: 1px solid var(--line-strong); background: var(--paper-deep); line-height: 1.45; }
+.onboard-actions { display: flex; align-items: center; gap: 16px; padding: 25px 28px 28px; }
+.onboard-actions .button { min-height: 48px; }
+.onboard-actions code, .onboard-actions > span { min-width: 0; overflow-wrap: anywhere; color: var(--ink-soft); font-family: var(--mono); font-size: 10px; line-height: 1.5; }
+.onboard-actions > span[data-tone="success"] { color: #0e784c; }
+.onboard-actions > span[data-tone="ready"] { color: var(--blue); }
+.onboard-actions > span[data-tone="error"] { color: var(--danger); }
+.enrollment-result { padding: 32px; border-left: 8px solid var(--mint); box-shadow: 8px 8px 0 var(--ink); }
+.enrollment-result h2 { margin: 8px 0 26px; }
+.enrollment-result dl { margin: 0 0 28px; border-top: 1px solid var(--line); }
+.enrollment-result dl div { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 16px; padding: 13px 0; border-bottom: 1px solid var(--line); }
+.enrollment-result dt { font-size: 8px; text-transform: uppercase; }
+.enrollment-result dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-family: var(--mono); font-size: 10px; }
+.button:disabled { cursor: not-allowed; opacity: 0.5; }
+
 .site-footer { padding: 64px 0; border-top: 1px solid var(--line-strong); background: var(--paper-deep); }
 .footer-layout { display: grid; grid-template-columns: 1.3fr 0.7fr 0.7fr; gap: 60px; }
 .footer-brand { margin-bottom: 14px; }
@@ -426,6 +468,8 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
   .external-proof-grid { grid-template-columns: 1fr 1fr; }
   .external-proof-card:last-child { grid-column: 1 / -1; }
   .provider-grid { grid-template-columns: 1fr 1fr; }
+  .enroll-layout { grid-template-columns: 220px minmax(0, 1fr); }
+  .onboard-card > header { grid-template-columns: 110px 1fr; }
 }
 
 @media (max-width: 820px) {
@@ -461,6 +505,11 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
   .verifier-layout, .ledger-explainer-grid, .admission-layout { grid-template-columns: 1fr; gap: 50px; }
   .footer-layout { grid-template-columns: 1fr 1fr; }
   .footer-meta { grid-column: 1 / -1; grid-template-columns: repeat(3, auto); }
+  .enroll-layout { grid-template-columns: 1fr; }
+  .enroll-rail { position: static; }
+  .enroll-rail ol { grid-template-columns: repeat(3, 1fr); }
+  .enroll-rail li { grid-template-columns: 30px 1fr; border-right: 1px solid rgba(255,255,255,0.18); border-bottom: 0; padding: 14px; }
+  .enroll-rail li:last-child { border-right: 0; }
 }
 
 @media (max-width: 620px) {
@@ -555,6 +604,17 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
   .admission-layout li { grid-template-columns: 44px 1fr; gap: 14px; }
   .footer-layout { grid-template-columns: 1fr; gap: 30px; }
   .footer-meta { grid-column: auto; grid-template-columns: 1fr; }
+  .enroll-section { padding: 44px 0 82px; }
+  .enroll-rail { padding: 20px; box-shadow: 6px 6px 0 var(--mint); }
+  .enroll-rail ol { grid-template-columns: 1fr; margin: 22px 0; }
+  .enroll-rail li { border-right: 0; border-bottom: 1px solid rgba(255,255,255,0.18); padding-inline: 0; }
+  .onboard-card > header { grid-template-columns: 1fr; gap: 8px; padding: 22px 20px; }
+  .onboard-card > p { padding: 22px 20px 0; }
+  .compact-fields { padding: 22px 20px; }
+  .onboard-actions { align-items: stretch; flex-direction: column; padding: 0 20px 22px; }
+  .onboard-actions .button { width: 100%; }
+  .enrollment-result { padding: 24px 20px; }
+  .enrollment-result dl div { grid-template-columns: 92px minmax(0, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {

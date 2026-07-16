@@ -3,6 +3,13 @@ import { isBytes32 } from "./utils.js";
 const OKX_TASK_ORIGIN = "https://www.okx.ai";
 const MAX_TASK_PAGE_BYTES = 2_000_000;
 const DEFAULT_TIMEOUT_MS = 8_000;
+const DEFAULT_CACHE_TTL_MS = 2_000;
+const DEFAULT_STALE_TTL_MS = 30_000;
+const CIRCUIT_FAILURE_THRESHOLD = 3;
+const CIRCUIT_OPEN_MS = 30_000;
+
+const memoryCache = new Map();
+const productionCircuit = { failures: 0, openUntil: 0 };
 
 export class OkxTaskPageError extends Error {
   constructor(code, message) {
@@ -72,10 +79,20 @@ function timelineTime(detail, label) {
   return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
 }
 
+function firstTimelineTime(detail, labels) {
+  for (const label of labels) {
+    const value = timelineTime(detail, label);
+    if (value) return value;
+  }
+  return null;
+}
+
 export function parseOkxTaskPage(html, expectedTaskId) {
   const detail = extractTaskDetail(html, expectedTaskId);
   const openedAtMs = timelineTime(detail, "Open") || Number(detail.createTime);
   const acceptedAtMs = timelineTime(detail, "Accepted");
+  const submittedAtMs = firstTimelineTime(detail, ["Submitted", "Delivered"]);
+  const completedAtMs = firstTimelineTime(detail, ["Completed", "Closed"]);
   if (!Number.isFinite(openedAtMs) || openedAtMs <= 0) {
     throw new OkxTaskPageError("okx_task_open_timestamp_missing");
   }
@@ -98,6 +115,8 @@ export function parseOkxTaskPage(html, expectedTaskId) {
     displayStatus: Number(detail.displayStatus),
     openedAt: new Date(openedAtMs).toISOString(),
     acceptedAt: new Date(acceptedAtMs).toISOString(),
+    submittedAt: submittedAtMs ? new Date(submittedAtMs).toISOString() : null,
+    completedAt: completedAtMs ? new Date(completedAtMs).toISOString() : null,
     plannedAt: Number(detail.plannedTime) > 0
       ? new Date(Number(detail.plannedTime)).toISOString()
       : null,
@@ -109,9 +128,26 @@ export async function fetchOkxTaskPage(reference, {
   fetchImpl = globalThis.fetch,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   attempts = 3,
+  cacheTtlMs = DEFAULT_CACHE_TTL_MS,
+  staleTtlMs = DEFAULT_STALE_TTL_MS,
+  cache,
+  circuitState,
+  allowStale = false,
+  now = () => Date.now(),
 } = {}) {
   if (typeof fetchImpl !== "function") throw new OkxTaskPageError("okx_task_fetch_unavailable");
   const taskId = parseOkxTaskReference(reference);
+  const runtimeCache = cache || (fetchImpl === globalThis.fetch ? memoryCache : new Map());
+  const runtimeCircuit = circuitState
+    || (fetchImpl === globalThis.fetch ? productionCircuit : { failures: 0, openUntil: 0 });
+  const cached = runtimeCache.get(String(taskId));
+  if (cached && cached.expiresAt > now()) return structuredClone(cached.value);
+  if (runtimeCircuit.openUntil > now()) {
+    if (allowStale && cached && cached.staleUntil > now()) {
+      return { ...structuredClone(cached.value), stale: true };
+    }
+    throw new OkxTaskPageError("okx_task_directory_circuit_open");
+  }
   const url = `${OKX_TASK_ORIGIN}/tasks/${taskId}`;
   let lastError;
 
@@ -124,7 +160,7 @@ export async function fetchOkxTaskPage(reference, {
         headers: {
           accept: "text/html,application/xhtml+xml",
           "cache-control": "no-cache",
-          "user-agent": "PolicyPool-Coverage-Preflight/0.2",
+          "user-agent": "PolicyPool-Coverage-Preflight/0.4",
         },
         redirect: "error",
         signal: controller.signal,
@@ -138,7 +174,20 @@ export async function fetchOkxTaskPage(reference, {
       if (buffer.byteLength > MAX_TASK_PAGE_BYTES) {
         throw new OkxTaskPageError("okx_task_page_too_large");
       }
-      return parseOkxTaskPage(new TextDecoder().decode(buffer), taskId);
+      const fetchedAt = now();
+      const value = {
+        ...parseOkxTaskPage(new TextDecoder().decode(buffer), taskId),
+        fetchedAt: new Date(fetchedAt).toISOString(),
+        stale: false,
+      };
+      runtimeCache.set(String(taskId), {
+        value,
+        expiresAt: fetchedAt + cacheTtlMs,
+        staleUntil: fetchedAt + staleTtlMs,
+      });
+      runtimeCircuit.failures = 0;
+      runtimeCircuit.openUntil = 0;
+      return structuredClone(value);
     } catch (error) {
       if (error instanceof OkxTaskPageError) lastError = error;
       else if (error?.name === "AbortError") lastError = new OkxTaskPageError("okx_task_fetch_timeout");
@@ -152,6 +201,13 @@ export async function fetchOkxTaskPage(reference, {
     if (attempt + 1 < attempts) {
       await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
     }
+  }
+  runtimeCircuit.failures += 1;
+  if (runtimeCircuit.failures >= CIRCUIT_FAILURE_THRESHOLD) {
+    runtimeCircuit.openUntil = now() + CIRCUIT_OPEN_MS;
+  }
+  if (allowStale && cached && cached.staleUntil > now()) {
+    return { ...structuredClone(cached.value), stale: true };
   }
   throw lastError || new OkxTaskPageError("okx_task_fetch_failed");
 }

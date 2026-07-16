@@ -2,6 +2,6 @@
   "name": "policypool-web",
   "private": true,
   "scripts": {
-    "build": "mkdir -p dist && cp index.html agent.html home.html coverage.html ledger.html proof.html providers.html styles.css tokens.css coverage-site.css app.js agent.js coverage-site.js favicon.svg logo.svg og.svg og.png agent-og.png agent-avatar.svg robots.txt sitemap.xml dist/"
+    "build": "mkdir -p dist && cp index.html agent.html home.html coverage.html ledger.html proof.html providers.html enroll.html styles.css tokens.css coverage-site.css app.js agent.js coverage-site.js enroll.js favicon.svg logo.svg og.svg og.png agent-og.png agent-avatar.svg robots.txt sitemap.xml dist/"
   }
 }
