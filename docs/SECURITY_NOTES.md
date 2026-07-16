@@ -89,11 +89,12 @@ Residual: terminal recovery and completion time are facts attested by permission
 
 ### Provider-relay payment and network findings remediated in source
 
-GitHub Codex found three High/P1 runtime paths after the Solidity review:
+GitHub Codex found four High/P1 runtime paths after the Solidity review:
 
 - Header presence could start an unpaid relay clock. The relay treated any nonempty payment header followed by a non-402 provider response as funded, so a fabricated header could create clock evidence without a provider payment.
 - DNS rebinding could bypass the provider relay SSRF check. The relay validated one DNS lookup but let the later fetch resolve the hostname again, allowing the checked public address and connected private address to differ.
 - A valid provider payment was not required to come from the buyer bound into the relay grant, so another wallet could start the clock while any breach payout still belonged to the original buyer.
+- An unpaid receipt could replace the per-job pointer to an earlier payment-verified receipt, causing reconciliation to lose the valid clock or delivery result.
 
 Source remediation:
 
@@ -103,10 +104,17 @@ Source remediation:
 - a successful provider response must carry settlement metadata whose X Layer transaction proves both the exact USD₮0 `Transfer` and matching `AuthorizationUsed` nonce;
 - the signed authorization is permanently consumed, independently of the short-lived one-use relay grant, so an old payment cannot start another covenant clock;
 - missing or invalid settlement proof releases only the pending reservations and creates no clock;
+- all signed relay receipts remain available by receipt ID, but the per-job reconciliation pointer advances only for receipts carrying a payment-verified clock and settlement transaction;
 - all resolved provider addresses must be public, and the HTTPS connection uses a pinned checked address while preserving the original hostname for SNI, certificate verification, and `Host`;
 - redirects remain disabled and request, response, and timeout limits remain enforced.
 
-Regression: `npm run agent:verify-relay` rejects malformed headers, wrong amounts, wrong signers, a valid payment from the wrong buyer, absent settlement evidence, authorization replay under a fresh grant, private DNS, and unpinned connection metadata. It proves that only the grant-bound buyer's signature-valid, nonce-bound, on-chain-verified provider payment creates a relay clock.
+Regression: `npm run agent:verify-relay` rejects malformed headers, wrong amounts, wrong signers, a valid payment from the wrong buyer, absent settlement evidence, authorization replay under a fresh grant, private DNS, and unpinned connection metadata. It also proves that a later unpaid receipt cannot replace the payment-verified job pointer. Only the grant-bound buyer's signature-valid, nonce-bound, on-chain-verified provider payment creates or replaces a relay clock.
+
+### Enrollment confirmation terms binding remediated in source
+
+The registration event identifies the provider, service, fingerprint, version, and policy ID, but it does not emit every signed policy field. Confirming from that event alone could activate a pending enrollment against a different latest policy registration for the same service and fingerprint while the off-chain resolver continued serving the originally signed terms.
+
+Confirmation now reads the exact policy struct back from the registry by the emitted policy ID, checks its metadata, recomputes the complete policy-terms hash, and requires equality with the provider-signed enrollment hash before activation. The binding covers scope, cap, SLA, enrollment window, payout basis, clock mode, expiry, and adapter as well as service identity. `npm run agent:verify-enrollment` proves an otherwise matching event with altered payout economics remains pending and fails with `policy_registered_terms_mismatch`.
 
 ### Universal lifecycle findings remediated in source
 

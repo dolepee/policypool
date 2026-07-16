@@ -51,10 +51,12 @@ const reads = {
 const onchainPolicyId = `0x${"11".repeat(32)}`;
 const serviceKey = `0x${"22".repeat(32)}`;
 let registrationReceipt;
+let registeredPolicy;
 const client = {
   async readContract({ functionName }) {
     if (functionName === "latestPolicyId") return onchainPolicyId;
     if (functionName === "isCoverable") return true;
+    if (functionName === "getPolicy") return structuredClone(registeredPolicy);
     return reads[functionName];
   },
   async getTransactionReceipt() {
@@ -139,6 +141,35 @@ registrationReceipt = {
   }],
 };
 const registrationTx = `0x${"33".repeat(32)}`;
+const registeredTerms = {
+  ...submitted.enrollment.terms,
+  agentId: BigInt(submitted.enrollment.terms.agentId),
+  serviceId: BigInt(submitted.enrollment.terms.serviceId),
+  maxCapAtomic: BigInt(submitted.enrollment.terms.maxCapAtomic),
+  expiresAt: BigInt(submitted.enrollment.terms.expiresAt),
+};
+registeredPolicy = {
+  id: onchainPolicyId,
+  serviceKey,
+  provider: provider.address,
+  terms: { ...registeredTerms, payoutBasis: 0 },
+  version: 1,
+  registeredAt: BigInt(Math.floor(nowMs / 1_000)),
+  active: true,
+  suspensionReason: `0x${"00".repeat(32)}`,
+};
+await assert.rejects(
+  () => service.confirm({
+    enrollmentId: submitted.enrollment.policyId,
+    transactionHash: registrationTx,
+  }),
+  (error) => error instanceof ProviderEnrollmentError
+    && error.code === "policy_registered_terms_mismatch",
+  "an event for the same provider/service/fingerprint must not activate different on-chain economics",
+);
+assert.equal((await store.getPolicy(submitted.enrollment.policyId)).status, "signed_pending_onchain_registration");
+
+registeredPolicy = { ...registeredPolicy, terms: registeredTerms };
 const confirmed = await service.confirm({
   enrollmentId: submitted.enrollment.policyId,
   transactionHash: registrationTx,

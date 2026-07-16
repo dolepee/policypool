@@ -89,7 +89,7 @@ This is a permissioned oracle model, not trustless marketplace verification. A c
 
 ### Clock adapters
 
-`OkxA2AClockAdapter` holds timing-ambiguous delivery statuses until historical delivery timing is available. The A2MCP relay rejects redirects and private or special-use destinations, pins the checked IP at connection time, verifies the buyer's token-domain EIP-3009 signature, and proves the exact `Transfer` plus `AuthorizationUsed` nonce before creating a clock. `RelayReceiptVerifier` uses EIP-712 signatures bound to chain ID and verifier address; relay receipts alone cannot move bonds because the manager separately requires quorum evidence.
+`OkxA2AClockAdapter` holds timing-ambiguous delivery statuses until historical delivery timing is available. The A2MCP relay rejects redirects and private or special-use destinations, pins the checked IP at connection time, verifies the grant-bound buyer's token-domain EIP-3009 signature, and proves the exact `Transfer` plus `AuthorizationUsed` nonce before creating a clock. Unpaid receipts remain addressable for diagnostics but cannot replace the payment-verified per-job receipt used by reconciliation. `RelayReceiptVerifier` uses EIP-712 signatures bound to chain ID and verifier address; relay receipts alone cannot move bonds because the manager separately requires quorum evidence.
 
 The contracts are intentionally non-upgradeable. Security changes require a complete redeployment. A qualified independent human audit remains mandatory before third-party capital is accepted.
 
@@ -100,7 +100,7 @@ The contracts are intentionally non-upgradeable. Security changes require a comp
 3. Enter one service ID and objective terms.
 4. `/api/provider-enrollment` verifies the live owner and service, computes the fingerprint, checks bond capacity, and returns EIP-712 enrollment data.
 5. The provider signs and broadcasts `registerPolicyBySig`.
-6. PolicyPool verifies the event, fingerprint, latest version, and current coverability before projecting the policy as active.
+6. PolicyPool verifies the event, reads the exact registered policy, matches its complete terms hash to the provider-signed enrollment, and then checks the fingerprint, latest version, and current coverability before projecting the policy as active.
 
 The manifest is a last-confirmed projection, not a guarantee. Every quote revalidates the live owner, service fingerprint, policy, expiry, and bond.
 
@@ -188,7 +188,7 @@ Production remains v0.3, `/api/manifest` remains the active contract, universal 
 
 ## Internal Audit Checkpoint
 
-The July 16 internal reviews and remediation are recorded in [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md). The original High single-operator finding is remediated in source. The later hostile review's stale-settlement, release-ordering, and quorum-loss findings are also remediated in source with terminal recovery plus 10-minute settlement-evidence freshness, a 24-hour challenge period with signed completion time, and a 30-day delayed recovery quorum. GitHub Codex's runtime reviews then prompted remediation of unpaid header-only relay clocks, DNS rebinding between endpoint validation and connection, provider-payment payer substitution, the missing payout-due settlement path, and post-deadline fee-failure bond lock. The candidate suite passes 88 Foundry tests; runtime gates now cover grant-buyer-bound paid relay proof, terminal settlement, challenge holds, uncertain issuance reconciliation, and primary plus recovery-quorum expired-unused fee cancellation.
+The July 16 internal reviews and remediation are recorded in [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md). The original High single-operator finding is remediated in source. The later hostile review's stale-settlement, release-ordering, and quorum-loss findings are also remediated in source with terminal recovery plus 10-minute settlement-evidence freshness, a 24-hour challenge period with signed completion time, and a 30-day delayed recovery quorum. GitHub Codex's runtime reviews then prompted remediation of unpaid header-only relay clocks, DNS rebinding between endpoint validation and connection, provider-payment payer substitution, unpaid relay receipt pointer replacement, incomplete enrollment-confirmation binding, the missing payout-due settlement path, and post-deadline fee-failure bond lock. The candidate suite passes 88 Foundry tests; runtime gates now cover full on-chain enrollment-term binding, grant-buyer-bound paid relay proof with stable reconciliation indexing, terminal settlement, challenge holds, uncertain issuance reconciliation, and primary plus recovery-quorum expired-unused fee cancellation.
 
 Core branch coverage:
 

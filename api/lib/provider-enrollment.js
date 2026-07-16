@@ -44,6 +44,7 @@ const REGISTRY_ABI = parseAbi([
   "function minimumBondAtomic() view returns (uint256)",
   "function latestPolicyId(bytes32 serviceKey) view returns (bytes32)",
   "function isCoverable(bytes32 policyId, bytes32 observedFingerprint) view returns (bool)",
+  "function getPolicy(bytes32 policyId) view returns ((bytes32 id, bytes32 serviceKey, address provider, (bytes32 marketplace, uint256 agentId, uint256 serviceId, bytes32 serviceFingerprint, bytes32 scopeHash, uint32 slaSeconds, uint32 enrollmentWindowSeconds, uint128 maxCapAtomic, uint16 premiumBps, uint8 payoutBasis, uint8 clockMode, uint64 expiresAt, address adapter) terms, uint32 version, uint64 registeredAt, bool active, bytes32 suspensionReason))",
   "function registerPolicyBySig(address provider, (bytes32 marketplace,uint256 agentId,uint256 serviceId,bytes32 serviceFingerprint,bytes32 scopeHash,uint32 slaSeconds,uint32 enrollmentWindowSeconds,uint128 maxCapAtomic,uint16 premiumBps,uint8 payoutBasis,uint8 clockMode,uint64 expiresAt,address adapter) terms, uint256 nonce, uint256 deadline, bytes signature) returns (bytes32)",
 ]);
 const POLICY_REGISTERED_EVENT = parseAbiItem(
@@ -441,7 +442,7 @@ export function createProviderEnrollmentService({
     if (!service || service.fingerprint.toLowerCase() !== enrollment.serviceFingerprint.toLowerCase()) {
       throw new ProviderEnrollmentError("service_fingerprint_changed_since_signature");
     }
-    const [latestPolicyId, coverable] = await Promise.all([
+    const [latestPolicyId, coverable, registeredPolicy] = await Promise.all([
       client.readContract({
         address: configuration.policyRegistry,
         abi: REGISTRY_ABI,
@@ -454,9 +455,33 @@ export function createProviderEnrollmentService({
         functionName: "isCoverable",
         args: [registered.policyId, enrollment.serviceFingerprint],
       }),
+      client.readContract({
+        address: configuration.policyRegistry,
+        abi: REGISTRY_ABI,
+        functionName: "getPolicy",
+        args: [registered.policyId],
+      }),
     ]);
     if (latestPolicyId.toLowerCase() !== registered.policyId.toLowerCase() || !coverable) {
       throw new ProviderEnrollmentError("registered_policy_not_coverable");
+    }
+    let registeredTermsHash;
+    try {
+      if (
+        registeredPolicy.id.toLowerCase() !== registered.policyId.toLowerCase()
+        || registeredPolicy.serviceKey.toLowerCase() !== registered.serviceKey.toLowerCase()
+        || getAddress(registeredPolicy.provider) !== getAddress(enrollment.providerWallet)
+        || Number(registeredPolicy.version) !== Number(registered.version)
+        || registeredPolicy.active !== true
+      ) {
+        throw new Error("registered policy metadata mismatch");
+      }
+      registeredTermsHash = policyTermsHash(registeredPolicy.terms);
+    } catch {
+      throw new ProviderEnrollmentError("policy_registered_terms_mismatch");
+    }
+    if (registeredTermsHash.toLowerCase() !== enrollment.policyTermsHash.toLowerCase()) {
+      throw new ProviderEnrollmentError("policy_registered_terms_mismatch");
     }
     const activated = await store.updatePolicy(enrollmentId, {
       status: "active",

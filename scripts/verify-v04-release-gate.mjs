@@ -125,10 +125,16 @@ assert.doesNotMatch(providerRelay, /paymentHeaderPresent/);
 assert.match(providerPolicyStore, /reserveRelayExecution/);
 assert.match(providerPolicyStore, /commitRelayExecution/);
 assert.match(providerPolicyStore, /releaseRelayExecution/);
+assert.match(providerPolicyStore, /function startsVerifiedRelayClock\(record\)/);
+assert.match(providerPolicyStore, /record\?\.request\?\.paymentVerified === true/);
+assert.match(providerPolicyStore, /targetJobId && startsVerifiedRelayClock\(record\)/);
 assert.match(chain, /event AuthorizationUsed\(address indexed authorizer, bytes32 indexed nonce\)/);
 assert.match(chain, /verifyProviderPaymentAuthorization/);
 assert.match(universalPolicy, /servicePriceAtomic:\s*servicePriceAtomic\.toString\(\)/);
 assert.match(enrollment, /provider_premium_not_supported_v04/);
+assert.match(enrollment, /functionName:\s*"getPolicy"/);
+assert.match(enrollment, /registeredTermsHash = policyTermsHash\(registeredPolicy\.terms\)/);
+assert.match(enrollment, /policy_registered_terms_mismatch/);
 assert.match(manifest, /sharedReserveForNewProviders:\s*false/);
 assert.match(manifest, /requires_live_quote_time_owner_fingerprint_policy_and_bond_revalidation/);
 assert.match(manifest, /settlementChallengePeriodSeconds:\s*86_400/);
@@ -186,6 +192,8 @@ assert.match(auditReport, /H-06: DNS rebinding could bypass the provider relay S
 assert.match(auditReport, /H-07: Payout-due covenants lacked an operational settlement path/);
 assert.match(auditReport, /H-08: Failed coverage-fee settlement could strand provider bond/);
 assert.match(auditReport, /H-09: Provider payment payer was not bound to the relay-grant buyer/);
+assert.match(auditReport, /H-10: Enrollment confirmation did not bind the complete on-chain policy terms/);
+assert.match(auditReport, /H-11: Unpaid relay receipts could replace the verified per-job receipt/);
 assert.ok(
   vercel.routes.some((route) => route.src === "/providers/enroll" && route.dest === "/web/enroll.html"),
   "provider enrollment route must stay explicit",

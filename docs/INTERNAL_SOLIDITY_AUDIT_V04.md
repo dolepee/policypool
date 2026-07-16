@@ -236,6 +236,38 @@ Source remediation:
 
 Regression: `scripts/verify-provider-relay.mjs` signs a structurally and cryptographically valid payment from a second wallet and proves it is rejected specifically for buyer mismatch before provider forwarding.
 
+### H-10: Enrollment confirmation did not bind the complete on-chain policy terms
+
+Severity: High / P1 runtime
+
+Status: Fixed in source, not deployed
+
+The `PolicyRegistered` event does not emit the scope hash, cap, SLA, enrollment window, payout basis, clock mode, expiry, or adapter. Confirmation previously matched only the event's provider, agent, service, and fingerprint before activating the stored signed enrollment. A different latest on-chain registration for the same service and fingerprint could therefore activate while the resolver exposed the stored terms and `CoverageManager` enforced different terms.
+
+Source remediation:
+
+- confirmation reads `getPolicy(policyId)` from the registry identified by the verified event;
+- policy ID, service key, provider, version, and active state must match the event and enrollment;
+- PolicyPool recomputes the complete registered policy-terms hash and requires exact equality with the provider-signed `enrollment.policyTermsHash` before activation.
+
+Regression: `scripts/verify-provider-enrollment.mjs` supplies an otherwise matching event and coverable latest policy with a changed payout basis, proves activation fails with `policy_registered_terms_mismatch`, and then activates only after the full registered terms match.
+
+### H-11: Unpaid relay receipts could replace the verified per-job receipt
+
+Severity: High / P1 runtime
+
+Status: Fixed in source, not deployed
+
+Every signed relay receipt was stored and also written to the per-job latest-receipt pointer. Because no-payment relay challenges do not consume the one-use paid grant, a later unpaid 402 call could replace the pointer to a valid paid receipt with a receipt whose clock was null. Reconciliation reads that pointer and could then miss a valid start or delivery result.
+
+Source remediation:
+
+- all receipts remain retrievable by receipt ID for auditability;
+- the memory and Redis per-job pointers advance only when `request.paymentVerified` is true, the verified-settlement clock source is present, and a settlement transaction is bound;
+- unpaid, malformed, or challenge-only receipts can no longer replace a payment-verified clock receipt.
+
+Regression: `scripts/verify-provider-relay.mjs` creates a paid receipt, follows it with a valid unpaid 402 receipt under the same grant, and proves the unpaid receipt is stored while the per-job pointer remains on the paid receipt.
+
 ### M-01: Vault owner could replace the manager
 
 Severity: Medium

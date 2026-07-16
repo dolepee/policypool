@@ -79,7 +79,10 @@ await store.saveRelayReceipt({
   signer: "0x1000000000000000000000000000000000000001",
   signature: "0xsigned",
   provider: { targetJobId: relay.jobId },
+  request: { paymentVerified: true },
+  settlement: { transaction: `0x${"12".repeat(32)}` },
   clock: {
+    source: "policypool_relay_verified_x402_settlement",
     startedAt: "2026-07-16T12:59:00.000Z",
     completedAt: "2026-07-16T12:59:01.000Z",
     delivered: true,

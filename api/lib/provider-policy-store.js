@@ -13,6 +13,12 @@ function serviceKey(agentId, serviceId) {
 const RELAY_GRANT_RESERVATION_TTL_SECONDS = 15 * 60;
 const RELAY_GRANT_CLAIM_TTL_SECONDS = 24 * 60 * 60;
 
+function startsVerifiedRelayClock(record) {
+  return record?.request?.paymentVerified === true
+    && record?.clock?.source === "policypool_relay_verified_x402_settlement"
+    && Boolean(record?.settlement?.transaction);
+}
+
 export class MemoryProviderPolicyStore {
   constructor() {
     this.policies = new Map();
@@ -76,7 +82,9 @@ export class MemoryProviderPolicyStore {
     const record = structuredClone({ ...input, receiptId });
     this.relayReceipts.set(receiptId, record);
     const targetJobId = String(record.provider?.targetJobId || "").toLowerCase();
-    if (targetJobId) this.latestRelayByJob.set(targetJobId, receiptId);
+    if (targetJobId && startsVerifiedRelayClock(record)) {
+      this.latestRelayByJob.set(targetJobId, receiptId);
+    }
     return structuredClone(record);
   }
 
@@ -213,7 +221,9 @@ export class RedisProviderPolicyStore {
     const record = { ...input, receiptId };
     const targetJobId = String(record.provider?.targetJobId || "").toLowerCase();
     const writes = [this.redis.set(this.key("relay", receiptId), JSON.stringify(record), { nx: true })];
-    if (targetJobId) writes.push(this.redis.set(this.key("relay-job", targetJobId), receiptId));
+    if (targetJobId && startsVerifiedRelayClock(record)) {
+      writes.push(this.redis.set(this.key("relay-job", targetJobId), receiptId));
+    }
     await Promise.all(writes);
     return this.getRelayReceipt(receiptId);
   }

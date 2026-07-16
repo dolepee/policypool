@@ -194,6 +194,11 @@ assert.equal(challenge.receipt.clock, null);
 assert.equal(challenge.receipt.request.paymentAuthorizationPresent, false);
 assert.equal(challenge.receipt.request.paymentVerified, false);
 assert.equal(challenge.receipt.signer, signer.address);
+assert.equal(
+  await store.getLatestRelayReceiptForJob(targetJobId),
+  null,
+  "an unpaid challenge must not create a reconciliation pointer",
+);
 
 const wrongAmountPayment = await paymentHeader("wrong-amount", { amount: "1" });
 const wrongSignaturePayment = await paymentHeader("wrong-signature", { signingAccount: wrongSigner });
@@ -341,6 +346,22 @@ assert.equal(
   delivered.receipt.receiptId,
   "relay receipt must be indexed by target job for autonomous reconciliation",
 );
+responseStatus = 402;
+const unpaidAfterPaid = await relay.execute({
+  agentId: "3808",
+  serviceId: "33461",
+  targetJobId,
+  providerRequest: { target_url: "https://policypool.vercel.app/api/covered-job-receipt" },
+  relayGrant: "signed-relay-grant",
+}, {});
+assert.equal(unpaidAfterPaid.receipt.clock, null);
+assert.equal(await store.getRelayReceipt(unpaidAfterPaid.receipt.receiptId) !== null, true);
+assert.equal(
+  (await store.getLatestRelayReceiptForJob(targetJobId)).receiptId,
+  delivered.receipt.receiptId,
+  "an unpaid receipt must not replace the verified clock receipt used by reconciliation",
+);
+responseStatus = 200;
 await assert.rejects(
   () => relay.execute({
     agentId: "3808",
