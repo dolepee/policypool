@@ -139,4 +139,8 @@ abstract contract CoverageEvidenceTestBase is Test {
     {
         payout = manager.settleNetLoss(evidence, _signatures(manager.settlementEvidenceDigest(evidence)));
     }
+
+    function _cancelUnpaid(CoverageManager manager, CoverageManager.CancelUnpaidEvidence memory evidence) internal {
+        manager.cancelUnpaid(evidence, _signatures(manager.cancelUnpaidEvidenceDigest(evidence)));
+    }
 }

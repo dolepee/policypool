@@ -177,6 +177,49 @@ Source remediation:
 
 Regression: the relay gate verifies the exact screened address set passed to transport, exercises the pinned lookup, and rejects private IPv4, IPv4-mapped IPv6, and multicast IPv6 destinations. The v0.4 release gate statically requires pinned lookup plus TLS hostname verification.
 
+### H-07: Payout-due covenants lacked an operational settlement path
+
+Severity: High / P1 runtime
+
+Status: Fixed in source, not deployed
+
+The contract exposed `settleNetLoss`, but the scheduled reconciler never called it. A genuine breach could move to `PayoutDue` and remain there indefinitely, leaving the buyer unpaid and the provider bond locked even after the challenge period and marketplace recovery became terminal.
+
+Source remediation:
+
+- the reconciler waits for the full on-chain 24-hour challenge period rather than guessing from local time;
+- A2A net-loss settlement requires a fresh public task observation proving status `7` (funds returned) or `9` (arbitration refunded buyer), and binds the full-refund amount to the covenant's verified job value;
+- relay settlement is permitted only for provider-bonded SLA-credit policies with a signature-valid relay receipt and verified provider-payment transaction;
+- nonterminal, stale, unsupported, or ambiguous recovery remains on hold without a transaction;
+- after settlement, the reconciler reads the covenant back from chain and accepts only `Paid` or `RecoveredWithoutPayout` before updating the ledger.
+
+Residual: OKX terminal status semantics and relay-payment finality remain facts independently checked by the evidence quorum. A2A v0.4 issuance therefore requires a public task reference; current status without historical timing cannot settle custody.
+
+Regression: `scripts/verify-universal-reconciler.mjs` proves terminal full-refund settlement, challenge-period hold, final-state readback, and replay idempotency.
+
+### H-08: Failed coverage-fee settlement could strand provider bond
+
+Severity: High / P1 runtime
+
+Status: Fixed in source, not deployed
+
+The endpoint locked provider bond before settling PolicyPool's x402 fee, which is the correct buyer-protection order. If fee settlement then failed after the covenant deadline, compensation incorrectly called the delivery-release path with a post-deadline timestamp. The contract rejected it, and no cancellation transition existed.
+
+Source remediation:
+
+- issue evidence binds the exact x402 fee-authorization hash and expiry, and the covenant ID includes that authorization hash;
+- fee authorizations more than 15 minutes ahead are rejected before issuance, bounding temporary bond exposure;
+- failed settlement enters a durable compensation state and never invents provider completion evidence;
+- an uncertain issuance result retains the planned covenant ID until authorization expiry, then re-reads chain state before releasing any local reservation;
+- only after the exact authorization expires may a quorum attest that no `AuthorizationUsed` event and no PolicyPool fee transfer exist;
+- `cancelUnpaid` releases the bond, records a distinct `CancelledUnpaid` terminal state, and clears the job lock only for that unpaid attempt so a fresh authorization may retry;
+- stale, mismatched, still-active, replayed, and terminal-covenant cancellations fail closed;
+- a disjoint recovery quorum can perform the same cancellation only after the 30-day emergency delay.
+
+Residual: the attesters must independently check the fee token and exact authorization on chain. If settlement is uncertain rather than absent, they must reject cancellation and alert; they must never trust the relayer's failure string alone.
+
+Regression proofs: `testExpiredUnusedFeeAuthorizationCancelsAndAllowsCleanRetry`, `testUnpaidCancellationRejectsStaleEvidenceAndTerminalCovenants`, `testRecoveryQuorumCancelsExpiredUnusedAuthorizationOnlyAfterEmergencyDelay`, `scripts/verify-universal-flow.mjs`, and `scripts/verify-universal-reconciler.mjs`.
+
 ### M-01: Vault owner could replace the manager
 
 Severity: Medium
@@ -304,7 +347,7 @@ No production credential is intentionally tracked. The local dirty `lib/v4-core`
 
 ## Verification Results
 
-- clean `forge test --summary`: 85 tests passed
+- clean `forge test --summary`: 87 tests passed
 - `AgentPolicyRegistry` branch coverage: 100% (`23/23`)
 - `ProviderBondVault` branch coverage: 100% (`29/29`)
 - `CoverageEvidenceVerifier` branch coverage: 100% (`13/13`)

@@ -198,6 +198,90 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
         assertEq(vault.availableBond(provider), 4_500_000);
     }
 
+    function testExpiredUnusedFeeAuthorizationCancelsAndAllowsCleanRetry() public {
+        bytes32 id = _issueDefault();
+        CoverageManager.Covenant memory issued = manager.getCovenant(id);
+        CoverageManager.CancelUnpaidEvidence memory cancellation = CoverageManager.CancelUnpaidEvidence({
+            covenantId: id,
+            observedAt: uint64(block.timestamp),
+            feeAuthorizationHash: issued.feeAuthorizationHash,
+            nonSettlementEvidenceHash: keccak256("AUTHORIZATION_UNUSED")
+        });
+        bytes[] memory earlySignatures = _signatures(manager.cancelUnpaidEvidenceDigest(cancellation));
+        vm.expectRevert(CoverageManager.PaymentAuthorizationActive.selector);
+        manager.cancelUnpaid(cancellation, earlySignatures);
+
+        vm.warp(uint256(issued.feeAuthorizationValidBefore) + 1);
+        cancellation.observedAt = uint64(block.timestamp);
+        CoverageManager.CancelUnpaidEvidence memory mismatch = cancellation;
+        mismatch.feeAuthorizationHash = keccak256("DIFFERENT_AUTHORIZATION");
+        bytes[] memory mismatchSignatures = _signatures(manager.cancelUnpaidEvidenceDigest(mismatch));
+        vm.expectRevert(CoverageManager.PaymentAuthorizationMismatch.selector);
+        manager.cancelUnpaid(mismatch, mismatchSignatures);
+
+        cancellation.feeAuthorizationHash = issued.feeAuthorizationHash;
+        _cancelUnpaid(manager, cancellation);
+        assertEq(vault.availableBond(provider), 5_000_000);
+        assertEq(manager.coveredJobCovenant(JOB_ID), bytes32(0));
+        assertEq(uint256(manager.getCovenant(id).state), uint256(CoverageManager.CovenantState.CancelledUnpaid));
+
+        CoverageManager.IssueEvidence memory retry =
+            _issueEvidence(policyId, FINGERPRINT, JOB_ID, buyer, 500_000, 500_000);
+        retry.feeAuthorization.authorizationHash = keccak256("RETRY_FEE_AUTHORIZATION");
+        bytes32 retryId = _issue(manager, retry);
+        assertNotEq(retryId, id);
+        assertEq(manager.coveredJobCovenant(JOB_ID), retryId);
+        assertEq(vault.availableBond(provider), 4_500_000);
+    }
+
+    function testUnpaidCancellationRejectsStaleEvidenceAndTerminalCovenants() public {
+        bytes32 id = _issueDefault();
+        CoverageManager.Covenant memory issued = manager.getCovenant(id);
+        vm.warp(uint256(issued.feeAuthorizationValidBefore) + 1);
+        CoverageManager.CancelUnpaidEvidence memory stale = CoverageManager.CancelUnpaidEvidence({
+            covenantId: id,
+            observedAt: uint64(block.timestamp),
+            feeAuthorizationHash: issued.feeAuthorizationHash,
+            nonSettlementEvidenceHash: keccak256("STALE_NON_SETTLEMENT")
+        });
+        vm.warp(block.timestamp + manager.CANCELLATION_EVIDENCE_MAX_AGE() + 1);
+        bytes[] memory staleSignatures = _signatures(manager.cancelUnpaidEvidenceDigest(stale));
+        vm.expectRevert(CoverageManager.EvidenceStale.selector);
+        manager.cancelUnpaid(stale, staleSignatures);
+
+        CoverageManager.CancelUnpaidEvidence memory current = stale;
+        current.observedAt = uint64(block.timestamp);
+        bytes[] memory currentSignatures = _signatures(manager.cancelUnpaidEvidenceDigest(current));
+        manager.cancelUnpaid(current, currentSignatures);
+        vm.expectRevert(CoverageManager.CovenantNotActive.selector);
+        manager.cancelUnpaid(current, currentSignatures);
+    }
+
+    function testRecoveryQuorumCancelsExpiredUnusedAuthorizationOnlyAfterEmergencyDelay() public {
+        bytes32 id = _issueDefault();
+        CoverageManager.Covenant memory issued = manager.getCovenant(id);
+        vm.warp(uint256(issued.feeAuthorizationValidBefore) + 1);
+        CoverageManager.CancelUnpaidEvidence memory cancellation = CoverageManager.CancelUnpaidEvidence({
+            covenantId: id,
+            observedAt: uint64(block.timestamp),
+            feeAuthorizationHash: issued.feeAuthorizationHash,
+            nonSettlementEvidenceHash: keccak256("RECOVERY_QUORUM_AUTHORIZATION_UNUSED")
+        });
+        bytes[] memory earlySignatures = _recoverySignatures(manager.emergencyCancelUnpaidEvidenceDigest(cancellation));
+        vm.expectRevert(CoverageManager.EmergencyResolutionNotReady.selector);
+        manager.emergencyCancelUnpaid(cancellation, earlySignatures);
+
+        vm.warp(uint256(issued.feeAuthorizationValidBefore) + manager.EMERGENCY_EVIDENCE_DELAY() + 1);
+        cancellation.observedAt = uint64(block.timestamp);
+        manager.emergencyCancelUnpaid(
+            cancellation, _recoverySignatures(manager.emergencyCancelUnpaidEvidenceDigest(cancellation))
+        );
+
+        assertEq(uint256(manager.getCovenant(id).state), uint256(CoverageManager.CovenantState.CancelledUnpaid));
+        assertEq(manager.coveredJobCovenant(JOB_ID), bytes32(0));
+        assertEq(vault.availableBond(provider), 5_000_000);
+    }
+
     function testSingleRelayerCannotInventBuyerOrJobEvidence() public {
         CoverageManager.IssueEvidence memory legitimate =
             _issueEvidence(policyId, FINGERPRINT, JOB_ID, buyer, 500_000, 500_000);
@@ -270,7 +354,10 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
             buyerPaidAtomic: 500_000,
             verifiedAcceptanceAt: uint64(block.timestamp),
             enrollmentExpiresAt: uint64(block.timestamp + 60),
-            acceptanceEvidenceHash: keccak256("reentry-acceptance")
+            acceptanceEvidenceHash: keccak256("reentry-acceptance"),
+            feeAuthorization: CoverageManager.FeeAuthorization({
+                authorizationHash: keccak256("reentry-fee-authorization"), validBefore: uint64(block.timestamp + 600)
+            })
         });
         bytes[] memory signatures = _signatures(reentryManager.issueEvidenceDigest(evidence));
 
@@ -297,7 +384,10 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
             buyerPaidAtomic: 500_000,
             verifiedAcceptanceAt: uint64(block.timestamp),
             enrollmentExpiresAt: uint64(block.timestamp + 60),
-            acceptanceEvidenceHash: keccak256("static-acceptance-one")
+            acceptanceEvidenceHash: keccak256("static-acceptance-one"),
+            feeAuthorization: CoverageManager.FeeAuthorization({
+                authorizationHash: keccak256("static-fee-authorization-one"), validBefore: uint64(block.timestamp + 600)
+            })
         });
         simpleManager.issue(first, new bytes[](0));
         CoverageManager.IssueEvidence memory second = CoverageManager.IssueEvidence({
@@ -310,7 +400,11 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
             buyerPaidAtomic: first.buyerPaidAtomic,
             verifiedAcceptanceAt: first.verifiedAcceptanceAt,
             enrollmentExpiresAt: first.enrollmentExpiresAt,
-            acceptanceEvidenceHash: keccak256("static-acceptance-two")
+            acceptanceEvidenceHash: keccak256("static-acceptance-two"),
+            feeAuthorization: CoverageManager.FeeAuthorization({
+                authorizationHash: keccak256("static-fee-authorization-two"),
+                validBefore: first.feeAuthorization.validBefore
+            })
         });
 
         vm.expectRevert(CoverageManager.EvidenceAlreadyConsumed.selector);
@@ -490,7 +584,13 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
             ),
             bytes32(0)
         );
-        assertNotEq(manager.covenantId(policyId, JOB_ID, buyer), bytes32(0));
+        assertNotEq(
+            manager.hashCancelUnpaidEvidence(
+                CoverageManager.CancelUnpaidEvidence(JOB_ID, uint64(block.timestamp), FINGERPRINT, keccak256("UNUSED"))
+            ),
+            bytes32(0)
+        );
+        assertNotEq(manager.covenantId(policyId, JOB_ID, buyer, keccak256("fee-authorization")), bytes32(0));
     }
 
     function testCannotMarkBreachBeforeDeadlineOrSettleWithoutEvidence() public {
@@ -581,7 +681,11 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
             buyerPaidAtomic: paid,
             verifiedAcceptanceAt: uint64(block.timestamp),
             enrollmentExpiresAt: uint64(block.timestamp + 60),
-            acceptanceEvidenceHash: keccak256(abi.encode("OKX_ACCEPTANCE", jobId))
+            acceptanceEvidenceHash: keccak256(abi.encode("OKX_ACCEPTANCE", jobId)),
+            feeAuthorization: CoverageManager.FeeAuthorization({
+                authorizationHash: keccak256(abi.encode("POLICYPOOL_FEE_AUTHORIZATION", jobId, selectedBuyer)),
+                validBefore: uint64(block.timestamp + 600)
+            })
         });
     }
 

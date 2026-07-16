@@ -190,7 +190,11 @@ contract V04FreshnessAndRecoveryTest is CoverageEvidenceTestBase {
             buyerPaidAtomic: 500_000,
             verifiedAcceptanceAt: uint64(block.timestamp),
             enrollmentExpiresAt: uint64(block.timestamp + 60),
-            acceptanceEvidenceHash: keccak256(abi.encode("OKX_ACCEPTANCE", jobId))
+            acceptanceEvidenceHash: keccak256(abi.encode("OKX_ACCEPTANCE", jobId)),
+            feeAuthorization: CoverageManager.FeeAuthorization({
+                authorizationHash: keccak256(abi.encode("POLICYPOOL_FEE_AUTHORIZATION", jobId)),
+                validBefore: uint64(block.timestamp + 600)
+            })
         });
         bytes32 pendingId = _issue(manager, pendingEvidence);
         CoverageManager.ReleaseEvidence memory pendingRelease = CoverageManager.ReleaseEvidence({
@@ -270,7 +274,11 @@ contract V04FreshnessAndRecoveryTest is CoverageEvidenceTestBase {
             buyerPaidAtomic: 500_000,
             verifiedAcceptanceAt: uint64(block.timestamp),
             enrollmentExpiresAt: uint64(block.timestamp + 60),
-            acceptanceEvidenceHash: keccak256(abi.encode("OKX_ACCEPTANCE", jobId))
+            acceptanceEvidenceHash: keccak256(abi.encode("OKX_ACCEPTANCE", jobId)),
+            feeAuthorization: CoverageManager.FeeAuthorization({
+                authorizationHash: keccak256(abi.encode("POLICYPOOL_FEE_AUTHORIZATION", jobId)),
+                validBefore: uint64(block.timestamp + 600)
+            })
         });
         id = _issue(manager, evidence);
     }

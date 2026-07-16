@@ -51,9 +51,13 @@ contract CoverageManager {
     error EvidenceTopologyInvalid();
     error EvidenceSignerOverlap();
     error SettlementChallengeActive();
+    error PaymentAuthorizationActive();
+    error PaymentAuthorizationMismatch();
     error Reentrancy();
 
     uint256 public constant SETTLEMENT_EVIDENCE_MAX_AGE = 10 minutes;
+    uint256 public constant CANCELLATION_EVIDENCE_MAX_AGE = 10 minutes;
+    uint256 public constant MAX_FEE_AUTHORIZATION_WINDOW = 15 minutes;
     uint256 public constant SETTLEMENT_CHALLENGE_PERIOD = 24 hours;
     uint256 public constant EMERGENCY_EVIDENCE_DELAY = 30 days;
     uint256 public constant MIN_EVIDENCE_SIGNERS = 5;
@@ -64,10 +68,13 @@ contract CoverageManager {
     bytes32 public constant RELEASE_ACTION = keccak256("POLICYPOOL_RELEASE");
     bytes32 public constant BREACH_ACTION = keccak256("POLICYPOOL_BREACH");
     bytes32 public constant SETTLEMENT_ACTION = keccak256("POLICYPOOL_SETTLEMENT");
+    bytes32 public constant CANCEL_UNPAID_ACTION = keccak256("POLICYPOOL_CANCEL_UNPAID");
 
     bytes32 public constant ISSUE_EVIDENCE_TYPEHASH = keccak256(
-        "IssueEvidence(bytes32 policyId,bytes32 observedFingerprint,bytes32 jobId,address provider,address buyer,uint128 coverageCapAtomic,uint128 buyerPaidAtomic,uint64 verifiedAcceptanceAt,uint64 enrollmentExpiresAt,bytes32 acceptanceEvidenceHash)"
+        "IssueEvidence(bytes32 policyId,bytes32 observedFingerprint,bytes32 jobId,address provider,address buyer,uint128 coverageCapAtomic,uint128 buyerPaidAtomic,uint64 verifiedAcceptanceAt,uint64 enrollmentExpiresAt,bytes32 acceptanceEvidenceHash,FeeAuthorization feeAuthorization)FeeAuthorization(bytes32 authorizationHash,uint64 validBefore)"
     );
+    bytes32 public constant FEE_AUTHORIZATION_TYPEHASH =
+        keccak256("FeeAuthorization(bytes32 authorizationHash,uint64 validBefore)");
     bytes32 public constant CLOCK_EVIDENCE_TYPEHASH =
         keccak256("ClockEvidence(bytes32 covenantId,uint64 startedAt,bytes32 evidenceHash)");
     bytes32 public constant RELEASE_EVIDENCE_TYPEHASH =
@@ -77,6 +84,9 @@ contract CoverageManager {
     bytes32 public constant SETTLEMENT_EVIDENCE_TYPEHASH = keccak256(
         "SettlementEvidence(bytes32 covenantId,uint128 escrowRefundAtomic,uint128 otherRecoveryAtomic,uint64 observedAt,bool recoveryFinalized,bytes32 recoveryEvidenceHash)"
     );
+    bytes32 public constant CANCEL_UNPAID_EVIDENCE_TYPEHASH = keccak256(
+        "CancelUnpaidEvidence(bytes32 covenantId,uint64 observedAt,bytes32 feeAuthorizationHash,bytes32 nonSettlementEvidenceHash)"
+    );
 
     enum CovenantState {
         None,
@@ -85,7 +95,13 @@ contract CoverageManager {
         Released,
         PayoutDue,
         Paid,
-        RecoveredWithoutPayout
+        RecoveredWithoutPayout,
+        CancelledUnpaid
+    }
+
+    struct FeeAuthorization {
+        bytes32 authorizationHash;
+        uint64 validBefore;
     }
 
     struct IssueEvidence {
@@ -99,6 +115,7 @@ contract CoverageManager {
         uint64 verifiedAcceptanceAt;
         uint64 enrollmentExpiresAt;
         bytes32 acceptanceEvidenceHash;
+        FeeAuthorization feeAuthorization;
     }
 
     struct ClockEvidence {
@@ -129,6 +146,13 @@ contract CoverageManager {
         bytes32 recoveryEvidenceHash;
     }
 
+    struct CancelUnpaidEvidence {
+        bytes32 covenantId;
+        uint64 observedAt;
+        bytes32 feeAuthorizationHash;
+        bytes32 nonSettlementEvidenceHash;
+    }
+
     struct Covenant {
         bytes32 id;
         bytes32 policyId;
@@ -152,6 +176,8 @@ contract CoverageManager {
         bytes32 acceptanceEvidenceHash;
         bytes32 breachEvidenceHash;
         bytes32 recoveryEvidenceHash;
+        bytes32 feeAuthorizationHash;
+        uint64 feeAuthorizationValidBefore;
         bool recoveryFinalized;
     }
 
@@ -178,6 +204,8 @@ contract CoverageManager {
         uint8 payoutBasis,
         uint8 clockMode,
         bytes32 acceptanceEvidenceHash,
+        bytes32 feeAuthorizationHash,
+        uint256 feeAuthorizationValidBefore,
         bytes32 evidenceDigest
     );
     event CovenantClockStarted(
@@ -203,6 +231,13 @@ contract CoverageManager {
         bytes32 recoveryEvidenceHash,
         bytes32 evidenceDigest,
         CovenantState finalState
+    );
+    event CovenantCancelledUnpaid(
+        bytes32 indexed covenantId,
+        uint256 observedAt,
+        bytes32 feeAuthorizationHash,
+        bytes32 nonSettlementEvidenceHash,
+        bytes32 evidenceDigest
     );
     event EmergencyEvidenceUsed(
         bytes32 indexed covenantId, bytes32 indexed action, address indexed verifier, bytes32 evidenceDigest
@@ -239,11 +274,22 @@ contract CoverageManager {
         return covenants[covenantId_];
     }
 
-    function covenantId(bytes32 policyId, bytes32 jobId, address buyer) public pure returns (bytes32) {
-        return keccak256(abi.encode(policyId, jobId, buyer));
+    function covenantId(bytes32 policyId, bytes32 jobId, address buyer, bytes32 feeAuthorizationHash)
+        public
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(policyId, jobId, buyer, feeAuthorizationHash));
     }
 
     function hashIssueEvidence(IssueEvidence memory evidence) public pure returns (bytes32) {
+        bytes32 feeAuthorizationHash = keccak256(
+            abi.encode(
+                FEE_AUTHORIZATION_TYPEHASH,
+                evidence.feeAuthorization.authorizationHash,
+                evidence.feeAuthorization.validBefore
+            )
+        );
         return keccak256(
             abi.encode(
                 ISSUE_EVIDENCE_TYPEHASH,
@@ -256,7 +302,8 @@ contract CoverageManager {
                 evidence.buyerPaidAtomic,
                 evidence.verifiedAcceptanceAt,
                 evidence.enrollmentExpiresAt,
-                evidence.acceptanceEvidenceHash
+                evidence.acceptanceEvidenceHash,
+                feeAuthorizationHash
             )
         );
     }
@@ -300,6 +347,18 @@ contract CoverageManager {
         );
     }
 
+    function hashCancelUnpaidEvidence(CancelUnpaidEvidence memory evidence) public pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                CANCEL_UNPAID_EVIDENCE_TYPEHASH,
+                evidence.covenantId,
+                evidence.observedAt,
+                evidence.feeAuthorizationHash,
+                evidence.nonSettlementEvidenceHash
+            )
+        );
+    }
+
     function issueEvidenceDigest(IssueEvidence calldata evidence) external view returns (bytes32) {
         return evidenceVerifier.attestationDigest(address(this), ISSUE_ACTION, hashIssueEvidence(evidence));
     }
@@ -320,6 +379,11 @@ contract CoverageManager {
         return evidenceVerifier.attestationDigest(address(this), SETTLEMENT_ACTION, hashSettlementEvidence(evidence));
     }
 
+    function cancelUnpaidEvidenceDigest(CancelUnpaidEvidence calldata evidence) external view returns (bytes32) {
+        return
+            evidenceVerifier.attestationDigest(address(this), CANCEL_UNPAID_ACTION, hashCancelUnpaidEvidence(evidence));
+    }
+
     function emergencyReleaseEvidenceDigest(ReleaseEvidence calldata evidence) external view returns (bytes32) {
         return recoveryEvidenceVerifier.attestationDigest(address(this), RELEASE_ACTION, hashReleaseEvidence(evidence));
     }
@@ -335,6 +399,16 @@ contract CoverageManager {
             );
     }
 
+    function emergencyCancelUnpaidEvidenceDigest(CancelUnpaidEvidence calldata evidence)
+        external
+        view
+        returns (bytes32)
+    {
+        return recoveryEvidenceVerifier.attestationDigest(
+            address(this), CANCEL_UNPAID_ACTION, hashCancelUnpaidEvidence(evidence)
+        );
+    }
+
     function issue(IssueEvidence calldata evidence, bytes[] calldata signatures)
         external
         nonReentrant
@@ -345,7 +419,7 @@ contract CoverageManager {
         uint64 deadline = clockMode == 0 ? evidence.verifiedAcceptanceAt + slaSeconds : 0;
         if (clockMode == 0 && deadline <= block.timestamp) revert InvalidCovenant();
 
-        id = covenantId(evidence.policyId, evidence.jobId, evidence.buyer);
+        id = covenantId(evidence.policyId, evidence.jobId, evidence.buyer, evidence.feeAuthorization.authorizationHash);
         if (covenants[id].state != CovenantState.None) revert CovenantAlreadyExists();
         if (coveredJobCovenant[evidence.jobId] != bytes32(0)) revert JobAlreadyCovered();
 
@@ -425,6 +499,25 @@ contract CoverageManager {
         Covenant storage covenant = covenants[evidence.covenantId];
         _requireEmergencyDelay(covenant, CovenantState.PayoutDue, covenant.deadline);
         payoutAtomic = _settleNetLoss(evidence, signatures, recoveryEvidenceVerifier, true);
+    }
+
+    /// @notice Releases a bond only when the exact fee authorization bound at issuance expired unused.
+    /// @dev The evidence quorum must independently verify that no fee settlement used the authorization.
+    function cancelUnpaid(CancelUnpaidEvidence calldata evidence, bytes[] calldata signatures) external nonReentrant {
+        _cancelUnpaid(evidence, signatures, evidenceVerifier, false);
+    }
+
+    /// @notice Delayed cancellation through the disjoint recovery quorum if the primary quorum is unavailable.
+    function emergencyCancelUnpaid(CancelUnpaidEvidence calldata evidence, bytes[] calldata signatures)
+        external
+        nonReentrant
+    {
+        Covenant storage covenant = covenants[evidence.covenantId];
+        if (
+            covenant.feeAuthorizationValidBefore == 0
+                || block.timestamp <= uint256(covenant.feeAuthorizationValidBefore) + EMERGENCY_EVIDENCE_DELAY
+        ) revert EmergencyResolutionNotReady();
+        _cancelUnpaid(evidence, signatures, recoveryEvidenceVerifier, true);
     }
 
     function _release(
@@ -532,6 +625,47 @@ contract CoverageManager {
         );
     }
 
+    function _cancelUnpaid(
+        CancelUnpaidEvidence calldata evidence,
+        bytes[] calldata signatures,
+        ICoverageEvidenceVerifier verifier,
+        bool emergency
+    ) private {
+        Covenant storage covenant = covenants[evidence.covenantId];
+        if (
+            covenant.state != CovenantState.PendingStart && covenant.state != CovenantState.Active
+                && covenant.state != CovenantState.PayoutDue
+        ) revert CovenantNotActive();
+        if (evidence.feeAuthorizationHash != covenant.feeAuthorizationHash) {
+            revert PaymentAuthorizationMismatch();
+        }
+        if (
+            evidence.observedAt <= covenant.feeAuthorizationValidBefore || evidence.observedAt > block.timestamp
+                || evidence.nonSettlementEvidenceHash == bytes32(0)
+        ) revert PaymentAuthorizationActive();
+        if (block.timestamp > uint256(evidence.observedAt) + CANCELLATION_EVIDENCE_MAX_AGE) revert EvidenceStale();
+        bytes32 digest = _consumeEvidence(
+            verifier,
+            CANCEL_UNPAID_ACTION,
+            hashCancelUnpaidEvidence(evidence),
+            signatures,
+            emergency,
+            evidence.covenantId
+        );
+        covenant.state = CovenantState.CancelledUnpaid;
+        if (coveredJobCovenant[covenant.jobId] == evidence.covenantId) {
+            coveredJobCovenant[covenant.jobId] = bytes32(0);
+        }
+        bondVault.release(evidence.covenantId);
+        emit CovenantCancelledUnpaid(
+            evidence.covenantId,
+            evidence.observedAt,
+            evidence.feeAuthorizationHash,
+            evidence.nonSettlementEvidenceHash,
+            digest
+        );
+    }
+
     function _requireEmergencyReleaseDelay(Covenant storage covenant) private view {
         if (covenant.state != CovenantState.Active && covenant.state != CovenantState.PayoutDue) {
             revert CovenantNotActive();
@@ -559,6 +693,9 @@ contract CoverageManager {
                 || evidence.coverageCapAtomic > evidence.buyerPaidAtomic || evidence.verifiedAcceptanceAt == 0
                 || evidence.verifiedAcceptanceAt > block.timestamp || evidence.enrollmentExpiresAt <= block.timestamp
                 || evidence.acceptanceEvidenceHash == bytes32(0)
+                || evidence.feeAuthorization.authorizationHash == bytes32(0)
+                || evidence.feeAuthorization.validBefore <= block.timestamp
+                || evidence.feeAuthorization.validBefore > block.timestamp + MAX_FEE_AUTHORIZATION_WINDOW
         ) revert InvalidCovenant();
     }
 
@@ -612,6 +749,8 @@ contract CoverageManager {
             acceptanceEvidenceHash: evidence.acceptanceEvidenceHash,
             breachEvidenceHash: bytes32(0),
             recoveryEvidenceHash: bytes32(0),
+            feeAuthorizationHash: evidence.feeAuthorization.authorizationHash,
+            feeAuthorizationValidBefore: evidence.feeAuthorization.validBefore,
             recoveryFinalized: false
         });
     }
@@ -630,6 +769,8 @@ contract CoverageManager {
             covenant.payoutBasis,
             covenant.clockMode,
             evidence.acceptanceEvidenceHash,
+            evidence.feeAuthorization.authorizationHash,
+            evidence.feeAuthorization.validBefore,
             digest
         );
     }

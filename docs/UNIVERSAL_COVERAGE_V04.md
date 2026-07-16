@@ -188,18 +188,18 @@ Production remains v0.3, `/api/manifest` remains the active contract, universal 
 
 ## Internal Audit Checkpoint
 
-The July 16 internal reviews and remediation are recorded in [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md). The original High single-operator finding is remediated in source. The later hostile review's stale-settlement, release-ordering, and quorum-loss findings are also remediated in source with terminal recovery plus 10-minute settlement-evidence freshness, a 24-hour challenge period with signed completion time, and a 30-day delayed recovery quorum. GitHub Codex's runtime review then found and prompted remediation of unpaid header-only relay clocks and DNS rebinding between endpoint validation and connection. The candidate suite passes 85 Foundry tests, and the runtime relay gate covers the two additional findings.
+The July 16 internal reviews and remediation are recorded in [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md). The original High single-operator finding is remediated in source. The later hostile review's stale-settlement, release-ordering, and quorum-loss findings are also remediated in source with terminal recovery plus 10-minute settlement-evidence freshness, a 24-hour challenge period with signed completion time, and a 30-day delayed recovery quorum. GitHub Codex's runtime reviews then prompted remediation of unpaid header-only relay clocks, DNS rebinding between endpoint validation and connection, the missing payout-due settlement path, and post-deadline fee-failure bond lock. The candidate suite passes 88 Foundry tests; runtime gates now cover paid relay proof, terminal settlement, challenge holds, uncertain issuance reconciliation, and primary plus recovery-quorum expired-unused fee cancellation.
 
 Core branch coverage:
 
 - `AgentPolicyRegistry`: `100%` (`23/23`)
 - `ProviderBondVault`: `100%` (`29/29`)
 - `CoverageEvidenceVerifier`: `100%` (`13/13`)
-- `CoverageManager`: `94.87%` (`37/39`)
+- `CoverageManager`: `93.33%` (`42/45`)
 - `OkxA2AClockAdapter`: `100%` (`6/6`)
 - `RelayReceiptVerifier`: `100%` (`8/8`)
 
-The two uncovered manager branches are defensive states excluded by construction: an A2A deadline cannot already be elapsed while its shorter enrollment window remains open under `enrollmentWindowSeconds <= slaSeconds`, and an `Active` or `PayoutDue` covenant cannot enter emergency resolution with an unset deadline.
+The three reported uncovered manager branches are defensive paths: the explicit reentrancy behavior test is not attributed to the guard branch by Foundry coverage instrumentation; an A2A deadline cannot already be elapsed while its shorter enrollment window remains open under `enrollmentWindowSeconds <= slaSeconds`; and an `Active` or `PayoutDue` covenant cannot enter emergency resolution with an unset deadline.
 
 This is still an internal review. Claude's second review is another internal adversarial pass, not a qualified independent human audit.
 
@@ -243,8 +243,9 @@ Rollback stops new issuance by setting `POLICYPOOL_UNIVERSAL_ENABLED=false`. Exi
 - This internal work is not a qualified independent audit.
 - The canonical X Layer ERC-8004 registry is an externally controlled EIP-1967 proxy; ownership checks inherit its upgrade and availability risk.
 - OKX.AI exposes no documented stable JSON service directory, so strict cached HTML parsing remains an external dependency and fails closed when stale.
-- A2A delivery timing needs a public task reference and historical timestamp. Current status alone does not prove timing.
+- A2A delivery timing and terminal recovery need a public task reference and historical timestamp. v0.4 A2A issuance rejects requests without one; current status alone does not prove timing or authorize settlement.
 - A2MCP coverage requires the PolicyPool relay; direct provider calls cannot prove the processing-start clock.
 - Relay execution is at-most-once. An uncertain provider response requires investigation rather than an automatic paid retry.
+- Coverage-fee failure never masquerades as provider delivery. The exact fee authorization is bound at issuance; uncertain issuance remains durable until expiry and chain recheck, after which quorum-attested non-settlement can cancel an unpaid covenant and unlock a clean retry.
 - Policy expiry is the last issuance time, not the deadline by which an existing covenant must finish.
 - Provider premiums, shared-reserve co-coverage, subjective quality claims, ratings, additional chains, and discretionary automated payouts remain out of scope.

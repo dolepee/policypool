@@ -106,9 +106,28 @@ Source remediation:
 
 Regression: `npm run agent:verify-relay` rejects malformed headers, wrong amounts, wrong signers, absent settlement evidence, authorization replay under a fresh grant, private DNS, and unpinned connection metadata. It proves that only a signature-valid, nonce-bound, on-chain-verified provider payment creates a relay clock.
 
+### Universal lifecycle findings remediated in source
+
+GitHub Codex found two additional High/P1 lifecycle gaps:
+
+- payout-due covenants had no operational settlement path, so a valid breach could hold buyer and provider funds indefinitely even after the challenge and terminal recovery checks were satisfiable;
+- a failed coverage-fee settlement could strand provider bond because compensation reused the delivery-release action with a post-deadline timestamp.
+
+Source remediation keeps the evidence meanings separate:
+
+- the scheduled reconciler now settles only after the on-chain 24-hour challenge and independently attestable terminal recovery; nonterminal or ambiguous recovery remains on hold;
+- v0.4 A2A issuance requires a public task reference so terminal status, historical timing, and refund evidence can be re-derived;
+- issue evidence binds the exact x402 fee authorization and its expiry;
+- failed or unconfirmed coverage-fee settlement queues compensation rather than claiming provider delivery;
+- an uncertain issuance broadcast retains its planned covenant ID and cannot be discarded until the fee authorization expires and chain state proves no covenant exists;
+- after authorization expiry, a fresh quorum attestation that the authorization remains unused may call `cancelUnpaid`, release the bond, and clear only the unpaid job lock;
+- cancellation evidence expires after ten minutes, and the recovery quorum path remains delayed 30 days.
+
+Residual: fee non-settlement and terminal marketplace recovery are permissioned-oracle facts. Attesters must query the chain and OKX evidence directly. A settlement timeout or relayer error is never sufficient evidence by itself.
+
 ### Static analysis
 
-Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 29 raw results and no unclassified v0.4 manager/verifier custody bypass. Relevant warning dispositions are:
+Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 31 raw results and no unclassified v0.4 manager/verifier custody bypass. Relevant warning dispositions are:
 
 - `ProviderBondVault.depositFor` performs an external token call before crediting the bond. The function is protected by its `nonReentrant` guard, requires the exact vault balance delta, and rejects false-return and fee-on-transfer assets. A malicious callback test confirms re-entry fails and the outer deposit rolls back.
 - `CoverageManager` calls immutable verifier and vault dependencies. Every state-changing entry point is `nonReentrant`, state is written before the vault call, and any dependency revert rolls back the full transaction.
@@ -123,7 +142,7 @@ Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 29 raw re
 
 ### Adversarial coverage gate
 
-The remediated custody/state-transition suite passes 85 Foundry tests and includes executable hostile regressions for stale settlement, terminal recovery, late completion, provisional-breach correction, primary and emergency challenge-period ordering, quorum separation, and delayed recovery.
+The remediated custody/state-transition suite passes 88 Foundry tests and includes executable hostile regressions for stale settlement, terminal recovery, late completion, provisional-breach correction, primary and emergency challenge-period ordering, quorum separation, delayed recovery, primary and recovery-quorum expired-unused fee cancellation, and uncertain issuance reconciliation.
 
 - `AgentPolicyRegistry`: `100%` (`23/23`);
 - `ProviderBondVault`: `100%` (`29/29`);

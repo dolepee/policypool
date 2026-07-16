@@ -13,14 +13,15 @@ import { createEvidenceAttestationClient, EvidenceAttestationError } from "./evi
 import { universalConfiguration } from "./universal-config.js";
 import { isBytes32 } from "./utils.js";
 
-const ISSUE_TUPLE = "(bytes32 policyId,bytes32 observedFingerprint,bytes32 jobId,address provider,address buyer,uint128 coverageCapAtomic,uint128 buyerPaidAtomic,uint64 verifiedAcceptanceAt,uint64 enrollmentExpiresAt,bytes32 acceptanceEvidenceHash)";
+const ISSUE_TUPLE = "(bytes32 policyId,bytes32 observedFingerprint,bytes32 jobId,address provider,address buyer,uint128 coverageCapAtomic,uint128 buyerPaidAtomic,uint64 verifiedAcceptanceAt,uint64 enrollmentExpiresAt,bytes32 acceptanceEvidenceHash,(bytes32 authorizationHash,uint64 validBefore) feeAuthorization)";
 const CLOCK_TUPLE = "(bytes32 covenantId,uint64 startedAt,bytes32 evidenceHash)";
 const OBSERVATION_TUPLE = "(bytes32 covenantId,uint64 observedAt,bytes32 evidenceHash)";
 const RELEASE_TUPLE = "(bytes32 covenantId,uint64 completedAt,uint64 observedAt,bytes32 evidenceHash)";
 const SETTLEMENT_TUPLE = "(bytes32 covenantId,uint128 escrowRefundAtomic,uint128 otherRecoveryAtomic,uint64 observedAt,bool recoveryFinalized,bytes32 recoveryEvidenceHash)";
+const CANCEL_UNPAID_TUPLE = "(bytes32 covenantId,uint64 observedAt,bytes32 feeAuthorizationHash,bytes32 nonSettlementEvidenceHash)";
 
 const MANAGER_ABI = parseAbi([
-  "function getCovenant(bytes32 covenantId) view returns ((bytes32 id,bytes32 policyId,bytes32 jobId,address provider,address buyer,uint128 coverageCapAtomic,uint128 buyerPaidAtomic,uint64 issuedAt,uint64 startAt,uint64 deadline,uint64 enrollmentExpiresAt,uint64 payoutDueAt,uint64 completedAt,uint64 recoveryObservedAt,uint32 slaSeconds,uint8 payoutBasis,uint8 clockMode,uint8 state,uint128 payoutAtomic,bytes32 acceptanceEvidenceHash,bytes32 breachEvidenceHash,bytes32 recoveryEvidenceHash,bool recoveryFinalized))",
+  "function getCovenant(bytes32 covenantId) view returns ((bytes32 id,bytes32 policyId,bytes32 jobId,address provider,address buyer,uint128 coverageCapAtomic,uint128 buyerPaidAtomic,uint64 issuedAt,uint64 startAt,uint64 deadline,uint64 enrollmentExpiresAt,uint64 payoutDueAt,uint64 completedAt,uint64 recoveryObservedAt,uint32 slaSeconds,uint8 payoutBasis,uint8 clockMode,uint8 state,uint128 payoutAtomic,bytes32 acceptanceEvidenceHash,bytes32 breachEvidenceHash,bytes32 recoveryEvidenceHash,bytes32 feeAuthorizationHash,uint64 feeAuthorizationValidBefore,bool recoveryFinalized))",
   `function issue(${ISSUE_TUPLE} evidence, bytes[] signatures) returns (bytes32)`,
   `function issueEvidenceDigest(${ISSUE_TUPLE} evidence) view returns (bytes32)`,
   `function release(${RELEASE_TUPLE} evidence, bytes[] signatures)`,
@@ -38,6 +39,10 @@ const MANAGER_ABI = parseAbi([
   `function emergencyBreachEvidenceDigest(${OBSERVATION_TUPLE} evidence) view returns (bytes32)`,
   `function emergencySettleNetLoss(${SETTLEMENT_TUPLE} evidence, bytes[] signatures) returns (uint256)`,
   `function emergencySettlementEvidenceDigest(${SETTLEMENT_TUPLE} evidence) view returns (bytes32)`,
+  `function cancelUnpaid(${CANCEL_UNPAID_TUPLE} evidence, bytes[] signatures)`,
+  `function cancelUnpaidEvidenceDigest(${CANCEL_UNPAID_TUPLE} evidence) view returns (bytes32)`,
+  `function emergencyCancelUnpaid(${CANCEL_UNPAID_TUPLE} evidence, bytes[] signatures)`,
+  `function emergencyCancelUnpaidEvidenceDigest(${CANCEL_UNPAID_TUPLE} evidence) view returns (bytes32)`,
 ]);
 
 export class UniversalIssuerError extends Error {
@@ -215,6 +220,8 @@ export function createUniversalIssuer({
         acceptanceEvidenceHash: value.acceptanceEvidenceHash,
         breachEvidenceHash: value.breachEvidenceHash,
         recoveryEvidenceHash: value.recoveryEvidenceHash,
+        feeAuthorizationHash: value.feeAuthorizationHash,
+        feeAuthorizationValidBefore: Number(value.feeAuthorizationValidBefore),
         recoveryFinalized: Boolean(value.recoveryFinalized),
       };
     } catch (error) {
@@ -224,7 +231,10 @@ export function createUniversalIssuer({
     }
   }
 
-  async function issue({ policy, targetOrder, coverageCapAtomic, enrollmentClosesAt }) {
+  async function issue({ policy, targetOrder, coverageCapAtomic, enrollmentClosesAt, paymentAuthorization }) {
+    if (!isBytes32(paymentAuthorization?.hash)) {
+      throw new UniversalIssuerError("fee_authorization_hash_invalid", 422);
+    }
     const evidence = {
       policyId: policyId(policy?.onchainPolicyId),
       observedFingerprint: policy.serviceFingerprint,
@@ -236,8 +246,12 @@ export function createUniversalIssuer({
       verifiedAcceptanceAt: BigInt(seconds(targetOrder.acceptedAt, "target_acceptance_time")),
       enrollmentExpiresAt: BigInt(seconds(enrollmentClosesAt, "coverage_enrollment_close")),
       acceptanceEvidenceHash: acceptanceEvidenceHash(targetOrder),
+      feeAuthorization: {
+        authorizationHash: paymentAuthorization.hash,
+        validBefore: BigInt(paymentAuthorization.validBefore),
+      },
     };
-    const id = previewCovenantId({ policy, targetOrder });
+    const id = previewCovenantId({ policy, targetOrder, paymentAuthorization });
     return {
       covenantId: id,
       ...(await attestedWrite({
@@ -245,16 +259,19 @@ export function createUniversalIssuer({
         digestFunctionName: "issueEvidenceDigest",
         action: "issue",
         evidence,
-        context: { policy, targetOrder },
+        context: { policy, targetOrder, paymentAuthorization },
       })),
     };
   }
 
-  function previewCovenantId({ policy, targetOrder }) {
+  function previewCovenantId({ policy, targetOrder, paymentAuthorization }) {
     const onchainPolicyId = policyId(policy?.onchainPolicyId);
+    if (!isBytes32(paymentAuthorization?.hash)) {
+      throw new UniversalIssuerError("fee_authorization_hash_invalid", 422);
+    }
     return keccak256(encodeAbiParameters(
-      [{ type: "bytes32" }, { type: "bytes32" }, { type: "address" }],
-      [onchainPolicyId, targetOrder.jobId, targetOrder.buyer],
+      [{ type: "bytes32" }, { type: "bytes32" }, { type: "address" }, { type: "bytes32" }],
+      [onchainPolicyId, targetOrder.jobId, targetOrder.buyer, paymentAuthorization.hash],
     ));
   }
 
@@ -401,6 +418,45 @@ export function createUniversalIssuer({
     });
   }
 
+  async function cancelUnpaid(covenantId, feeAuthorizationHash, nonSettlementEvidenceHash, context = {}) {
+    if (![covenantId, feeAuthorizationHash, nonSettlementEvidenceHash].every(isBytes32)) {
+      throw new UniversalIssuerError("unpaid_cancellation_evidence_invalid", 422);
+    }
+    const evidence = {
+      covenantId,
+      observedAt: BigInt(Math.floor(now() / 1_000)),
+      feeAuthorizationHash,
+      nonSettlementEvidenceHash,
+    };
+    return attestedWrite({
+      functionName: "cancelUnpaid",
+      digestFunctionName: "cancelUnpaidEvidenceDigest",
+      action: "cancel_unpaid",
+      evidence,
+      context,
+    });
+  }
+
+  async function emergencyCancelUnpaid(covenantId, feeAuthorizationHash, nonSettlementEvidenceHash, context = {}) {
+    if (![covenantId, feeAuthorizationHash, nonSettlementEvidenceHash].every(isBytes32)) {
+      throw new UniversalIssuerError("unpaid_cancellation_evidence_invalid", 422);
+    }
+    const evidence = {
+      covenantId,
+      observedAt: BigInt(Math.floor(now() / 1_000)),
+      feeAuthorizationHash,
+      nonSettlementEvidenceHash,
+    };
+    return attestedWrite({
+      functionName: "emergencyCancelUnpaid",
+      digestFunctionName: "emergencyCancelUnpaidEvidenceDigest",
+      action: "cancel_unpaid",
+      evidence,
+      context,
+      recovery: true,
+    });
+  }
+
   return {
     issue,
     previewCovenantId,
@@ -413,6 +469,8 @@ export function createUniversalIssuer({
     emergencyMarkPayoutDue,
     settleNetLoss,
     emergencySettleNetLoss,
+    cancelUnpaid,
+    emergencyCancelUnpaid,
     relayer: account.address,
   };
 }

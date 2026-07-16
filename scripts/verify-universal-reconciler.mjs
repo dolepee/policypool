@@ -12,10 +12,27 @@ const tasks = new Map();
 const writes = [];
 
 function stateNumber(state) {
-  return { pending_start: 1, active: 2, released: 3, payout_due: 4, paid: 5 }[state];
+  return {
+    pending_start: 1,
+    active: 2,
+    released: 3,
+    payout_due: 4,
+    paid: 5,
+    recovered_without_payout: 6,
+    cancelled_unpaid: 7,
+  }[state];
 }
 
-async function seed({ id, state, clockMode, deadline, enrollmentClosedAt, publicTaskReference = null }) {
+async function seed({
+  id,
+  state,
+  clockMode,
+  deadline,
+  enrollmentClosedAt,
+  publicTaskReference = null,
+  payoutDueAt = null,
+  payoutBasis = 0,
+}) {
   const jobId = `0x${id.repeat(64).slice(0, 64)}`;
   const covenantId = `0x${(Number.parseInt(id, 16) + 8).toString(16).repeat(64).slice(0, 64)}`;
   const record = {
@@ -26,7 +43,7 @@ async function seed({ id, state, clockMode, deadline, enrollmentClosedAt, public
     liabilityAtomic: "0",
     providerBondLiabilityAtomic: "500000",
     universalCovenant: { covenantId },
-    targetOrder: { jobId, publicTaskReference },
+    targetOrder: { jobId, publicTaskReference, amountAtomic: "500000" },
     receipt: {
       version: "0.4.0",
       target: { clockMode, slaSeconds: 300 },
@@ -39,6 +56,12 @@ async function seed({ id, state, clockMode, deadline, enrollmentClosedAt, public
     state: stateNumber(state),
     jobId,
     deadline: deadline ? Math.floor(Date.parse(deadline) / 1000) : 0,
+    payoutDueAt: payoutDueAt ? Math.floor(Date.parse(payoutDueAt) / 1000) : 0,
+    payoutBasis,
+    buyerPaidAtomic: "500000",
+    coverageCapAtomic: "500000",
+    payoutAtomic: "0",
+    feeAuthorizationHash: `0x${id.repeat(64).slice(0, 64)}`,
   });
   chainStates.set(jobId, 1);
   return { ...record, state, jobId, covenantId };
@@ -109,7 +132,19 @@ const compensated = await seed({
 await ledger.transitionUniversal({
   ...(await ledger.get(compensated.receiptId)),
   state: "compensation_required",
-  compensation: { reason: "coverage_fee_not_settled" },
+  feeAuthorization: {
+    hash: covenantStates.get(compensated.covenantId).feeAuthorizationHash,
+    nonce: `0x${"55".repeat(32)}`,
+    validBefore: String(Math.floor(Date.parse("2026-07-16T12:50:00.000Z") / 1_000)),
+  },
+  compensation: {
+    reason: "coverage_fee_not_settled",
+    feeAuthorization: {
+      hash: covenantStates.get(compensated.covenantId).feeAuthorizationHash,
+      nonce: `0x${"55".repeat(32)}`,
+      validBefore: String(Math.floor(Date.parse("2026-07-16T12:50:00.000Z") / 1_000)),
+    },
+  },
 }, ["pending_start"]);
 covenantStates.get(compensated.covenantId).state = 1;
 
@@ -131,10 +166,121 @@ tasks.set("405669", {
   stale: false,
 });
 
+const terminalRecovery = await seed({
+  id: "7",
+  state: "payout_due",
+  clockMode: "verified_acceptance",
+  deadline: "2026-07-15T11:59:00.000Z",
+  payoutDueAt: "2026-07-15T12:00:00.000Z",
+  enrollmentClosedAt: "2026-07-15T11:55:00.000Z",
+  publicTaskReference: "405670",
+});
+tasks.set("405670", {
+  publicTaskId: "405670",
+  publicUrl: "https://www.okx.ai/tasks/405670",
+  jobId: terminalRecovery.jobId,
+  status: 9,
+  submittedAt: null,
+  completedAt: "2026-07-16T12:40:00.000Z",
+  stale: false,
+});
+
+const challengeActive = await seed({
+  id: "8",
+  state: "payout_due",
+  clockMode: "verified_acceptance",
+  deadline: "2026-07-16T11:59:00.000Z",
+  payoutDueAt: "2026-07-16T12:00:00.000Z",
+  enrollmentClosedAt: "2026-07-16T11:55:00.000Z",
+  publicTaskReference: "405671",
+});
+tasks.set("405671", {
+  publicTaskId: "405671",
+  publicUrl: "https://www.okx.ai/tasks/405671",
+  jobId: challengeActive.jobId,
+  status: 9,
+  submittedAt: null,
+  completedAt: "2026-07-16T12:40:00.000Z",
+  stale: false,
+});
+
+const issuancePending = await seed({
+  id: "9",
+  state: "pending_start",
+  clockMode: "policypool_relay",
+  deadline: null,
+  enrollmentClosedAt: "2026-07-16T13:02:00.000Z",
+});
+await ledger.transitionUniversal({
+  ...(await ledger.get(issuancePending.receiptId)),
+  state: "compensation_required",
+  compensation: {
+    reason: "coverage_issuance_outcome_unconfirmed",
+    feeAuthorization: {
+      hash: covenantStates.get(issuancePending.covenantId).feeAuthorizationHash,
+      nonce: `0x${"99".repeat(32)}`,
+      validBefore: String(Math.floor(Date.parse("2026-07-16T13:05:00.000Z") / 1_000)),
+    },
+  },
+}, ["pending_start"]);
+covenantStates.get(issuancePending.covenantId).state = 0;
+
+const issuanceAbsent = await seed({
+  id: "a",
+  state: "pending_start",
+  clockMode: "policypool_relay",
+  deadline: null,
+  enrollmentClosedAt: "2026-07-16T13:02:00.000Z",
+});
+await ledger.transitionUniversal({
+  ...(await ledger.get(issuanceAbsent.receiptId)),
+  state: "compensation_required",
+  compensation: {
+    reason: "coverage_issuance_outcome_unconfirmed",
+    feeAuthorization: {
+      hash: covenantStates.get(issuanceAbsent.covenantId).feeAuthorizationHash,
+      nonce: `0x${"aa".repeat(32)}`,
+      validBefore: String(Math.floor(Date.parse("2026-07-16T12:50:00.000Z") / 1_000)),
+    },
+  },
+}, ["pending_start"]);
+covenantStates.get(issuanceAbsent.covenantId).state = 0;
+
+const interruptedJobId = `0x${"bb".repeat(32)}`;
+const interruptedCovenantId = `0x${"fe".repeat(32)}`;
+const interruptedFeeAuthorization = {
+  hash: `0x${"dd".repeat(32)}`,
+  nonce: `0x${"ee".repeat(32)}`,
+  validBefore: String(Math.floor(Date.parse("2026-07-16T12:50:00.000Z") / 1_000)),
+};
+const interruptedPending = {
+  receiptId: "ppc-interrupted-pending",
+  requestId: "request-interrupted-pending",
+  paymentId: "payment-interrupted-pending",
+  state: "pending",
+  liabilityAtomic: "0",
+  providerBondLiabilityAtomic: "500000",
+  feeAuthorization: interruptedFeeAuthorization,
+  universalCovenant: { covenantId: interruptedCovenantId, state: "planned" },
+  targetOrder: { jobId: interruptedJobId, amountAtomic: "500000" },
+};
+await ledger.reserve(interruptedPending, 0n);
+covenantStates.set(interruptedCovenantId, {
+  state: 2,
+  jobId: interruptedJobId,
+  deadline: Math.floor(Date.parse("2026-07-16T13:05:00.000Z") / 1_000),
+  payoutDueAt: 0,
+  payoutBasis: 0,
+  buyerPaidAtomic: "500000",
+  coverageCapAtomic: "500000",
+  payoutAtomic: "0",
+  feeAuthorizationHash: interruptedFeeAuthorization.hash,
+});
+
 const issuer = {
   async getCovenant(covenantId) {
     const value = covenantStates.get(covenantId);
-    return { id: covenantId, jobId: value.jobId, state: value.state, deadline: value.deadline };
+    return { id: covenantId, ...value };
   },
   async startClock(covenantId, startedAt, evidenceHash) {
     assert.match(evidenceHash, /^0x[a-f0-9]{64}$/);
@@ -153,6 +299,28 @@ const issuer = {
     writes.push({ action: "expire", covenantId });
     covenantStates.get(covenantId).state = 3;
   },
+  async cancelUnpaid(covenantId, feeAuthorizationHash, nonSettlementEvidenceHash) {
+    assert.equal(feeAuthorizationHash, covenantStates.get(covenantId).feeAuthorizationHash);
+    assert.match(nonSettlementEvidenceHash, /^0x[a-f0-9]{64}$/);
+    writes.push({ action: "cancel", covenantId });
+    covenantStates.get(covenantId).state = 7;
+  },
+  async settleNetLoss(
+    covenantId,
+    escrowRefundAtomic,
+    otherRecoveryAtomic,
+    recoveryFinalized,
+    recoveryEvidenceHash,
+  ) {
+    assert.equal(escrowRefundAtomic, "500000");
+    assert.equal(otherRecoveryAtomic, "0");
+    assert.equal(recoveryFinalized, true);
+    assert.match(recoveryEvidenceHash, /^0x[a-f0-9]{64}$/);
+    writes.push({ action: "settle", covenantId });
+    covenantStates.get(covenantId).state = 6;
+    covenantStates.get(covenantId).payoutAtomic = "0";
+    return { transactionHash: `0x${"99".repeat(32)}` };
+  },
 };
 const reconciler = createUniversalReconciler({
   ledger,
@@ -168,10 +336,10 @@ const reconciler = createUniversalReconciler({
 
 const result = await reconciler.reconcile();
 assert.equal(result.ok, true);
-assert.equal(result.checked, 6);
+assert.equal(result.checked, 11);
 assert.deepEqual(
   writes.map((write) => write.action).sort(),
-  ["expire", "payout_due", "release", "release", "release", "release", "start"],
+  ["cancel", "cancel", "expire", "payout_due", "release", "release", "release", "settle", "start"],
 );
 assert.equal((await ledger.get(relay.receiptId)).state, "released");
 assert.equal((await ledger.get(breach.receiptId)).state, "payout_due");
@@ -179,10 +347,21 @@ assert.equal((await ledger.get(delivered.receiptId)).state, "released");
 assert.equal((await ledger.get(expired.receiptId)).state, "released");
 assert.equal(await ledger.get(compensated.receiptId), null);
 assert.equal((await ledger.get(correctedBreach.receiptId)).state, "released");
+assert.equal((await ledger.get(terminalRecovery.receiptId)).state, "recovered_without_payout");
+assert.equal((await ledger.get(challengeActive.receiptId)).state, "payout_due");
+assert.equal((await ledger.get(issuancePending.receiptId)).state, "compensation_required");
+assert.equal(await ledger.get(issuanceAbsent.receiptId), null);
+assert.equal(await ledger.get(interruptedPending.receiptId), null);
+assert.ok(result.holds.some((hold) => (
+  hold.receiptId === challengeActive.receiptId && hold.reason === "payout_due_challenge_period_active"
+)));
+assert.ok(result.holds.some((hold) => (
+  hold.receiptId === issuancePending.receiptId && hold.reason === "coverage_issuance_outcome_pending"
+)));
 
 const before = writes.length;
 const replay = await reconciler.reconcile();
 assert.equal(replay.ok, true);
 assert.equal(writes.length, before, "terminal reconciliation replay must not write again");
 
-console.log("PolicyPool universal reconciler passed: relay start/release, A2A release/breach, expiry, and idempotent replay.");
+console.log("PolicyPool universal reconciler passed: clocks, release/breach, unpaid cancellation, uncertain issuance, terminal settlement, challenge hold, and idempotent replay.");

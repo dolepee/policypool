@@ -55,6 +55,33 @@ const INPUT_ALIASES = {
 };
 
 const CONTAINER_KEYS = new Set(["input", "data", "payload", "request", "parameters", "arguments", "context", "body"]);
+const MAX_FEE_AUTHORIZATION_WINDOW_SECONDS = 15 * 60;
+
+function universalFeeAuthorization(verified, nowMs) {
+  const authorization = verified?.payload?.payload?.authorization;
+  const hash = String(verified?.paymentId || "").replace(/^sha256:/, "0x");
+  let validBefore;
+  try {
+    validBefore = BigInt(authorization?.validBefore);
+  } catch {
+    throw new UniversalIssuerError("fee_authorization_expiry_invalid", 422);
+  }
+  const current = BigInt(Math.floor(nowMs / 1_000));
+  if (
+    !isBytes32(hash)
+    || !isBytes32(authorization?.nonce)
+    || validBefore <= current
+    || validBefore > current + BigInt(MAX_FEE_AUTHORIZATION_WINDOW_SECONDS)
+  ) {
+    throw new UniversalIssuerError("fee_authorization_window_invalid", 422);
+  }
+  return {
+    hash,
+    nonce: authorization.nonce,
+    validBefore: validBefore.toString(),
+    payer: verified.payer,
+  };
+}
 
 const OUTPUT_SCHEMA = {
   input: {
@@ -87,7 +114,7 @@ const OUTPUT_SCHEMA = {
         },
         targetTaskReference: {
           type: "string",
-          description: "Optional OKX.AI public task id or URL used to verify delivery timing during reconciliation.",
+          description: "OKX.AI public task id or URL used to verify delivery timing. Required for v0.4 A2A coverage.",
         },
         jobDescription: {
           type: "string",
@@ -268,6 +295,9 @@ export function evaluateGuard(input, policy) {
   }
   if (!isBytes32(input.targetAcceptanceTxHash)) {
     return { verdict: "BLOCK", reason: "target_acceptance_transaction_required" };
+  }
+  if (policy.onchainPolicyId && policy.serviceType === "A2A" && !input.targetTaskReference) {
+    return { verdict: "BLOCK", reason: "public_task_reference_required_for_universal_a2a" };
   }
   if (!input.jobDescription) return { verdict: "BLOCK", reason: "job_description_required" };
   if (!Number.isSafeInteger(policy.slaSeconds)
@@ -845,11 +875,21 @@ export function createHandler(dependencies = {}) {
       requestedCoverageAtomic: input.requestedCoverageAtomic.toString(),
     };
     let plannedUniversalCovenant = null;
+    let feeAuthorization = null;
     if (policy.onchainPolicyId) {
-      plannedUniversalCovenant = {
-        covenantId: getUniversalIssuer().previewCovenantId({ policy, targetOrder }),
-        state: "planned",
-      };
+      try {
+        feeAuthorization = universalFeeAuthorization(verified, now());
+        plannedUniversalCovenant = {
+          covenantId: getUniversalIssuer().previewCovenantId({ policy, targetOrder, paymentAuthorization: feeAuthorization }),
+          state: "planned",
+        };
+      } catch (error) {
+        return sendJson(res, error instanceof UniversalIssuerError ? error.status : 422, {
+          ok: false,
+          error: error instanceof UniversalIssuerError ? error.code : "fee_authorization_invalid",
+          charged: false,
+        });
+      }
     }
     let pending = {
       receiptId,
@@ -864,6 +904,7 @@ export function createHandler(dependencies = {}) {
       targetOrder,
       payer: verified.payer,
       quoteId: quote?.id || null,
+      feeAuthorization,
       universalCovenant: plannedUniversalCovenant,
     };
 
@@ -907,6 +948,7 @@ export function createHandler(dependencies = {}) {
           targetOrder,
           coverageCapAtomic,
           enrollmentClosesAt: coverageEnrollmentClosesAt,
+          paymentAuthorization: feeAuthorization,
         });
         if (universalCovenant.covenantId.toLowerCase() !== plannedUniversalCovenant.covenantId.toLowerCase()) {
           throw new UniversalIssuerError("coverage_manager_covenant_id_mismatch");
@@ -927,32 +969,28 @@ export function createHandler(dependencies = {}) {
           throw new UniversalIssuerError("coverage_manager_outbox_update_failed");
         }
       } catch (error) {
-        if (universalCovenant?.covenantId) {
+        const covenantToReconcile = universalCovenant || plannedUniversalCovenant;
+        if (covenantToReconcile?.covenantId) {
           const compensationPending = {
             ...pending,
-            universalCovenant,
+            universalCovenant: covenantToReconcile,
             state: "compensation_required",
             compensation: {
-              reason: "coverage_issuance_aborted",
+              reason: universalCovenant
+                ? "coverage_issuance_aborted"
+                : "coverage_issuance_outcome_unconfirmed",
               createdAt: new Date(now()).toISOString(),
+              feeAuthorization,
             },
           };
           await ledger.transitionUniversal(compensationPending, ["pending"]).catch(() => undefined);
-          try {
-            await getUniversalIssuer().release(
-              universalCovenant.covenantId,
-              new Date(now()).toISOString(),
-              `0x${sha256("COVERAGE_ISSUANCE_ABORTED")}`,
-            );
-            await ledger.release(compensationPending);
-          } catch {
-            return sendJson(res, 503, {
-              ok: false,
-              error: "provider_bond_release_pending_retry",
-              charged: false,
-              receiptId,
-            });
-          }
+          return sendJson(res, 503, {
+            ok: false,
+            error: "provider_bond_cancellation_pending_authorization_expiry",
+            charged: false,
+            receiptId,
+            retryAfter: new Date(Number(feeAuthorization.validBefore) * 1_000).toISOString(),
+          });
         } else {
           await ledger.release(pending).catch(() => undefined);
         }
@@ -976,24 +1014,17 @@ export function createHandler(dependencies = {}) {
           compensation: {
             reason: "coverage_fee_not_settled",
             createdAt: new Date(now()).toISOString(),
+            feeAuthorization,
           },
         };
         await ledger.transitionUniversal(compensationPending, ["pending"]).catch(() => undefined);
-        try {
-          await getUniversalIssuer().release(
-            universalCovenant.covenantId,
-            new Date(now()).toISOString(),
-            `0x${sha256("COVERAGE_FEE_NOT_SETTLED")}`,
-          );
-          await ledger.release(compensationPending);
-        } catch {
-          return sendJson(res, 503, {
-            ok: false,
-            error: "provider_bond_release_pending_retry",
-            charged: false,
-            receiptId,
-          });
-        }
+        return sendJson(res, 503, {
+          ok: false,
+          error: "provider_bond_cancellation_pending_authorization_expiry",
+          charged: false,
+          receiptId,
+          retryAfter: new Date(Number(feeAuthorization.validBefore) * 1_000).toISOString(),
+        });
       } else {
         await ledger.release(pending).catch(() => undefined);
       }

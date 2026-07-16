@@ -87,6 +87,8 @@ export function createUniversalManifestHandler(dependencies = {}) {
         settlementEvidenceMaxAgeSeconds: 600,
         settlementRequiresTerminalRecovery: true,
         settlementChallengePeriodSeconds: 86_400,
+        unpaidFeeCancellation: "quorum_attested_after_exact_x402_authorization_expiry",
+        cancelledUnpaidJobCanRetryWithNewAuthorization: true,
         releaseRequiresCompletionAtOrBeforeDeadline: true,
         provisionalBreachCanBeCorrectedByOnTimeCompletion: true,
         singleRelayerAuthority: false,
@@ -100,8 +102,15 @@ export function createUniversalManifestHandler(dependencies = {}) {
       },
       operations: {
         reconciliation: "managed_minute_scheduler_with_idempotent_onchain_state_recovery",
-        automaticTransitions: ["relay_clock_start", "release", "payout_due", "unstarted_expiry"],
-        payoutSettlement: "permissionless_execution_after_threshold_recovery_attestation",
+        automaticTransitions: [
+          "relay_clock_start",
+          "release",
+          "payout_due",
+          "terminal_net_loss_settlement",
+          "unpaid_issuance_cancellation",
+          "unstarted_expiry",
+        ],
+        payoutSettlement: "scheduled_after_challenge_and_threshold_attested_terminal_recovery",
         relayer: "unprivileged_gas_payer",
       },
       okxListing: {

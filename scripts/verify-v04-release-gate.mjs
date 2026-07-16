@@ -9,6 +9,8 @@ const [
   evidenceVerifier,
   vault,
   issuer,
+  reconciler,
+  coveredReceipt,
   evidenceClient,
   relay,
   providerRelay,
@@ -31,6 +33,8 @@ const [
   read("src/CoverageEvidenceVerifier.sol"),
   read("src/ProviderBondVault.sol"),
   read("api/lib/universal-issuer.js"),
+  read("api/lib/universal-reconciler.js"),
+  read("api/covered-job-receipt.js"),
   read("api/lib/evidence-attestation.js"),
   read("src/adapters/RelayReceiptVerifier.sol"),
   read("api/lib/provider-relay.js"),
@@ -74,6 +78,11 @@ assert.match(manager, /evidence\.recoveryFinalized/);
 assert.match(manager, /evidence\.completedAt > releaseDeadline/);
 assert.match(manager, /covenant\.state != CovenantState\.PayoutDue/);
 assert.match(manager, /function emergencySettleNetLoss/);
+assert.match(manager, /function cancelUnpaid/);
+assert.match(manager, /function emergencyCancelUnpaid/);
+assert.match(manager, /feeAuthorizationValidBefore/);
+assert.match(manager, /coveredJobCovenant\[covenant\.jobId\] = bytes32\(0\)/);
+assert.match(manager, /CANCELLATION_EVIDENCE_MAX_AGE = 10 minutes/);
 assert.match(manager, /recoveryEvidenceVerifier\.isSigner\(signer\)/);
 assert.match(manager, /revert EvidenceSignerOverlap\(\)/);
 assert.doesNotMatch(manager, /onlyOperator|setOperator|address public operator|address public owner/);
@@ -93,6 +102,14 @@ assert.match(issuer, /configuration\.evidenceVerifier/);
 assert.match(issuer, /verifier:\s*recovery \? configuration\.recoveryEvidenceVerifier/);
 assert.match(issuer, /recoveryFinalized !== true/);
 assert.match(issuer, /completedAt:\s*BigInt\(seconds\(completedAt/);
+assert.match(issuer, /action:\s*"cancel_unpaid"/);
+assert.match(reconciler, /issuer\.settleNetLoss/);
+assert.match(reconciler, /issuer\.cancelUnpaid/);
+assert.match(reconciler, /payout_due_challenge_period_active/);
+assert.match(reconciler, /requiresCompensation/);
+assert.match(reconciler, /coverage_issuance_outcome_pending/);
+assert.match(coveredReceipt, /paymentAuthorization:\s*feeAuthorization/);
+assert.match(coveredReceipt, /provider_bond_cancellation_pending_authorization_expiry/);
 assert.match(evidenceClient, /evidence_attestation_domain_invalid/);
 assert.match(relay, /EIP712Domain\(string name,string version,uint256 chainId,address verifyingContract\)/);
 assert.match(providerRelay, /lookup:\s*createPinnedLookup\(record\)/);
@@ -157,11 +174,15 @@ assert.match(securityNotes, /on-time completion/i);
 assert.match(securityNotes, /both evidence quorums/i);
 assert.match(securityNotes, /header presence could start an unpaid relay clock/i);
 assert.match(securityNotes, /DNS rebinding could bypass the provider relay SSRF check/i);
+assert.match(securityNotes, /payout-due covenants had no operational settlement path/i);
+assert.match(securityNotes, /failed coverage-fee settlement could strand provider bond/i);
 assert.match(auditReport, /H-03: Stale settlement evidence could overpay after a later escrow refund/);
 assert.match(auditReport, /M-04: Release and breach ordering lacked an on-chain completion-time tiebreak/);
 assert.match(auditReport, /H-04: Primary quorum loss could strand provider bond/);
 assert.match(auditReport, /H-05: Header presence could start an unpaid relay clock/);
 assert.match(auditReport, /H-06: DNS rebinding could bypass the provider relay SSRF check/);
+assert.match(auditReport, /H-07: Payout-due covenants lacked an operational settlement path/);
+assert.match(auditReport, /H-08: Failed coverage-fee settlement could strand provider bond/);
 assert.ok(
   vercel.routes.some((route) => route.src === "/providers/enroll" && route.dest === "/web/enroll.html"),
   "provider enrollment route must stay explicit",

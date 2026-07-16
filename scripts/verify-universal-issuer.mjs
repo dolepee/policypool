@@ -51,6 +51,8 @@ const publicClient = {
       acceptanceEvidenceHash: `0x${"04".repeat(32)}`,
       breachEvidenceHash: `0x${"00".repeat(32)}`,
       recoveryEvidenceHash: `0x${"00".repeat(32)}`,
+      feeAuthorizationHash: `0x${"06".repeat(32)}`,
+      feeAuthorizationValidBefore: 1_768_562_400n,
       recoveryFinalized: false,
     };
   },
@@ -78,6 +80,10 @@ const issuer = createUniversalIssuer({
 });
 const jobId = `0x${"11".repeat(32)}`;
 const policyId = `0x${"22".repeat(32)}`;
+const paymentAuthorization = {
+  hash: `0x${"66".repeat(32)}`,
+  validBefore: String(Date.parse("2026-07-16T12:20:00.000Z") / 1_000),
+};
 const issued = await issuer.issue({
   policy: {
     onchainPolicyId: `onchain:${policyId}`,
@@ -94,15 +100,19 @@ const issued = await issuer.issue({
   },
   coverageCapAtomic: "500000",
   enrollmentClosesAt: "2026-07-16T12:01:00.000Z",
+  paymentAuthorization,
 });
 assert.match(issued.covenantId, /^0x[a-f0-9]{64}$/);
 assert.equal(issued.covenantId, issuer.previewCovenantId({
   policy: { onchainPolicyId: `onchain:${policyId}` },
   targetOrder: { jobId, buyer: "0x6000000000000000000000000000000000000006" },
+  paymentAuthorization,
 }));
 assert.equal(writes[0].request.functionName, "issue");
 assert.equal(writes[0].request.args[0].policyId, policyId);
 assert.equal(writes[0].request.args[0].coverageCapAtomic, 500000n);
+assert.equal(writes[0].request.args[0].feeAuthorization.authorizationHash, paymentAuthorization.hash);
+assert.equal(writes[0].request.args[0].feeAuthorization.validBefore, BigInt(paymentAuthorization.validBefore));
 assert.equal(writes[0].request.args[1].length, 3);
 
 await issuer.startClock(issued.covenantId, "2026-07-16T12:00:10.000Z", `0x${"44".repeat(32)}`);

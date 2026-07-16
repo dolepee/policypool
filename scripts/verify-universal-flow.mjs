@@ -43,24 +43,33 @@ const body = {
   targetJobId: jobId,
   targetCreationTxHash: creationTx,
   targetAcceptanceTxHash: acceptanceTx,
+  targetTaskReference: "405668",
   jobDescription: "Run an endpoint security audit against the enrolled target.",
   requestedCoverageUSDT: "0.5",
 };
 
 function paymentHeader(tag, accepted) {
+  const nonce = `0x${sha256(`nonce:${tag}`)}`;
   return encodePaymentSignatureHeader({
     x402Version: 2,
     accepted,
     payload: {
       signature: `0x${sha256(tag).padEnd(130, "0").slice(0, 130)}`,
-      authorization: { nonce: `0x${sha256(`nonce:${tag}`)}` },
+      authorization: {
+        from: buyer,
+        to: PAYMENT.payTo,
+        value: PAYMENT.amountAtomic,
+        validAfter: "0",
+        validBefore: String(Math.floor(now / 1_000) + 600),
+        nonce,
+      },
     },
   });
 }
 
-function runtime({ settlementFails = false, releaseFails = false } = {}) {
+function runtime({ settlementFails = false, issuanceFails = false } = {}) {
   const ledger = new MemoryLedger();
-  const calls = { issue: 0, release: 0, settle: 0 };
+  const calls = { issue: 0, cancel: 0, settle: 0 };
   const chain = {
     async getReserveBalance() { return 9_000_000n; },
     async getJobStatus() { return 1; },
@@ -117,17 +126,19 @@ function runtime({ settlementFails = false, releaseFails = false } = {}) {
   });
   const universalIssuer = {
     previewCovenantId() { return `0x${"34".repeat(32)}`; },
-    async issue() {
+    async issue({ paymentAuthorization }) {
+      assert.match(paymentAuthorization.hash, /^0x[a-f0-9]{64}$/);
+      assert.equal(paymentAuthorization.validBefore, String(Math.floor(now / 1_000) + 600));
       calls.issue += 1;
+      if (issuanceFails) throw new Error("simulated_receipt_wait_failure");
       return {
         covenantId: `0x${"34".repeat(32)}`,
         transactionHash: `0x${"56".repeat(32)}`,
         blockNumber: "124",
       };
     },
-    async release() {
-      calls.release += 1;
-      if (releaseFails) throw new Error("simulated_release_failure");
+    async cancelUnpaid() {
+      calls.cancel += 1;
       return { transactionHash: `0x${"78".repeat(32)}`, blockNumber: "125" };
     },
   };
@@ -193,28 +204,32 @@ const failedPaid = await callHandler(failed.handler, {
   body,
   headers: { "payment-signature": paymentHeader("universal-failed", failedChallenge.accepts[0]) },
 });
-assert.equal(failedPaid.statusCode, 402);
 assert.equal(failed.calls.issue, 1);
-assert.equal(failed.calls.release, 1);
-assert.equal((await failed.ledger.stats()).recordCount, 0);
-
-const compensation = runtime({ settlementFails: true, releaseFails: true });
-const compensationChallengeResponse = await callHandler(compensation.handler, { method: "POST", body });
-const compensationChallenge = decodePaymentRequired(compensationChallengeResponse.headers["payment-required"]);
-const compensationPaid = await callHandler(compensation.handler, {
-  method: "POST",
-  body,
-  headers: { "payment-signature": paymentHeader("universal-compensation", compensationChallenge.accepts[0]) },
-});
-assert.equal(compensationPaid.statusCode, 503);
-assert.equal(compensationPaid.json().error, "provider_bond_release_pending_retry");
-assert.equal(compensationPaid.json().charged, false);
-assert.equal(compensation.calls.issue, 1);
-assert.equal(compensation.calls.release, 1);
-const [compensationRecord] = await compensation.ledger.list();
+assert.equal(failedPaid.statusCode, 503);
+assert.equal(failedPaid.json().error, "provider_bond_cancellation_pending_authorization_expiry");
+assert.equal(failedPaid.json().charged, false);
+assert.equal(failed.calls.cancel, 0);
+const [compensationRecord] = await failed.ledger.list();
 assert.equal(compensationRecord.state, "compensation_required");
 assert.equal(compensationRecord.compensation.reason, "coverage_fee_not_settled");
+assert.match(compensationRecord.compensation.feeAuthorization.hash, /^0x[a-f0-9]{64}$/);
 assert.equal(compensationRecord.universalCovenant.covenantId, `0x${"34".repeat(32)}`);
 
+const uncertain = runtime({ issuanceFails: true });
+const uncertainChallengeResponse = await callHandler(uncertain.handler, { method: "POST", body });
+const uncertainChallenge = decodePaymentRequired(uncertainChallengeResponse.headers["payment-required"]);
+const uncertainPaid = await callHandler(uncertain.handler, {
+  method: "POST",
+  body,
+  headers: { "payment-signature": paymentHeader("universal-uncertain", uncertainChallenge.accepts[0]) },
+});
+assert.equal(uncertainPaid.statusCode, 503);
+assert.equal(uncertain.calls.issue, 1);
+assert.equal(uncertain.calls.settle, 0);
+const [uncertainRecord] = await uncertain.ledger.list();
+assert.equal(uncertainRecord.state, "compensation_required");
+assert.equal(uncertainRecord.compensation.reason, "coverage_issuance_outcome_unconfirmed");
+assert.equal(uncertainRecord.universalCovenant.covenantId, `0x${"34".repeat(32)}`);
+
 assert.equal(paymentRequirements().amount, "100000");
-console.log("PolicyPool universal flow passed: provider bond locks before charge, compensates failed settlement, and retains retry evidence if release fails.");
+console.log("PolicyPool universal flow passed: provider bond locks before charge and failed or uncertain issuance/settlement stays in authorization-bound reconciliation.");
