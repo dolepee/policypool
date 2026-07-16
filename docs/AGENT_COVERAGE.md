@@ -28,6 +28,8 @@ Input:
 
 `quoteId` is optional for legacy full-body clients. The free preflight returns a signed, short-lived quote in the paid URL, x402 accepted requirements, and canonical body. If OKX drops the replay body, PolicyPool can recover only when the verified payer has exactly one canonical open quote; zero or multiple matches fail without settlement.
 
+For direct full-body clients, PolicyPool checks the public target-job status before returning a payment challenge and declines tasks that are already submitted or terminal. This early check only removes an unnecessary signing round-trip; payer ownership and the complete target evidence are still reverified after authorization and before settlement.
+
 The target job must still be in accepted state. PolicyPool verifies the creation and acceptance transactions against the public OKX task escrow and binds the buyer wallet, job ID, provider wallet, target agent ID, payment token, target-job value, service type, exact accepted-service hash, and acceptance timestamp. The coverage payer must be the target-job buyer.
 
 The accepted-event service hash is preserved verbatim and checked for A2A/A2MCP consistency. OKX does not expose a documented public derivation from listed service ID to that hash, so listed-service-ID correspondence remains separate marketplace evidence rather than an onchain claim.

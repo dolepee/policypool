@@ -574,6 +574,25 @@ export function createHandler(dependencies = {}) {
       if (req.method === "POST" && staticGuard.verdict === "BLOCK") {
         return rejectStaticGuard(res, staticGuard);
       }
+      if (req.method === "POST") {
+        try {
+          const targetStatus = await getChain().getJobStatus(input.targetJobId);
+          if (targetStatus !== 1) {
+            return sendJson(res, 400, {
+              ok: false,
+              error: `target_job_not_accepted:${targetStatus}`,
+              charged: false,
+              quoteId: quote?.id || null,
+            });
+          }
+        } catch (error) {
+          return sendJson(res, 503, {
+            ok: false,
+            error: error instanceof EvidenceError ? error.code : "target_job_status_unavailable",
+            charged: false,
+          });
+        }
+      }
       if (!quote) {
         try {
           quote = await getQuoteService().issue({

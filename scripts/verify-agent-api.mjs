@@ -51,12 +51,13 @@ function makeRuntime({
   clock = () => FIXED_NOW,
 } = {}) {
   const ledger = new MemoryLedger();
-  const calls = { verify: 0, settle: 0, target: 0, transfer: 0 };
+  const calls = { verify: 0, settle: 0, target: 0, status: 0, transfer: 0 };
   const chain = {
     async getReserveBalance() {
       return reserveAtomic;
     },
     async getJobStatus() {
+      calls.status += 1;
       return jobStatus;
     },
     async verifyTargetOrder({ jobId, creationTxHash, acceptanceTxHash }) {
@@ -154,6 +155,21 @@ assert.ok(challenge.outputSchema.input.body.required.includes("targetCreationTxH
 assert.equal(challenge.outputSchema.input.body.required.includes("deadline"), false);
 assert.match(challenge.accepts[0].extra.policyPoolQuote, /^ppq_[a-f0-9]{32}\.[a-f0-9]{64}$/);
 assert.equal(new URL(challenge.resource.url).searchParams.get("quote"), challenge.accepts[0].extra.policyPoolQuote);
+
+const staleBeforeQuote = makeRuntime({ jobStatus: 2 });
+const staleBeforeQuoteResponse = await callHandler(staleBeforeQuote.handler, {
+  method: "POST",
+  body: { ...sampleBody, targetJobId: `0x${"7".repeat(64)}` },
+});
+assert.equal(staleBeforeQuoteResponse.statusCode, 400, "a stale task must fail before a payment challenge");
+assert.equal(staleBeforeQuoteResponse.json().error, "target_job_not_accepted:2");
+assert.equal(staleBeforeQuoteResponse.json().charged, false);
+assert.equal(staleBeforeQuoteResponse.headers["payment-required"], undefined);
+assert.equal(staleBeforeQuote.calls.status, 1);
+assert.equal(staleBeforeQuote.calls.verify, 0);
+assert.equal(staleBeforeQuote.calls.settle, 0);
+assert.equal(staleBeforeQuote.calls.target, 0);
+assert.equal((await staleBeforeQuote.ledger.stats()).recordCount, 0);
 
 const explicitBodyless = makeRuntime();
 const explicitUnpaid = await callHandler(explicitBodyless.handler, {
