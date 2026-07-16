@@ -108,6 +108,8 @@ assert.match(issuer, /action:\s*"cancel_unpaid"/);
 assert.match(reconciler, /issuer\.settleNetLoss/);
 assert.match(reconciler, /issuer\.cancelUnpaid/);
 assert.match(reconciler, /payout_due_challenge_period_active/);
+assert.match(reconciler, /verified_okx_a2a_deadline_breach_with_provider_bonded_sla_credit/);
+assert.match(reconciler, /a2a_sla_credit_breach_evidence_unavailable/);
 assert.match(reconciler, /requiresCompensation/);
 assert.match(reconciler, /coverage_issuance_outcome_pending/);
 assert.match(coveredReceipt, /paymentAuthorization:\s*feeAuthorization/);
@@ -213,6 +215,7 @@ assert.match(auditReport, /H-10: Enrollment confirmation did not bind the comple
 assert.match(auditReport, /H-11: Unpaid relay receipts could replace the verified per-job receipt/);
 assert.match(auditReport, /H-12: Relay claims were consumed before the paid receipt was durable/);
 assert.match(auditReport, /H-13: Consumed relay-grant claims expired before the longest grant window/);
+assert.match(auditReport, /H-14: A2A SLA-credit covenants could remain locked after verified late delivery/);
 assert.ok(
   vercel.routes.some((route) => route.src === "/providers/enroll" && route.dest === "/web/enroll.html"),
   "provider enrollment route must stay explicit",

@@ -128,7 +128,7 @@ The scheduled path can request quorum authorization to:
 - mark an objective missed deadline as payout due;
 - release a lock left after failed service-fee settlement.
 
-An unstarted relay covenant may be expired permissionlessly after its on-chain enrollment deadline. A provisional breach stays open for 24 hours so an attested on-time completion can correct it. Final net-loss settlement requires quorum signatures over the exact refund, other recovery, terminal-finality flag, observation time, and recovery-evidence hash, and the observation must be no more than ten minutes old when executed.
+An unstarted relay covenant may be expired permissionlessly after its on-chain enrollment deadline. A provisional breach stays open for 24 hours so an attested on-time completion can correct it. Final net-loss settlement requires quorum signatures over the exact refund, other recovery, terminal-finality flag, observation time, and recovery-evidence hash, and the observation must be no more than ten minutes old when executed. Provider-bonded SLA credit is different: after the same challenge period, a fresh public-task observation that independently proves an A2A deadline breach may settle the full provider-funded credit without waiting for a marketplace refund. That path cannot be used by a net-loss policy.
 
 ## Runtime Configuration
 

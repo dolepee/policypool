@@ -207,6 +207,48 @@ tasks.set("405671", {
   stale: false,
 });
 
+const lateA2aSlaCredit = await seed({
+  id: "b",
+  state: "payout_due",
+  clockMode: "verified_acceptance",
+  deadline: "2026-07-15T11:59:00.000Z",
+  payoutDueAt: "2026-07-15T12:00:00.000Z",
+  enrollmentClosedAt: "2026-07-15T11:55:00.000Z",
+  publicTaskReference: "405672",
+  payoutBasis: 1,
+});
+tasks.set("405672", {
+  publicTaskId: "405672",
+  publicUrl: "https://www.okx.ai/tasks/405672",
+  jobId: lateA2aSlaCredit.jobId,
+  status: 2,
+  submittedAt: "2026-07-15T12:00:30.000Z",
+  completedAt: null,
+  fetchedAt: "2026-07-16T13:00:00.000Z",
+  stale: false,
+});
+
+const lateA2aNetLoss = await seed({
+  id: "c",
+  state: "payout_due",
+  clockMode: "verified_acceptance",
+  deadline: "2026-07-15T11:59:00.000Z",
+  payoutDueAt: "2026-07-15T12:00:00.000Z",
+  enrollmentClosedAt: "2026-07-15T11:55:00.000Z",
+  publicTaskReference: "405673",
+  payoutBasis: 0,
+});
+tasks.set("405673", {
+  publicTaskId: "405673",
+  publicUrl: "https://www.okx.ai/tasks/405673",
+  jobId: lateA2aNetLoss.jobId,
+  status: 2,
+  submittedAt: "2026-07-15T12:00:30.000Z",
+  completedAt: null,
+  fetchedAt: "2026-07-16T13:00:00.000Z",
+  stale: false,
+});
+
 const issuancePending = await seed({
   id: "9",
   state: "pending_start",
@@ -315,13 +357,15 @@ const issuer = {
     recoveryFinalized,
     recoveryEvidenceHash,
   ) {
-    assert.equal(escrowRefundAtomic, "500000");
+    const covenant = covenantStates.get(covenantId);
+    const providerBondedSlaCredit = Number(covenant.payoutBasis) === 1;
+    assert.equal(escrowRefundAtomic, providerBondedSlaCredit ? "0" : "500000");
     assert.equal(otherRecoveryAtomic, "0");
     assert.equal(recoveryFinalized, true);
     assert.match(recoveryEvidenceHash, /^0x[a-f0-9]{64}$/);
-    writes.push({ action: "settle", covenantId });
-    covenantStates.get(covenantId).state = 6;
-    covenantStates.get(covenantId).payoutAtomic = "0";
+    writes.push({ action: "settle", covenantId, payoutBasis: covenant.payoutBasis });
+    covenant.state = providerBondedSlaCredit ? 5 : 6;
+    covenant.payoutAtomic = providerBondedSlaCredit ? "500000" : "0";
     return { transactionHash: `0x${"99".repeat(32)}` };
   },
 };
@@ -339,10 +383,10 @@ const reconciler = createUniversalReconciler({
 
 const result = await reconciler.reconcile();
 assert.equal(result.ok, true);
-assert.equal(result.checked, 11);
+assert.equal(result.checked, 13);
 assert.deepEqual(
   writes.map((write) => write.action).sort(),
-  ["cancel", "cancel", "expire", "payout_due", "release", "release", "release", "settle", "start"],
+  ["cancel", "cancel", "expire", "payout_due", "release", "release", "release", "settle", "settle", "start"],
 );
 assert.equal((await ledger.get(relay.receiptId)).state, "released");
 assert.equal((await ledger.get(breach.receiptId)).state, "payout_due");
@@ -352,11 +396,17 @@ assert.equal(await ledger.get(compensated.receiptId), null);
 assert.equal((await ledger.get(correctedBreach.receiptId)).state, "released");
 assert.equal((await ledger.get(terminalRecovery.receiptId)).state, "recovered_without_payout");
 assert.equal((await ledger.get(challengeActive.receiptId)).state, "payout_due");
+assert.equal((await ledger.get(lateA2aSlaCredit.receiptId)).state, "paid");
+assert.equal((await ledger.get(lateA2aSlaCredit.receiptId)).payout.amountAtomic, "500000");
+assert.equal((await ledger.get(lateA2aNetLoss.receiptId)).state, "payout_due");
 assert.equal((await ledger.get(issuancePending.receiptId)).state, "compensation_required");
 assert.equal(await ledger.get(issuanceAbsent.receiptId), null);
 assert.equal(await ledger.get(interruptedPending.receiptId), null);
 assert.ok(result.holds.some((hold) => (
   hold.receiptId === challengeActive.receiptId && hold.reason === "payout_due_challenge_period_active"
+)));
+assert.ok(result.holds.some((hold) => (
+  hold.receiptId === lateA2aNetLoss.receiptId && hold.reason === "marketplace_recovery_not_terminal"
 )));
 assert.ok(result.holds.some((hold) => (
   hold.receiptId === issuancePending.receiptId && hold.reason === "coverage_issuance_outcome_pending"
@@ -367,4 +417,4 @@ const replay = await reconciler.reconcile();
 assert.equal(replay.ok, true);
 assert.equal(writes.length, before, "terminal reconciliation replay must not write again");
 
-console.log("PolicyPool universal reconciler passed: clocks, release/breach, unpaid cancellation, uncertain issuance, terminal settlement, challenge hold, and idempotent replay.");
+console.log("PolicyPool universal reconciler passed: clocks, release/breach, unpaid cancellation, uncertain issuance, net-loss finality, A2A SLA-credit settlement, challenge hold, and idempotent replay.");

@@ -84,8 +84,9 @@ function expectedPayoutAtomic({ payoutBasis, coverageCapAtomic, buyerPaidAtomic,
 }
 
 function terminalRecovery({ onchain, clockMode, observed, task, relayReceipt }) {
+  const providerBondedSlaCredit = Number(onchain.payoutBasis) === 1;
   if (clockMode === "policypool_relay") {
-    if (Number(onchain.payoutBasis) !== 1) {
+    if (!providerBondedSlaCredit) {
       return { ready: false, reason: "relay_net_loss_recovery_finality_unavailable" };
     }
     if (!relayReceipt?.request?.paymentVerified || !relayReceipt?.settlement?.transaction) {
@@ -100,6 +101,29 @@ function terminalRecovery({ onchain, clockMode, observed, task, relayReceipt }) 
       relayReceiptId: relayReceipt.receiptId,
       providerPaymentTransaction: relayReceipt.settlement.transaction,
       relayReceipt,
+    };
+  }
+  if (providerBondedSlaCredit) {
+    if (
+      observed?.action !== "mark_payout_due"
+      || task?.stale !== false
+      || !task?.publicTaskId
+      || !task?.fetchedAt
+    ) {
+      return { ready: false, reason: "a2a_sla_credit_breach_evidence_unavailable" };
+    }
+    return {
+      ready: true,
+      recoveryFinalized: true,
+      escrowRefundAtomic: "0",
+      otherRecoveryAtomic: "0",
+      source: "verified_okx_a2a_deadline_breach_with_provider_bonded_sla_credit",
+      publicTaskId: task.publicTaskId,
+      terminalStatus: Number(task.status),
+      taskFetchedAt: task.fetchedAt,
+      breachReason: observed.reason,
+      breachAt: observed.deliveredAt || observed.resolvedAt || task.fetchedAt,
+      task,
     };
   }
   if (observed?.recoveryFinalized !== true || ![7, 9].includes(Number(task?.status))) {
@@ -402,7 +426,9 @@ export function createUniversalReconciler({
       changes.push(await apply(record, "settle_net_loss", {
         ...evidence,
         ...recovery,
-        reason: "terminal_recovery_verified_and_challenge_elapsed",
+        reason: Number(onchain.payoutBasis) === 1
+          ? "provider_bonded_sla_credit_verified_and_challenge_elapsed"
+          : "terminal_recovery_verified_and_challenge_elapsed",
         payoutBasis: Number(onchain.payoutBasis),
         coverageCapAtomic: String(onchain.coverageCapAtomic),
         buyerPaidAtomic: String(onchain.buyerPaidAtomic),

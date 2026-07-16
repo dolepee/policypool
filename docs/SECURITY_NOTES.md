@@ -140,6 +140,12 @@ Source remediation keeps the evidence meanings separate:
 
 Residual: fee non-settlement and terminal marketplace recovery are permissioned-oracle facts. Attesters must query the chain and OKX evidence directly. A settlement timeout or relayer error is never sufficient evidence by itself.
 
+### A2A provider-bonded SLA-credit settlement remediated in source
+
+An A2A policy using `provider_bonded_sla_credit` could enter `PayoutDue` after a verified late delivery but remain locked because the reconciler required marketplace refund status `7` or `9`. That requirement belongs to net-loss coverage, not to a provider-funded deadline credit whose payout is independent of refund.
+
+The reconciler now settles the SLA-credit path only after the on-chain challenge period and only from a fresh, non-stale public OKX task observation that still proves the objective deadline breach. It supplies the full task and observed timing to the evidence quorum, uses zero marketplace recovery inputs, and preserves terminal-recovery requirements for every net-loss policy. A late-delivered net-loss covenant remains on hold until marketplace recovery is terminal.
+
 ### Static analysis
 
 Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 31 raw results and no unclassified v0.4 manager/verifier custody bypass. Relevant warning dispositions are:

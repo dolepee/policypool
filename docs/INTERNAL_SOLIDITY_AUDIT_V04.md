@@ -302,6 +302,23 @@ Source remediation:
 
 Regression: `scripts/verify-provider-relay.mjs` advances the relay clock 48 hours beyond a successful call, supplies a fresh valid payment authorization, and proves the original grant still fails with `relay_grant_already_used`.
 
+### H-14: A2A SLA-credit covenants could remain locked after verified late delivery
+
+Severity: High / P1 runtime
+
+Status: Fixed in source, not deployed
+
+The reconciler previously required marketplace status `7` or `9` before settling every A2A payout-due covenant. A provider-bonded SLA credit does not depend on marketplace recovery, so an ordinary late-but-delivered job could remain in `PayoutDue` indefinitely with the provider bond locked.
+
+Source remediation:
+
+- after the on-chain 24-hour challenge, an A2A SLA-credit covenant may settle from a fresh, non-stale public task observation that still proves the objective deadline breach;
+- the exact public task, delivery or resolution timing, fetch time, and breach reason are supplied to the evidence quorum;
+- settlement uses zero recovery inputs because payout basis `1` is the provider-funded credit, not reimbursement of net loss;
+- net-loss policies still require terminal marketplace recovery and cannot use this path.
+
+Regression: `scripts/verify-universal-reconciler.mjs` proves that the same late-delivery task pays a provider-bonded SLA credit after the challenge while a net-loss covenant remains in `PayoutDue` with `marketplace_recovery_not_terminal`.
+
 ### M-01: Vault owner could replace the manager
 
 Severity: Medium
