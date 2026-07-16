@@ -26,4 +26,19 @@ assert.doesNotMatch(JSON.stringify(manifest), /private.key|seed phrase|fully aut
 const head = await callHandler(createManifestHandler(), { method: "HEAD", url: "/api/manifest" });
 assert.equal(head.statusCode, 200);
 
+let universalCalls = 0;
+const universal = await callHandler(createManifestHandler({
+  universalHandler: async (_req, res) => {
+    universalCalls += 1;
+    return res.status(200).send(JSON.stringify({ ok: true, version: "0.4.0", enabled: false }));
+  },
+}), {
+  method: "GET",
+  url: "/api/universal-manifest",
+  query: { surface: "universal" },
+});
+assert.equal(universal.statusCode, 200);
+assert.equal(universal.json().version, "0.4.0");
+assert.equal(universalCalls, 1);
+
 console.log("PolicyPool manifest gate passed: stable service contract, quote semantics, provider windows, and autonomy limits.");

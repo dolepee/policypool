@@ -1,6 +1,7 @@
 import { COVERAGE, PAYMENT, XLAYER } from "./lib/config.js";
 import { listPublishedPolicies, policyCoverageCapAtomic } from "./lib/policy-registry.js";
 import { formatUsdtAtomic, sendJson } from "./lib/utils.js";
+import { createUniversalManifestHandler } from "./universal-manifest.js";
 
 function providerManifest(policy) {
   return {
@@ -21,8 +22,12 @@ function providerManifest(policy) {
   };
 }
 
-export function createManifestHandler({ now = () => Date.now() } = {}) {
+export function createManifestHandler({
+  now = () => Date.now(),
+  universalHandler = createUniversalManifestHandler(),
+} = {}) {
   return async function handler(req, res) {
+    if (req.query?.surface === "universal") return universalHandler(req, res);
     if (req.method === "HEAD") return res.status(200).end();
     if (req.method !== "GET") return sendJson(res, 405, { ok: false, error: "method_not_allowed" });
     return sendJson(res, 200, {

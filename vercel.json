@@ -2,7 +2,51 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/*.js",
+      "src": "api/coverage-demand.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/coverage-ledger.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/coverage-preflight.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/coverage-status.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/covered-job-receipt.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/manifest.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/provider-bond.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/provider-enrollment.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/provider-relay.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/reconcile-coverage.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/reconcile-universal.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/record-payout.js",
       "use": "@vercel/node"
     },
     {
@@ -11,6 +55,10 @@
     }
   ],
   "routes": [
+    {
+      "src": "/api/universal-manifest",
+      "dest": "/api/manifest.js?surface=universal"
+    },
     {
       "src": "/api/(.*)",
       "dest": "/api/$1.js"
