@@ -8,6 +8,7 @@ function nonNegative(value, field) {
   if (parsed < 0n) throw new RangeError(`${field}_negative`);
   return parsed;
 }
+
 function minBigInt(...values) {
   return values.reduce((minimum, value) => (value < minimum ? value : minimum));
 }

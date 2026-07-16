@@ -175,6 +175,57 @@ contract CoverageManagerTest is Test {
         );
     }
 
+    function testOnlyOperatorCanIssueOrReleaseAndCovenantsCannotReplay() public {
+        vm.prank(buyer);
+        vm.expectRevert(CoverageManager.Unauthorized.selector);
+        manager.issue(
+            policyId,
+            FINGERPRINT,
+            JOB_ID,
+            provider,
+            buyer,
+            500_000,
+            500_000,
+            uint64(block.timestamp),
+            uint64(block.timestamp + 60)
+        );
+
+        bytes32 covenantId = _issue();
+        vm.expectRevert(CoverageManager.CovenantAlreadyExists.selector);
+        _issue();
+
+        vm.prank(buyer);
+        vm.expectRevert(CoverageManager.Unauthorized.selector);
+        manager.release(covenantId, keccak256("UNAUTHORIZED"));
+    }
+
+    function testRelayClockRejectsMissingEvidenceAndLateStart() public {
+        AgentPolicyRegistry.PolicyTerms memory terms = _terms();
+        terms.serviceId = 33464;
+        terms.serviceFingerprint = SLA_FINGERPRINT;
+        terms.clockMode = 1;
+        vm.prank(provider);
+        bytes32 relayPolicyId = registry.registerPolicy(terms);
+        bytes32 covenantId = manager.issue(
+            relayPolicyId,
+            SLA_FINGERPRINT,
+            keccak256("relay-validation-job"),
+            provider,
+            buyer,
+            500_000,
+            500_000,
+            uint64(block.timestamp),
+            uint64(block.timestamp + 60)
+        );
+
+        vm.expectRevert(CoverageManager.InvalidCovenant.selector);
+        manager.startClock(covenantId, uint64(block.timestamp), bytes32(0));
+
+        vm.warp(block.timestamp + 61);
+        vm.expectRevert(CoverageManager.InvalidCovenant.selector);
+        manager.startClock(covenantId, uint64(block.timestamp), keccak256("LATE_RELAY_RECEIPT"));
+    }
+
     function testUnstartedRelayClockExpiresAndUnlocksBond() public {
         AgentPolicyRegistry.PolicyTerms memory terms = _terms();
         terms.serviceId = 33463;

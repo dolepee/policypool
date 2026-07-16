@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 interface IOkxTaskStatus {
     function getJobStatus(bytes32 jobId) external view returns (uint8);
 }
+
 /// @notice Coarse on-chain status observation for OKX A2A jobs.
 /// @dev Historical delivery timing is still proven from the status-change log;
 ///      this adapter intentionally does not pretend a current status proves time.

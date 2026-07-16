@@ -10,6 +10,7 @@ function timestamp(value, field) {
   if (!Number.isFinite(parsed)) throw new TypeError(`${field}_invalid`);
   return parsed;
 }
+
 export function observeOkxA2AClock({ task, deadline, now = Date.now() }) {
   const status = Number(task?.status);
   const deadlineMs = timestamp(deadline, "coverage_deadline");

@@ -8,6 +8,7 @@ function agentIdFromReference(value) {
   const match = raw.match(/(?:^|#)(\d{1,12})$/);
   return match ? match[1] : /^\d{1,12}$/.test(raw) ? raw : "";
 }
+
 export function createCoveragePolicyResolver(dependencies = {}) {
   const configuration = dependencies.configuration || universalConfiguration();
   let runtimeStore = dependencies.store;

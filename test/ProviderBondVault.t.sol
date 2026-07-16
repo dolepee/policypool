@@ -75,6 +75,37 @@ contract ProviderBondVaultTest is Test {
         vault.slash(COVENANT, buyer, 1);
     }
 
+    function testOnlyManagerCanMoveBondAndCovenantIdsCannotReplay() public {
+        vm.prank(buyer);
+        vm.expectRevert(ProviderBondVault.Unauthorized.selector);
+        vault.lock(COVENANT, provider, 1_000_000);
+
+        vault.lock(COVENANT, provider, 1_000_000);
+        vm.expectRevert(ProviderBondVault.CovenantAlreadyLocked.selector);
+        vault.lock(COVENANT, provider, 1_000_000);
+
+        vm.prank(buyer);
+        vm.expectRevert(ProviderBondVault.Unauthorized.selector);
+        vault.release(COVENANT);
+    }
+
+    function testWithdrawalQueueCannotStackAndCanBeCancelled() public {
+        vm.prank(provider);
+        vault.requestWithdrawal(1_000_000);
+
+        vm.prank(provider);
+        vm.expectRevert(ProviderBondVault.WithdrawalAlreadyQueued.selector);
+        vault.requestWithdrawal(1);
+
+        vm.prank(provider);
+        vault.cancelWithdrawal();
+        assertEq(vault.availableBond(provider), 5_000_000);
+
+        vm.prank(provider);
+        vm.expectRevert(ProviderBondVault.WithdrawalNotQueued.selector);
+        vault.cancelWithdrawal();
+    }
+
     function testPolicyRegistrationRequiresAgentOwnershipAndBond() public {
         AgentPolicyRegistry.PolicyTerms memory terms = _terms();
 
@@ -111,6 +142,25 @@ contract ProviderBondVaultTest is Test {
         bytes32 changed = keccak256("service-changed");
         registry.suspendForFingerprint(policyId, changed);
         assertFalse(registry.isCoverable(policyId, FINGERPRINT));
+    }
+
+    function testPolicyPauseAndFingerprintSuspensionAreAccessControlled() public {
+        vm.prank(provider);
+        bytes32 policyId = registry.registerPolicy(_terms());
+
+        vm.prank(buyer);
+        vm.expectRevert(AgentPolicyRegistry.Unauthorized.selector);
+        registry.pausePolicy(policyId, keccak256("UNAUTHORIZED"));
+
+        vm.expectRevert(AgentPolicyRegistry.FingerprintUnchanged.selector);
+        registry.suspendForFingerprint(policyId, FINGERPRINT);
+
+        vm.prank(provider);
+        registry.pausePolicy(policyId, keccak256("PROVIDER_PAUSED"));
+        assertFalse(registry.isCoverable(policyId, FINGERPRINT));
+
+        vm.expectRevert(AgentPolicyRegistry.PolicyNotActive.selector);
+        registry.suspendForFingerprint(policyId, keccak256("service-v2"));
     }
 
     function testAgentOwnershipChangeFailsClosedOnchain() public {
@@ -150,6 +200,12 @@ contract ProviderBondVaultTest is Test {
         vm.warp(deadline + 1);
         vm.expectRevert(AgentPolicyRegistry.SignatureExpired.selector);
         registry.registerPolicyBySig(provider, terms, 0, deadline, signature);
+    }
+
+    function testRelayedEnrollmentRejectsMalformedSignature() public {
+        AgentPolicyRegistry.PolicyTerms memory terms = _terms();
+        vm.expectRevert(AgentPolicyRegistry.InvalidSignature.selector);
+        registry.registerPolicyBySig(provider, terms, 0, block.timestamp + 10 minutes, hex"00");
     }
 
     function _terms() internal view returns (AgentPolicyRegistry.PolicyTerms memory) {
