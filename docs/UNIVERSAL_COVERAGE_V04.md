@@ -110,6 +110,13 @@ The v0.4 feature remains disabled unless `POLICYPOOL_UNIVERSAL_ENABLED=true` and
 ```text
 POLICYPOOL_UNIVERSAL_ENABLED=false
 POLICYPOOL_SHARED_COVERAGE_ENABLED=false
+OKX_AGENT_IDENTITY_REGISTRY=0x8004A169FB4a3325136EB29fA0ceB6D2e539a432
+POLICYPOOL_V04_OWNER=
+POLICYPOOL_V04_OPERATOR=
+POLICYPOOL_V04_MONITOR=
+POLICYPOOL_PAYMENT_ASSET=0x779Ded0c9e1022225f8E0630b35a9b54bE713736
+POLICYPOOL_OKX_TASK_ESCROW=0x000000EB79a0c9cBEED4BD63372653E28F6bEdbE
+POLICYPOOL_MINIMUM_PROVIDER_BOND_ATOMIC=500000
 POLICYPOOL_POLICY_REGISTRY_ADDRESS=
 POLICYPOOL_BOND_VAULT_ADDRESS=
 POLICYPOOL_COVERAGE_MANAGER_ADDRESS=
@@ -126,6 +133,8 @@ POLICYPOOL_UNIVERSAL_RECONCILE_URL=https://policypool.vercel.app/api/reconcile-u
 ```
 
 Keep manager and relay keys distinct. `POLICYPOOL_RELAY_SIGNER_ADDRESS` is public configuration; its corresponding private key and the relay-grant secret must never be committed. Verify secret byte lengths after setting Vercel variables because newline contamination changes HMAC output.
+
+`POLICYPOOL_V04_OWNER_PRIVATE_KEY` is deployment-only input for `WireAgentCoverageV04Roles.s.sol`. It must never be configured in Vercel or any always-on runtime. After deployment, the cold owner accepts the bond-vault ownership transfer and sets the dedicated manager operator and policy monitor through that script.
 
 ## Release Gates
 
@@ -151,17 +160,19 @@ Required before deployment:
 ## Rollout And Rollback
 
 1. Deploy contracts without enabling the feature.
-2. Verify bytecode, ownership, manager wiring, minimum bond, signer, and adapters.
-3. Configure Redis, signer, and contract addresses while `POLICYPOOL_UNIVERSAL_ENABLED=false`.
-4. Run the full gate and a read-only reconciler dry run.
-5. Enable v0.4 for one provider and one bounded controlled covenant.
-6. Open enrollment only after that covenant releases or settles correctly.
+2. Run `WireAgentCoverageV04Roles.s.sol` from the cold owner to accept bond-vault ownership, set the hot operator, and set the registry monitor.
+3. Verify bytecode, ownership, pending ownership, manager wiring, minimum bond, signer, monitor, operator, token, identity registry, and adapters from chain state.
+4. Configure Redis, signer, and contract addresses while `POLICYPOOL_UNIVERSAL_ENABLED=false`.
+5. Run the full gate and a read-only reconciler dry run.
+6. Enable v0.4 for one house provider and one bounded controlled covenant only.
+7. Open external enrollment only after independent review and the controlled covenant releases or settles correctly.
 
 Rollback is the feature flag: set `POLICYPOOL_UNIVERSAL_ENABLED=false`. Production v0.3 static policies and receipts continue through the unchanged listed endpoint. Existing on-chain v0.4 covenants still require reconciliation and cannot be abandoned by disabling new issuance.
 
 ## Known Limitations
 
 - Contract code is not audited and must not custody public provider funds yet.
+- The canonical X Layer ERC-8004 identity registry at `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` is an EIP-1967 upgradeable proxy controlled outside PolicyPool. Agent ownership checks inherit that third-party upgrade and availability risk.
 - OKX.AI has no documented stable JSON service-directory API; PolicyPool uses strict, cached, bounded HTML parsing and fails closed on stale evidence.
 - A2A delivery timing requires a public task reference and timeline timestamp. Current status alone never proves historical timing.
 - A2MCP coverage requires the PolicyPool relay; direct provider calls cannot prove the processing-start clock.
