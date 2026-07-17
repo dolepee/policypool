@@ -119,6 +119,38 @@ async function paymentHeader(tag, {
   });
 }
 
+function reencodePaymentHeader(raw) {
+  const decoded = decodePaymentSignatureHeader(raw);
+  const { accepted, payload } = decoded;
+  const authorization = payload.authorization;
+  return encodePaymentSignatureHeader({
+    payload: {
+      authorization: {
+        nonce: authorization.nonce,
+        validBefore: authorization.validBefore,
+        validAfter: authorization.validAfter,
+        value: authorization.value,
+        to: authorization.to,
+        from: authorization.from,
+      },
+      signature: payload.signature,
+    },
+    accepted: {
+      extra: {
+        version: accepted.extra.version,
+        name: accepted.extra.name,
+      },
+      maxTimeoutSeconds: accepted.maxTimeoutSeconds,
+      payTo: accepted.payTo,
+      amount: accepted.amount,
+      asset: accepted.asset,
+      network: accepted.network,
+      scheme: accepted.scheme,
+    },
+    x402Version: decoded.x402Version,
+  });
+}
+
 function paymentRequiredHeader(accepts = null) {
   return encodePaymentRequiredHeader({
     x402Version: 2,
@@ -342,7 +374,23 @@ await assert.rejects(
 
 responseStatus = 200;
 const validPayment = await paymentHeader("valid-provider-payment");
+const reencodedValidPayment = reencodePaymentHeader(validPayment);
+assert.notEqual(reencodedValidPayment, validPayment);
 const validPayload = decodePaymentSignatureHeader(validPayment);
+const validIdentity = await __test.providerPaymentAuthorization(
+  validPayment,
+  policy,
+  chain,
+  relayNowBase + elapsed,
+);
+const reencodedIdentity = await __test.providerPaymentAuthorization(
+  reencodedValidPayment,
+  policy,
+  chain,
+  relayNowBase + elapsed,
+);
+assert.equal(reencodedIdentity.id, validIdentity.id);
+assert.equal(reencodedIdentity.hash, validIdentity.hash);
 const transferEvent = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
 const authorizationUsedEvent = parseAbiItem(
   "event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)",
@@ -543,10 +591,10 @@ await assert.rejects(
     targetJobId,
     providerRequest: { target_url: "https://policypool.vercel.app/api/covered-job-receipt" },
     relayGrant: "second-relay-grant",
-  }, { "payment-signature": validPayment }),
+  }, { "payment-signature": reencodedValidPayment }),
   (error) => error instanceof ProviderRelayError
     && error.code === "provider_payment_authorization_already_used",
-  "a verified payment authorization must not be reusable under a fresh relay grant",
+  "a re-encoded payment authorization must not be reusable under a fresh relay grant",
 );
 
 const retryStore = new MemoryProviderPolicyStore();

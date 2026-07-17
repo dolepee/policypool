@@ -162,6 +162,8 @@ Provider execution is at most once. The paid response body and signed relay rece
 
 The settlement scan overlaps its timestamp-derived lower bound by one block so a grant timestamp slightly ahead of the chain clock cannot hide a payment in the boundary block. This overlap is safe because recovery still requires the exact authorization payer and nonce plus the exact asset, recipient, amount, and transfer receipt.
 
+Payment replay identity is derived from canonical signed EIP-3009 fields rather than the encoded x402 header. Equivalent JSON or base64 encodings therefore share one durable payment claim and one direct job. The direct quote ID remains acceptance provenance but cannot make an already-signed provider authorization payable again.
+
 The direct scheduler is authenticated independently from the buyer route. It can relay only quorum-attested lifecycle actions and uses durable quote indexes rather than accepting caller-selected job or payment evidence. Ambiguous or conflicting states remain visible as holds instead of being guessed into release, cancellation, or payout.
 
 Direct reconciliation no longer depends on manually creating the QStash schedule. QStash remains the one-minute primary, while the checked-in five-minute GitHub workflow discovers whether the direct route is enabled and invokes it through an `always()`-isolated step. Both paths use the operator bearer token; scheduled QStash calls additionally carry its platform signature.

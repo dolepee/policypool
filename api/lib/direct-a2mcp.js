@@ -20,7 +20,7 @@ import {
 } from "./utils.js";
 
 const DIRECT_JOB_TYPEHASH = keccak256(stringToHex(
-  "PolicyPoolDirectA2MCPJob(bytes32 policyId,address buyer,bytes32 requestHash,bytes32 providerAuthorizationHash,bytes32 quoteId)",
+  "PolicyPoolDirectA2MCPJob(bytes32 policyId,address buyer,bytes32 requestHash,bytes32 providerAuthorizationHash)",
 ));
 const DIRECT_ACCEPTANCE_TYPEHASH = keccak256(stringToHex(
   "PolicyPoolDirectA2MCPAcceptance(bytes32 jobId,bytes32 policyId,address buyer,bytes32 requestHash,bytes32 providerRequirementsHash,bytes32 providerAuthorizationHash,bytes32 quoteId)",
@@ -54,13 +54,12 @@ function quoteIdBytes32(id) {
   return `0x${String(id).padEnd(64, "0")}`;
 }
 
-function directJobId({ policyId, buyer, requestHash, providerAuthorizationHash, quoteId }) {
+function directJobId({ policyId, buyer, requestHash, providerAuthorizationHash }) {
   return keccak256(encodeAbiParameters(
     [
       { type: "bytes32" },
       { type: "bytes32" },
       { type: "address" },
-      { type: "bytes32" },
       { type: "bytes32" },
       { type: "bytes32" },
     ],
@@ -70,7 +69,6 @@ function directJobId({ policyId, buyer, requestHash, providerAuthorizationHash, 
       getAddress(buyer),
       bytes32FromSha256(requestHash, "direct_request_hash"),
       providerAuthorizationHash,
-      quoteIdBytes32(quoteId),
     ],
   ));
 }
@@ -331,7 +329,6 @@ export function createDirectA2mcpCoordinator({
       buyer: current.buyer,
       requestHash: current.requestHash,
       providerAuthorizationHash: authorization.hash,
-      quoteId: current.id,
     });
     const feeValidAfter = 0;
     const feeValidBefore = Math.min(providerValidBefore, quoteExpiresAt);

@@ -193,12 +193,19 @@ assert.match(providerRelay, /covenantId:\s*grant\.covenantId\.toLowerCase\(\)/);
 assert.match(reconciler, /relay_receipt_covenant_binding_invalid/);
 assert.doesNotMatch(reconciler, /getLatestRelayReceiptForJob/);
 assert.doesNotMatch(providerRelay, /store\.commitRelayExecution\(/);
+assert.match(providerRelay, /canonicalProviderAuthorizationIdentity/);
+assert.match(providerRelay, /protocol:\s*"eip3009"/);
+assert.doesNotMatch(providerRelay, /id:\s*`sha256:\$\{sha256\(raw\)\}`/);
 assert.match(chain, /event AuthorizationUsed\(address indexed authorizer, bytes32 indexed nonce\)/);
 assert.match(chain, /verifyProviderPaymentAuthorization/);
 assert.match(chain, /findProviderSettlement/);
 assert.match(chain, /MAX_PROVIDER_SETTLEMENT_SEARCH_SECONDS = 20 \* 60/);
 assert.match(chain, /firstEligibleBlock > 0n \? firstEligibleBlock - 1n : 0n/);
 assert.match(directCoordinator, /provider_authorization_expired_unsettled/);
+assert.match(
+  directCoordinator,
+  /PolicyPoolDirectA2MCPJob\(bytes32 policyId,address buyer,bytes32 requestHash,bytes32 providerAuthorizationHash\)/,
+);
 assert.match(directCoordinator, /direct_coverage_cap_must_equal_policy_cap/);
 assert.match(directCoordinator, /direct_policy_cap_unavailable/);
 assert.match(directCoordinator, /await relay\.recover/);

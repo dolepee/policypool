@@ -423,6 +423,23 @@ Source remediation:
 
 Regression: `scripts/verify-direct-a2mcp.mjs` advances beyond both authorization expiries, retrieves the exact retained result, proves no provider or fee action repeats, and rejects substituted provider and fee signatures.
 
+### H-21: Raw payment-header identity allowed semantic authorization replay
+
+Severity: High / P1 duplicate-covenant risk
+
+Status: Fixed in source, not deployed
+
+Provider payment claims and direct job IDs originally depended on the hash of the encoded x402 header. JSON key order and equivalent base64 representations can change those bytes without changing the signed EIP-3009 authorization. A re-encoded authorization could therefore receive a new relay payment claim, while a fresh quote also produced a distinct direct job because its ephemeral quote ID was part of the job hash.
+
+Source remediation:
+
+- provider authorization identity is derived from canonical EIP-3009 domain and message fields: chain, network, token domain, asset, payer, recipient, amount, validity window, and nonce;
+- the same canonical digest drives the durable relay payment claim, signed relay receipt, direct binding, fee-escrow provider authorization hash, and execution identity;
+- a direct job is identified by policy, buyer, request, and canonical provider authorization, not by the replaceable quote ID;
+- the quote ID remains bound in the separate acceptance-evidence hash, preserving quote provenance without creating a second payable job.
+
+Regression: `scripts/verify-provider-relay.mjs` reorders the same signed x402 payload, proves both encodings have one canonical identity, and proves the second encoding is rejected as already used under a fresh grant. `scripts/verify-direct-a2mcp.mjs` proves distinct quotes map the same canonical authorization to one direct job.
+
 ### M-08: Direct checkout advertised partial caps that its fixed fee could not honor
 
 Severity: Medium / P2 checkout-contract mismatch

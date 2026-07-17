@@ -3,7 +3,11 @@ import { authorizationTypes } from "@x402/evm";
 import { encodePaymentSignatureHeader } from "@x402/core/http";
 import { getAddress, verifyTypedData } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { createDirectA2mcpCoordinator, DirectA2mcpError } from "../api/lib/direct-a2mcp.js";
+import {
+  __test as directTest,
+  createDirectA2mcpCoordinator,
+  DirectA2mcpError,
+} from "../api/lib/direct-a2mcp.js";
 import { createDirectA2mcpState, MemoryDirectA2mcpStore } from "../api/lib/direct-a2mcp-store.js";
 import { ProviderRelayError } from "../api/lib/provider-relay.js";
 import { PAYMENT, XLAYER } from "../api/lib/config.js";
@@ -25,6 +29,11 @@ const feeNonce = `0x${"88".repeat(32)}`;
 const relayReceiptDigest = `0x${"99".repeat(32)}`;
 const settlementTransaction = `0x${"aa".repeat(32)}`;
 const providerPaymentSignature = "provider-payment-signature-one";
+const providerAuthorizationDigest = sha256({
+  protocol: "eip3009",
+  payer: buyer.address.toLowerCase(),
+  nonce: `0x${"ab".repeat(32)}`,
+});
 
 function policy(overrides = {}) {
   return {
@@ -117,9 +126,12 @@ function createHarness({
       if (!allowExpired && providerAuthorizationValidBefore <= Math.floor(nowMs / 1_000)) {
         throw new ProviderRelayError("provider_payment_authorization_expired", 400);
       }
+      const digest = raw === providerPaymentSignature
+        ? providerAuthorizationDigest
+        : sha256({ protocol: "eip3009", testAuthorization: raw });
       return {
-        id: `sha256:${sha256(raw)}`,
-        hash: `0x${sha256(raw)}`,
+        id: `sha256:${digest}`,
+        hash: `0x${digest}`,
         payer: buyer.address,
         validAfter: "0",
         validBefore: String(providerAuthorizationValidBefore),
@@ -208,7 +220,7 @@ function createHarness({
       fee = {
         buyer: buyer.address,
         covenantId,
-        providerAuthorizationHash: `0x${sha256(providerPaymentSignature)}`,
+        providerAuthorizationHash: `0x${providerAuthorizationDigest}`,
         amountAtomic: "100000",
         state: 1,
       };
@@ -306,6 +318,18 @@ function createHarness({
     tick(milliseconds) { nowMs += milliseconds; },
   };
 }
+
+const canonicalJobInput = {
+  policyId,
+  buyer: buyer.address,
+  requestHash,
+  providerAuthorizationHash: `0x${providerAuthorizationDigest}`,
+};
+assert.equal(
+  directTest.directJobId({ ...canonicalJobInput, quoteId: "1".padStart(32, "0") }),
+  directTest.directJobId({ ...canonicalJobInput, quoteId: "2".padStart(32, "0") }),
+  "a fresh quote must not create a second job for the same canonical provider authorization",
+);
 
 const variableCap = createHarness({
   policyOverrides: {

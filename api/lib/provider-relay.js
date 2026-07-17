@@ -187,6 +187,24 @@ function acceptedRequirementsHash(accepted) {
   }
 }
 
+function canonicalProviderAuthorizationIdentity(accepted, authorization) {
+  const digest = sha256({
+    protocol: "eip3009",
+    chainId: XLAYER.id,
+    network: XLAYER.network,
+    asset: getAddress(accepted.asset).toLowerCase(),
+    name: String(accepted.extra.name),
+    version: String(accepted.extra.version),
+    from: getAddress(authorization.from).toLowerCase(),
+    to: getAddress(authorization.to).toLowerCase(),
+    value: BigInt(authorization.value).toString(),
+    validAfter: BigInt(authorization.validAfter).toString(),
+    validBefore: BigInt(authorization.validBefore).toString(),
+    nonce: String(authorization.nonce).toLowerCase(),
+  });
+  return { id: `sha256:${digest}`, hash: `0x${digest}` };
+}
+
 function validateProviderChallenge(raw, policy, canonicalEndpoint) {
   let challenge;
   try {
@@ -297,6 +315,7 @@ async function providerPaymentAuthorization(
   } catch {
     throw new ProviderRelayError("provider_payment_signature_invalid", 400);
   }
+  const identity = canonicalProviderAuthorizationIdentity(accepted, authorization);
   return {
     accepted,
     authorization: {
@@ -304,7 +323,7 @@ async function providerPaymentAuthorization(
       from: payer,
       to: getAddress(authorization.to),
     },
-    id: `sha256:${sha256(raw)}`,
+    ...identity,
     payload,
     raw,
   };
@@ -500,7 +519,7 @@ export function createProviderRelay({
     }
     return {
       id: authorization.id,
-      hash: `0x${sha256(raw)}`,
+      hash: authorization.hash,
       payer: authorization.authorization.from,
       validAfter: String(authorization.authorization.validAfter),
       validBefore: String(authorization.authorization.validBefore),
@@ -927,6 +946,7 @@ export const __test = {
   createPinnedLookup,
   privateIp,
   acceptedRequirementsHash,
+  canonicalProviderAuthorizationIdentity,
   providerPaymentAuthorization,
   validateProviderChallenge,
   verifyProviderPaymentSettlement,
