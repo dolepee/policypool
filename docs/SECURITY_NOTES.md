@@ -172,6 +172,8 @@ An authorized request becomes uncertain once dispatch begins. A timeout, lost re
 
 Completed direct results remain retrievable for the execution-retention window after their payment authorizations expire, but only with the exact original provider request and both bound payment signatures. The store rechecks the execution ID derived from both payment headers before returning a terminal result. Expiry tolerance never applies to a new or merely bound execution.
 
+Direct A2MCP policies use a fixed escrow fee derived from the enrolled policy cap. Checkout therefore covers exactly that cap: omitting the amount selects it, while a different amount is declined before either payment authorization. Partial-cap pricing requires a future variable-fee escrow and is not emulated by overcharging.
+
 Residual: a direct fee may time out and refund after a provider settlement if PolicyPool loses both the immediate transition and scheduled capture long enough. This loses PolicyPool's fee but does not remove buyer coverage or debit the provider twice. A settlement whose response bytes were never durable cannot automatically prove timely completion; it requires manual evidence resolution without slashing the provider for PolicyPool infrastructure loss.
 
 ### Static analysis

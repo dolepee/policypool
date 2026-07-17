@@ -198,6 +198,8 @@ assert.match(chain, /verifyProviderPaymentAuthorization/);
 assert.match(chain, /findProviderSettlement/);
 assert.match(chain, /MAX_PROVIDER_SETTLEMENT_SEARCH_SECONDS = 20 \* 60/);
 assert.match(directCoordinator, /provider_authorization_expired_unsettled/);
+assert.match(directCoordinator, /direct_coverage_cap_must_equal_policy_cap/);
+assert.match(directCoordinator, /direct_policy_cap_unavailable/);
 assert.match(directCoordinator, /await relay\.recover/);
 assert.match(directCoordinator, /await state\.retainRecovery/);
 assert.match(directCoordinator, /provider_delivery_indeterminate_manual_resolution/);
@@ -337,6 +339,7 @@ assert.match(auditReport, /H-17: Newer quote traffic could starve older direct e
 assert.match(auditReport, /H-18: Settled direct executions could not recover without the buyer replaying/);
 assert.match(auditReport, /H-19: Uncertain forwarded provider calls could lose their one-shot reservation/);
 assert.match(auditReport, /H-20: Completed direct results became inaccessible after authorization expiry/);
+assert.match(auditReport, /M-08: Direct checkout advertised partial caps that its fixed fee could not honor/);
 assert.match(auditReport, /M-07: Direct reconciliation depended on manual scheduler setup/);
 assert.ok(
   vercel.builds.some((build) => build.src === "api/direct-a2mcp.js" && build.use === "@vercel/node"),

@@ -259,19 +259,23 @@ export function createDirectA2mcpCoordinator({
     const policy = probe.policy;
     const policyId = onchainPolicyId(policy);
     const servicePriceAtomic = BigInt(policy.servicePriceAtomic);
+    const policyCapAtomic = BigInt(policy.maxCoverageAtomic);
+    const availableBondAtomic = BigInt(policy.providerAvailableBondAtomic);
     const requested = input?.requestedCoverageUSDT
       ? parseUsdtAtomic(input.requestedCoverageUSDT, PAYMENT.decimals)
-      : servicePriceAtomic;
-    const maximum = [
-      servicePriceAtomic,
-      BigInt(policy.maxCoverageAtomic),
-      BigInt(policy.providerAvailableBondAtomic),
-    ].reduce((left, right) => left < right ? left : right);
-    if (requested < COVERAGE.minAtomic || requested > maximum) {
-      throw new DirectA2mcpError("direct_coverage_cap_invalid");
+      : policyCapAtomic;
+    if (
+      policyCapAtomic < BigInt(COVERAGE.minAtomic)
+      || policyCapAtomic > servicePriceAtomic
+      || policyCapAtomic > availableBondAtomic
+    ) {
+      throw new DirectA2mcpError("direct_policy_cap_unavailable");
+    }
+    if (requested !== policyCapAtomic) {
+      throw new DirectA2mcpError("direct_coverage_cap_must_equal_policy_cap");
     }
     const terms = await feeEscrow.terms();
-    const expectedFee = requested * BigInt(policy.premiumBps) / 10_000n;
+    const expectedFee = policyCapAtomic * BigInt(policy.premiumBps) / 10_000n;
     if (expectedFee !== terms.amountAtomic) throw new DirectA2mcpError("direct_policy_fee_incompatible");
     const issued = await state.issue({
       version: "0.4.0-direct-a2mcp",

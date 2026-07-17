@@ -26,7 +26,7 @@ const relayReceiptDigest = `0x${"99".repeat(32)}`;
 const settlementTransaction = `0x${"aa".repeat(32)}`;
 const providerPaymentSignature = "provider-payment-signature-one";
 
-function policy() {
+function policy(overrides = {}) {
   return {
     agentId: "3808",
     serviceIds: ["33461"],
@@ -42,10 +42,15 @@ function policy() {
     premiumBps: 2000,
     slaSeconds: 300,
     enrollmentWindowSeconds: 60,
+    ...overrides,
   };
 }
 
-function createHarness({ loseProviderResponseOnce = false, failClockOnce = false } = {}) {
+function createHarness({
+  loseProviderResponseOnce = false,
+  failClockOnce = false,
+  policyOverrides = {},
+} = {}) {
   let nowMs = Date.parse("2026-07-17T12:00:00.000Z");
   let quoteSequence = 1;
   let covenant = { state: 0 };
@@ -55,6 +60,7 @@ function createHarness({ loseProviderResponseOnce = false, failClockOnce = false
   let failClock = failClockOnce;
   let driftChallenge = false;
   let providerAuthorizationValidBefore = null;
+  const currentPolicy = () => policy(policyOverrides);
   const calls = {
     capture: 0,
     executeProvider: 0,
@@ -75,8 +81,8 @@ function createHarness({ loseProviderResponseOnce = false, failClockOnce = false
     async probe() {
       calls.probe += 1;
       return {
-        policy: policy(),
-        endpoint: policy().serviceEndpoint,
+        policy: currentPolicy(),
+        endpoint: currentPolicy().serviceEndpoint,
         requestHash,
         providerChallengeHash: challengeHash,
         providerRequirementsHash: driftChallenge ? `sha256:${"ff".repeat(32)}` : requirementsHash,
@@ -87,7 +93,7 @@ function createHarness({ loseProviderResponseOnce = false, failClockOnce = false
             scheme: "exact",
             network: XLAYER.network,
             asset: PAYMENT.asset,
-            amount: "500000",
+            amount: currentPolicy().servicePriceAtomic,
             payTo: provider,
             maxTimeoutSeconds: 600,
             extra: { name: PAYMENT.name, version: PAYMENT.version },
@@ -97,7 +103,7 @@ function createHarness({ loseProviderResponseOnce = false, failClockOnce = false
           scheme: "exact",
           network: XLAYER.network,
           asset: PAYMENT.asset,
-          amount: "500000",
+          amount: currentPolicy().servicePriceAtomic,
           payTo: provider,
           maxTimeoutSeconds: 600,
           extra: { name: PAYMENT.name, version: PAYMENT.version },
@@ -252,13 +258,13 @@ function createHarness({ loseProviderResponseOnce = false, failClockOnce = false
     now: () => nowMs,
   });
 
-  async function bindAndSign({ feeSigner = buyer } = {}) {
+  async function bindAndSign({ feeSigner = buyer, requestedCoverageUSDT = "0.5" } = {}) {
     const quoted = await coordinator.quote({
       buyer: buyer.address,
       agentId: "3808",
       serviceId: "33461",
       providerRequest,
-      requestedCoverageUSDT: "0.5",
+      requestedCoverageUSDT,
     });
     const bound = await coordinator.bind({
       token: quoted.quote.token,
@@ -300,6 +306,26 @@ function createHarness({ loseProviderResponseOnce = false, failClockOnce = false
     tick(milliseconds) { nowMs += milliseconds; },
   };
 }
+
+const variableCap = createHarness({
+  policyOverrides: {
+    servicePriceAtomic: "1000000",
+    maxCoverageAtomic: "1000000",
+    providerAvailableBondAtomic: "1000000",
+    premiumBps: 1000,
+  },
+});
+await assert.rejects(
+  () => variableCap.bindAndSign({ requestedCoverageUSDT: "0.5" }),
+  (error) => error instanceof DirectA2mcpError
+    && error.code === "direct_coverage_cap_must_equal_policy_cap",
+  "a fixed-fee direct policy must reject partial coverage before either payment is requested",
+);
+assert.equal(variableCap.calls.issue, 0);
+assert.equal(variableCap.calls.fund, 0);
+const variableFullCap = await variableCap.bindAndSign({ requestedCoverageUSDT: "1" });
+assert.equal(variableFullCap.quoted.quote.coverageCapAtomic, "1000000");
+assert.equal(variableFullCap.quoted.quote.feeAmountAtomic, "100000");
 
 const happy = createHarness();
 const happyFlow = await happy.bindAndSign();

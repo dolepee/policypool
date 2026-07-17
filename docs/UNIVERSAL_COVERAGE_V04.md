@@ -158,6 +158,8 @@ Before provider dispatch, the live execution retains an authenticated encrypted 
 
 The exact completed result remains replayable throughout the ten-day execution-retention window even after its short-lived authorizations expire. The original request and both original signatures must still match every stored binding; expiry tolerance cannot authorize new execution.
 
+Direct A2MCP checkout covers the provider's exact enrolled cap because the fee escrow amount is immutable and enrollment derives the premium from that cap. Omitted coverage defaults to the enrolled cap; partial or larger requests fail before payment rather than being silently overcharged.
+
 The scheduled path can request quorum authorization to:
 
 - start a verified relay clock;

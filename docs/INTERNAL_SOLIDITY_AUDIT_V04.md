@@ -423,6 +423,23 @@ Source remediation:
 
 Regression: `scripts/verify-direct-a2mcp.mjs` advances beyond both authorization expiries, retrieves the exact retained result, proves no provider or fee action repeats, and rejects substituted provider and fee signatures.
 
+### M-08: Direct checkout advertised partial caps that its fixed fee could not honor
+
+Severity: Medium / P2 checkout-contract mismatch
+
+Status: Fixed in source, not deployed
+
+The direct quote accepted any requested cap between the global minimum and the live service, policy, and bond maximum. The deployed fee escrow, however, has one immutable fee derived from the provider's enrolled maximum cap. A smaller otherwise-valid request therefore passed the range check and failed only when its proportional fee did not equal the fixed escrow fee.
+
+Source remediation:
+
+- direct A2MCP checkout now has one explicit cap: the provider's enrolled policy cap;
+- an omitted request amount defaults to that cap, while any different amount fails before either payment authorization is requested;
+- the quote also fails if the enrolled cap exceeds the live job price or available provider bond;
+- the fixed escrow fee is checked against the same enrolled cap from which the enrollment premium was derived.
+
+Regression: `scripts/verify-direct-a2mcp.mjs` uses a policy whose partial cap is otherwise within the global range, proves the partial request fails before issue or fee funding, and proves the full enrolled cap produces the expected fixed fee.
+
 ### M-01: Vault owner could replace the manager
 
 Severity: Medium
