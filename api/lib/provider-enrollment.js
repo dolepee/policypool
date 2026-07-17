@@ -218,8 +218,26 @@ export function createProviderEnrollmentService({
       1,
       slaSeconds,
     );
-    const premiumBps = integer(input?.premiumBps ?? 0, "premium_bps", 0, 10_000);
-    if (premiumBps !== 0) throw new ProviderEnrollmentError("provider_premium_not_supported_v04");
+    const maxCapAtomic = parseUsdtAtomic(input?.maxCapUSDT, PAYMENT.decimals);
+    if (maxCapAtomic <= 0n) throw new ProviderEnrollmentError("max_cap_invalid");
+    let premiumBps = integer(input?.premiumBps ?? 0, "premium_bps", 0, 10_000);
+    if (service.serviceType === "A2MCP") {
+      const directFeeAtomic = BigInt(configuration.directFeeAtomic || 100_000);
+      const premiumNumerator = directFeeAtomic * 10_000n;
+      if (premiumNumerator % maxCapAtomic !== 0n) {
+        throw new ProviderEnrollmentError("direct_fee_not_expressible_for_cap");
+      }
+      const derivedPremiumBps = Number(premiumNumerator / maxCapAtomic);
+      if (!Number.isSafeInteger(derivedPremiumBps) || derivedPremiumBps <= 0 || derivedPremiumBps > 10_000) {
+        throw new ProviderEnrollmentError("direct_fee_incompatible_with_cap");
+      }
+      if (input?.premiumBps !== undefined && premiumBps !== derivedPremiumBps) {
+        throw new ProviderEnrollmentError("direct_fee_premium_mismatch");
+      }
+      premiumBps = derivedPremiumBps;
+    } else if (premiumBps !== 0) {
+      throw new ProviderEnrollmentError("provider_premium_not_supported_v04");
+    }
     const payoutBasis = {
       net_loss: 0,
       provider_bonded_sla_credit: 1,
@@ -229,8 +247,6 @@ export function createProviderEnrollmentService({
     const expectedClock = service.serviceType === "A2A" ? "verified_acceptance" : "policypool_relay";
     if (requestedClock !== expectedClock) throw new ProviderEnrollmentError("clock_mode_service_type_mismatch");
     const clockMode = expectedClock === "verified_acceptance" ? 0 : 1;
-    const maxCapAtomic = parseUsdtAtomic(input?.maxCapUSDT, PAYMENT.decimals);
-    if (maxCapAtomic <= 0n) throw new ProviderEnrollmentError("max_cap_invalid");
     const currentSeconds = Math.floor(now() / 1000);
     const expiresAt = integer(
       input?.expiresAt,

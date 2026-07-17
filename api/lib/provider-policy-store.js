@@ -51,6 +51,7 @@ export class MemoryProviderPolicyStore {
     this.relayReceipts = new Map();
     this.latestRelayByJob = new Map();
     this.relayByCovenant = new Map();
+    this.relayResponses = new Map();
     this.relayGrantClaims = new Map();
     this.relayPaymentClaims = new Map();
   }
@@ -129,6 +130,11 @@ export class MemoryProviderPolicyStore {
     return receiptId ? this.getRelayReceipt(receiptId) : null;
   }
 
+  async getRelayResponse(receiptId) {
+    const value = this.relayResponses.get(String(receiptId));
+    return value ? structuredClone(value) : null;
+  }
+
   async reserveRelayExecution(grantId, paymentId, requestId) {
     const grantKey = String(grantId);
     const paymentKey = String(paymentId);
@@ -140,7 +146,7 @@ export class MemoryProviderPolicyStore {
     return "reserved";
   }
 
-  async commitRelayExecutionReceipt(grantId, paymentId, requestId, grantExpiresAt, input) {
+  async commitRelayExecutionReceipt(grantId, paymentId, requestId, grantExpiresAt, input, upstream = null) {
     const grantKey = String(grantId);
     const paymentKey = String(paymentId);
     const grant = this.relayGrantClaims.get(grantKey);
@@ -155,7 +161,11 @@ export class MemoryProviderPolicyStore {
       && payment.state === "consumed"
     ) {
       const existing = this.relayReceipts.get(record.receiptId);
-      return existing && sha256(existing) === sha256(record) ? structuredClone(existing) : null;
+      const existingUpstream = this.relayResponses.get(record.receiptId);
+      if (!existing || sha256(existing) !== sha256(record)) return null;
+      if (upstream && existingUpstream && sha256(existingUpstream) !== sha256(upstream)) return null;
+      if (upstream && !existingUpstream) this.relayResponses.set(record.receiptId, structuredClone(upstream));
+      return structuredClone(existing);
     }
     if (
       !grant
@@ -171,7 +181,10 @@ export class MemoryProviderPolicyStore {
     if (!targetJobId || !covenantId) return null;
     const current = this.relayReceipts.get(record.receiptId);
     if (current && sha256(current) !== sha256(record)) return null;
+    const currentUpstream = this.relayResponses.get(record.receiptId);
+    if (upstream && currentUpstream && sha256(currentUpstream) !== sha256(upstream)) return null;
     this.relayReceipts.set(record.receiptId, current || record);
+    if (upstream && !currentUpstream) this.relayResponses.set(record.receiptId, structuredClone(upstream));
     this.latestRelayByJob.set(targetJobId, record.receiptId);
     this.relayByCovenant.set(covenantId, record.receiptId);
     this.relayGrantClaims.set(grantKey, consumed);
@@ -298,6 +311,12 @@ export class RedisProviderPolicyStore {
     return receiptId ? this.getRelayReceipt(String(receiptId)) : null;
   }
 
+  async getRelayResponse(receiptId) {
+    const value = await this.redis.get(this.key("relay-response", String(receiptId)));
+    if (!value) return null;
+    return typeof value === "string" ? JSON.parse(value) : value;
+  }
+
   async reserveRelayExecution(grantId, paymentId, requestId) {
     const grantKey = this.key("relay-grant", String(grantId));
     const paymentKey = this.key("relay-payment", String(paymentId));
@@ -317,7 +336,7 @@ export class RedisProviderPolicyStore {
     return "reserved";
   }
 
-  async commitRelayExecutionReceipt(grantId, paymentId, requestId, grantExpiresAt, input) {
+  async commitRelayExecutionReceipt(grantId, paymentId, requestId, grantExpiresAt, input, upstream = null) {
     const grantKey = this.key("relay-grant", String(grantId));
     const paymentKey = this.key("relay-payment", String(paymentId));
     const record = relayReceiptRecord(input);
@@ -333,14 +352,18 @@ export class RedisProviderPolicyStore {
     const receiptKey = this.key("relay", record.receiptId);
     const jobKey = this.key("relay-job", targetJobId);
     const covenantKey = this.key("relay-covenant", covenantId);
+    const responseKey = this.key("relay-response", record.receiptId);
     // A paid clock is usable only if its receipt, index, and replay claims become durable together.
     const result = await this.redis.eval(
       `
         local grant = redis.call("GET", KEYS[1])
         local payment = redis.call("GET", KEYS[2])
         local existing = redis.call("GET", KEYS[3])
+        local existingResponse = redis.call("GET", KEYS[6])
+        if ARGV[6] ~= "" and existingResponse and existingResponse ~= ARGV[6] then return 0 end
         if grant == ARGV[2] and payment == ARGV[2] then
           if existing ~= ARGV[3] then return 0 end
+          if ARGV[6] ~= "" and not existingResponse then redis.call("SET", KEYS[6], ARGV[6]) end
           redis.call("SET", KEYS[4], ARGV[4])
           redis.call("SET", KEYS[5], ARGV[4])
           return 2
@@ -348,6 +371,7 @@ export class RedisProviderPolicyStore {
         if grant == ARGV[1] and payment == ARGV[1] then
           if existing and existing ~= ARGV[3] then return 0 end
           if not existing then redis.call("SET", KEYS[3], ARGV[3]) end
+          if ARGV[6] ~= "" and not existingResponse then redis.call("SET", KEYS[6], ARGV[6]) end
           redis.call("SET", KEYS[4], ARGV[4])
           redis.call("SET", KEYS[5], ARGV[4])
           redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[5])
@@ -356,13 +380,14 @@ export class RedisProviderPolicyStore {
         end
         return 0
       `,
-      [grantKey, paymentKey, receiptKey, jobKey, covenantKey],
+      [grantKey, paymentKey, receiptKey, jobKey, covenantKey, responseKey],
       [
         `pending:${requestId}`,
         `consumed:${requestId}`,
         JSON.stringify(record),
         record.receiptId,
         String(grantClaimTtlSeconds),
+        upstream ? JSON.stringify(upstream) : "",
       ],
     );
     return Number(result) > 0 ? this.getRelayReceipt(record.receiptId) : null;

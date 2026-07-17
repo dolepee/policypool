@@ -24,6 +24,7 @@ const configuration = {
   bondVault: "0x2000000000000000000000000000000000000002",
   a2aAdapter: "0x3000000000000000000000000000000000000003",
   relayAdapter: "0x4000000000000000000000000000000000000004",
+  directFeeAtomic: 100_000,
   maximumSlaSeconds: 604800,
 };
 const snapshot = {
@@ -85,7 +86,7 @@ const input = {
   slaSeconds: 300,
   enrollmentWindowSeconds: 60,
   maxCapUSDT: "0.5",
-  premiumBps: 0,
+  premiumBps: 2000,
   payoutBasis: "provider_bonded_sla_credit",
   clockMode: "policypool_relay",
   expiresAt: Math.floor(nowMs / 1000) + 30 * 24 * 60 * 60,
@@ -98,7 +99,7 @@ assert.equal(prepared.nonce, "3");
 assert.equal(prepared.terms.maxCapAtomic, "500000");
 assert.equal(prepared.terms.payoutBasis, 1);
 assert.equal(prepared.terms.clockMode, 1);
-assert.equal(prepared.terms.premiumBps, 0);
+assert.equal(prepared.terms.premiumBps, 2000);
 assert.equal(prepared.bond.availableAtomic, "2000000");
 
 const signature = await provider.signTypedData({
@@ -252,7 +253,13 @@ await assert.rejects(
 );
 await assert.rejects(
   () => service.prepare({ ...input, premiumBps: 1 }),
-  (error) => error instanceof ProviderEnrollmentError && error.code === "provider_premium_not_supported_v04",
+  (error) => error instanceof ProviderEnrollmentError && error.code === "direct_fee_premium_mismatch",
+);
+const derivedPremium = await service.prepare({ ...input, premiumBps: undefined });
+assert.equal(derivedPremium.terms.premiumBps, 2000);
+await assert.rejects(
+  () => service.prepare({ ...input, maxCapUSDT: "0.6", premiumBps: undefined }),
+  (error) => error instanceof ProviderEnrollmentError && error.code === "direct_fee_not_expressible_for_cap",
 );
 reads.availableBond = 100_000n;
 await assert.rejects(

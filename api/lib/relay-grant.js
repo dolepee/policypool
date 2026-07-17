@@ -35,6 +35,12 @@ function numericId(value, field) {
   return result;
 }
 
+function sha256Id(value, field) {
+  const result = clean(value, 80).toLowerCase();
+  if (!/^sha256:[a-f0-9]{64}$/.test(result)) throw new RelayGrantError(`${field}_invalid`);
+  return result;
+}
+
 export function createRelayGrantService({
   secret = process.env.POLICYPOOL_RELAY_GRANT_SECRET,
   now = () => Date.now(),
@@ -73,11 +79,20 @@ export function createRelayGrantService({
       issuedAt: new Date(issuedAt).toISOString(),
       expiresAt: new Date(expiresAt).toISOString(),
     };
+    const directBindingPresent = input.providerRequestHash !== undefined
+      || input.providerRequirementsHash !== undefined;
+    if (directBindingPresent) {
+      payload.providerRequestHash = sha256Id(input.providerRequestHash, "relay_grant_request_hash");
+      payload.providerRequirementsHash = sha256Id(
+        input.providerRequirementsHash,
+        "relay_grant_requirements_hash",
+      );
+    }
     payload.grantId = `pprg-${sha256(payload).slice(0, 24)}`;
     return { token: tokenForPayload(payload), payload };
   }
 
-  function resolve(token) {
+  function resolve(token, { allowExpired = false } = {}) {
     const [bodyToken, signatureToken, extra] = clean(token, 4_000).split(".");
     if (!bodyToken || !signatureToken || extra) throw new RelayGrantError("relay_grant_invalid");
     const body = decode(bodyToken);
@@ -100,7 +115,15 @@ export function createRelayGrantService({
     if (payload.version !== "0.4.0" || !isBytes32(payload.covenantId) || !isBytes32(payload.targetJobId)) {
       throw new RelayGrantError("relay_grant_invalid");
     }
-    if (Date.parse(payload.expiresAt) <= now()) throw new RelayGrantError("relay_grant_expired");
+    const directBindingPresent = payload.providerRequestHash !== undefined
+      || payload.providerRequirementsHash !== undefined;
+    if (directBindingPresent) {
+      sha256Id(payload.providerRequestHash, "relay_grant_request_hash");
+      sha256Id(payload.providerRequirementsHash, "relay_grant_requirements_hash");
+    }
+    if (!allowExpired && Date.parse(payload.expiresAt) <= now()) {
+      throw new RelayGrantError("relay_grant_expired");
+    }
     return payload;
   }
 

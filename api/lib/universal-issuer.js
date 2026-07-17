@@ -86,6 +86,7 @@ function clients(account) {
 }
 
 function acceptanceEvidenceHash(targetOrder) {
+  if (isBytes32(targetOrder?.acceptanceEvidenceHash)) return targetOrder.acceptanceEvidenceHash;
   if (!isBytes32(targetOrder?.jobId) || !isBytes32(targetOrder?.creationTxHash) || !isBytes32(targetOrder?.acceptanceTxHash)) {
     throw new UniversalIssuerError("target_acceptance_evidence_invalid", 422);
   }

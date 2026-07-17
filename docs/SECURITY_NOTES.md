@@ -152,11 +152,24 @@ Verified relay receipts were indexed by target job, but reconciliation did not p
 
 Every signed relay receipt now includes the grant's covenant ID. Its durable atomic commit writes both the diagnostic job index and an exact covenant index. Reconciliation reads only the covenant index, verifies the receipt signature, and requires exact grant, covenant, job, agent, service, and grant-buyer/payment-payer equality before using any clock or delivery evidence. A prior receipt for the same job remains auditable but cannot drive a replacement covenant.
 
+### Direct A2MCP checkout and refundable fee escrow
+
+OKX Task Marketplace is an A2A accept/deliver transport and is not used for A2MCP services. `/api/direct-a2mcp` performs direct HTTP+x402 checkout through three fail-closed stages: probe and quote, provider authorization, then separate refundable PolicyPool fee authorization. The canonical provider request and x402 challenge are hashed into the quote; the buyer, policy, service fingerprint, endpoint, amount, provider destination, both nonces, and both authorization windows cannot change between stages.
+
+The ownerless `PolicyFeeEscrow` receives the PolicyPool fee before the provider call but cannot send it to the treasury until the provider settlement and clock are quorum-attested. If no provider settlement exists after authorization expiry, the covenant is quorum-cancelled and only the buyer can refund the fee. The escrow has no sweep or alternate recipient and verifies exact balance deltas.
+
+Provider execution is at most once. The paid response body and signed relay receipt persist in one atomic commit. Recovery first checks that durable record, then performs a bounded on-chain search for the exact indexed EIP-3009 nonce and USD₮0 transfer. A proven settlement with no durable response creates a safety hold: PolicyPool does not call the provider again and does not infer a provider breach from its own response-loss failure. If the PolicyPool fee was already refunded before a delayed settlement is recovered, coverage still follows the settled provider job while no second provider call or fee capture occurs.
+
+The direct scheduler is authenticated independently from the buyer route. It can relay only quorum-attested lifecycle actions and uses durable quote indexes rather than accepting caller-selected job or payment evidence. Ambiguous or conflicting states remain visible as holds instead of being guessed into release, cancellation, or payout.
+
+Residual: a direct fee may time out and refund after a provider settlement if PolicyPool loses both the immediate transition and scheduled capture long enough. This loses PolicyPool's fee but does not remove buyer coverage or debit the provider twice. A settlement whose response bytes were never durable cannot automatically prove timely completion; it requires manual evidence resolution without slashing the provider for PolicyPool infrastructure loss.
+
 ### Static analysis
 
-Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 33 raw results and no unclassified v0.4 manager/verifier custody bypass. Relevant warning dispositions are:
+Slither `0.11.5` analyzed 47 contracts with 101 detectors. It returned 44 raw results and no unclassified v0.4 manager, verifier, vault, or fee-escrow custody bypass. Relevant warning dispositions are:
 
 - `ProviderBondVault.depositFor` performs an external token call before crediting the bond. The function is protected by its `nonReentrant` guard, requires the exact vault balance delta, and rejects false-return and fee-on-transfer assets. A malicious callback test confirms re-entry fails and the outer deposit rolls back.
+- `PolicyFeeEscrow.fund` performs the buyer-authorized token call before recording the fee. Its `nonReentrant` guard blocks an authorization-token callback, the exact inbound delta is required, and any callback, tax, or token failure rolls back the authorization and state. Capture and refund write terminal state before an exact-delta outbound transfer.
 - `CoverageManager` calls immutable verifier and vault dependencies. Every state-changing entry point is `nonReentrant`, state is written before the vault call, and any dependency revert rolls back the full transaction.
 - `CoverageEvidenceVerifier` loops over at most 16 signatures and rejects duplicate, unordered, unauthorized, malformed, high-`s`, and cross-domain attestations.
 - `CoverageManager` validates exact 3-of-5 primary/recovery topology with bounded constructor-time calls to immutable verifier contracts. It fails deployment closed on any dependency revert, topology drift, or overlap.
@@ -169,7 +182,7 @@ Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 33 raw re
 
 ### Adversarial coverage gate
 
-The remediated custody/state-transition suite passes 90 Foundry tests and includes executable hostile regressions for stale settlement, held breach evidence, terminal recovery, late completion, provisional-breach correction, primary and emergency challenge-period ordering, quorum separation, delayed recovery, exact outbound token transfers, primary and recovery-quorum expired-unused fee cancellation, and uncertain issuance reconciliation.
+The remediated custody/state-transition suite passes 116 Foundry tests and includes executable hostile regressions for stale settlement, held breach evidence, terminal recovery, late completion, provisional-breach correction, primary and emergency challenge-period ordering, quorum separation, delayed recovery, exact outbound token transfers, primary and recovery-quorum expired-unused fee cancellation, uncertain issuance reconciliation, and the direct refundable fee escrow.
 
 - `AgentPolicyRegistry`: `100%` (`23/23`);
 - `ProviderBondVault`: `100%` (`30/30`);
@@ -177,6 +190,7 @@ The remediated custody/state-transition suite passes 90 Foundry tests and includ
 - `CoverageManager`: `93.33%` (`42/45`);
 - `OkxA2AClockAdapter`: `100%` (`6/6`);
 - `RelayReceiptVerifier`: `100%` (`8/8`).
+- `PolicyFeeEscrow`: `91.30%` (`21/23`).
 
 The three reported uncovered manager branches are defensive paths: Foundry does not attribute the explicit reentrancy regression to the guard branch, an A2A deadline cannot already be elapsed while its shorter enrollment window remains open under `enrollmentWindowSeconds <= slaSeconds`, and an `Active` or `PayoutDue` covenant cannot enter emergency resolution with an unset deadline.
 

@@ -56,7 +56,10 @@ export function isEvmAddress(value) {
 export function sendJson(res, status, payload) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, PAYMENT-SIGNATURE, X-PAYMENT");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, PAYMENT-SIGNATURE, PROVIDER-PAYMENT-SIGNATURE, X-PAYMENT",
+  );
   res.setHeader("Access-Control-Expose-Headers", "PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-RESPONSE");
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Content-Type", "application/json; charset=utf-8");

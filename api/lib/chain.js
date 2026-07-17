@@ -24,6 +24,7 @@ const JOB_ABI = parseAbi([
   "function getJobStatus(bytes32 jobId) view returns (uint8)",
 ]);
 const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
+const MAX_PROVIDER_SETTLEMENT_SEARCH_SECONDS = 20 * 60;
 
 export class EvidenceError extends Error {
   constructor(code, message) {
@@ -405,9 +406,90 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
     };
   }
 
+  async function findProviderSettlement({
+    payer,
+    payTo,
+    asset = PAYMENT.asset,
+    amountAtomic,
+    authorizationNonce,
+    notBeforeTimestamp,
+    notAfterTimestamp,
+  }) {
+    let expectedPayer;
+    let expectedPayTo;
+    let expectedAsset;
+    try {
+      expectedPayer = getAddress(payer);
+      expectedPayTo = getAddress(payTo);
+      expectedAsset = getAddress(asset);
+    } catch {
+      throw new EvidenceError("provider_settlement_search_address_invalid");
+    }
+    if (!isBytes32(authorizationNonce)) {
+      throw new EvidenceError("provider_settlement_search_nonce_invalid");
+    }
+    const fromTimestamp = Number(notBeforeTimestamp);
+    const throughTimestamp = Number(notAfterTimestamp);
+    if (
+      !Number.isSafeInteger(fromTimestamp)
+      || !Number.isSafeInteger(throughTimestamp)
+      || fromTimestamp <= 0
+      || throughTimestamp < fromTimestamp
+      || throughTimestamp - fromTimestamp > MAX_PROVIDER_SETTLEMENT_SEARCH_SECONDS
+    ) throw new EvidenceError("provider_settlement_search_window_invalid");
+
+    let latest;
+    try {
+      latest = await publicClient.getBlock();
+    } catch (error) {
+      throw new EvidenceError("provider_settlement_search_head_unavailable", error instanceof Error ? error.message : String(error));
+    }
+    if (latest.number === null || Number(latest.timestamp) < fromTimestamp) return null;
+    const boundedThrough = Math.min(throughTimestamp, Number(latest.timestamp));
+    const fromBlock = await firstBlockAtOrAfter(fromTimestamp);
+    const throughBlock = boundedThrough === Number(latest.timestamp)
+      ? latest.number
+      : await firstBlockAtOrAfter(boundedThrough);
+    let matches;
+    try {
+      matches = await publicClient.getLogs({
+        address: expectedAsset,
+        event: AUTHORIZATION_USED_EVENT,
+        args: { authorizer: expectedPayer, nonce: authorizationNonce },
+        fromBlock,
+        toBlock: throughBlock,
+      });
+    } catch (error) {
+      throw new EvidenceError("provider_settlement_search_failed", error instanceof Error ? error.message : String(error));
+    }
+    if (matches.length === 0) return null;
+    if (matches.length !== 1 || !isBytes32(matches[0].transactionHash)) {
+      throw new EvidenceError("provider_settlement_search_ambiguous");
+    }
+    const transfer = await verifyTransfer({
+      txHash: matches[0].transactionHash,
+      from: expectedPayer,
+      to: expectedPayTo,
+      asset: expectedAsset,
+      amountAtomic,
+      authorizationNonce,
+    });
+    let settlementBlock;
+    try {
+      settlementBlock = await publicClient.getBlock({ blockNumber: BigInt(matches[0].blockNumber) });
+    } catch (error) {
+      throw new EvidenceError("provider_settlement_block_unavailable", error instanceof Error ? error.message : String(error));
+    }
+    return {
+      ...transfer,
+      settledAt: new Date(Number(settlementBlock.timestamp) * 1_000).toISOString(),
+    };
+  }
+
   return {
     getJobStatus,
     getReserveBalance,
+    findProviderSettlement,
     resolveTargetOrderEvidence,
     verifyProviderPaymentAuthorization,
     verifySettlement: ({ txHash, payer, amountAtomic }) => verifyTransfer({

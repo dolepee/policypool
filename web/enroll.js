@@ -66,7 +66,6 @@ function enrollmentInput() {
     slaSeconds: Number(byId("sla-seconds").value),
     enrollmentWindowSeconds: Number(byId("window-seconds").value),
     maxCapUSDT: byId("coverage-cap").value,
-    premiumBps: 0,
     payoutBasis: byId("payout-basis").value,
     clockMode: serviceType === "A2A" ? "verified_acceptance" : "policypool_relay",
     expiresAt: Math.floor(Date.now() / 1000) + days * 24 * 60 * 60,

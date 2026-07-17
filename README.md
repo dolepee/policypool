@@ -22,7 +22,7 @@ PolicyPool does not rate subjective quality, accept caller-supplied policy overr
 
 > **Genesis submission scope:** Agent Coverage is the current OKX.AI product and submission. The v4 liquidity-covenant implementation is the historical X Layer foundation retained below, not the listed Genesis service.
 
-> **v0.4 development status:** the High single-operator evidence issue is remediated in source with an immutable threshold evidence quorum and permissionless execution. That source is not deployed. The old flag-off deployment is superseded, production remains v0.3, and third-party bonds remain blocked until independent review, operationally independent signers, redeployment, bytecode verification, and a fresh controlled pilot. See [Universal Coverage v0.4](docs/UNIVERSAL_COVERAGE_V04.md) and the [internal Solidity audit](docs/INTERNAL_SOLIDITY_AUDIT_V04.md).
+> **v0.4 development status:** the High single-operator evidence issue is remediated in source with immutable threshold evidence quorums and permissionless execution. Direct A2MCP checkout now uses separate provider and refundable PolicyPool-fee authorizations, at-most-once provider execution, and autonomous reconciliation without routing through Task Marketplace. This source is not deployed. The old flag-off deployment is superseded, production remains v0.3, and third-party-funded bonds remain blocked until qualified audit, operationally independent signers, redeployment, bytecode verification, and controlled pilots. See [Universal Coverage v0.4](docs/UNIVERSAL_COVERAGE_V04.md) and the [internal Solidity audit](docs/INTERNAL_SOLIDITY_AUDIT_V04.md).
 
 ## Agent Coverage Loop
 
@@ -57,7 +57,7 @@ The accepted-event service hash is preserved verbatim and checked for A2A/A2MCP 
 
 v0.4 replaces the manual allowlist as the growth path without creating unbacked provider-agnostic coverage. Any OKX.AI provider can enroll one exact service by proving agent ownership, depositing provider-owned first-loss USD₮0, and signing versioned objective terms. Every quote revalidates ownership, service fingerprint, policy state, expiry, and available bond. A changed listing fails closed until re-enrollment.
 
-The branch includes a bond vault, policy registry, immutable threshold evidence verifier, permissionless covenant manager, A2A and A2MCP clocks, covenant-bound relay grants, deduplicated buyer demand signals, an enrollment UI, a one-minute reconciler, and an SDK. Shared-reserve co-coverage and provider premiums are disabled. Issuance and every subjective lifecycle transition require threshold-attested evidence bound to the exact chain, verifier, manager, action, and payload; the runtime relayer only pays gas.
+The branch includes a bond vault, policy registry, two disjoint immutable threshold evidence verifiers, permissionless covenant manager, ownerless refundable fee escrow, A2A and direct A2MCP clocks, covenant-bound relay grants, deduplicated buyer demand signals, an enrollment UI, authenticated one-minute reconcilers, and an SDK. The A2MCP route is `/api/direct-a2mcp`; it is direct HTTP+x402 and explicitly incompatible with Task Marketplace. Shared-reserve co-coverage and discretionary provider premiums are disabled. Issuance and every subjective lifecycle transition require threshold-attested evidence bound to the exact chain, verifier, manager, action, and payload; the runtime relayer only pays gas.
 
 ## Controlled Lifecycle Proof
 

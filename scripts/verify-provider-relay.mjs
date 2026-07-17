@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { authorizationTypes } from "@x402/evm";
 import {
   decodePaymentSignatureHeader,
+  encodePaymentRequiredHeader,
   encodePaymentResponseHeader,
   encodePaymentSignatureHeader,
 } from "@x402/core/http";
@@ -55,13 +56,16 @@ const grant = {
   serviceId: "33461",
   targetJobId,
   buyer,
+  issuedAt: "2026-07-16T12:00:00.000Z",
   expiresAt: "2026-07-22T12:00:00.000Z",
 };
 const secondGrant = { ...grant, grantId: "pprg-test-second" };
+let boundGrant;
 const grantService = {
   resolve(token) {
     if (token === "signed-relay-grant") return grant;
     if (token === "second-relay-grant") return secondGrant;
+    if (token === "bound-relay-grant") return boundGrant;
     assert.fail(`unexpected relay grant token: ${token}`);
   },
 };
@@ -71,6 +75,7 @@ async function paymentHeader(tag, {
   signingAccount = buyerSigner,
   from = buyer,
   authorizationAtMs = Date.now(),
+  maxTimeoutSeconds = 600,
 } = {}) {
   const authorization = {
     from: getAddress(from),
@@ -104,13 +109,33 @@ async function paymentHeader(tag, {
       asset: PAYMENT.asset,
       amount,
       payTo,
-      maxTimeoutSeconds: 600,
+      maxTimeoutSeconds,
       extra: { name: PAYMENT.name, version: PAYMENT.version },
     },
     payload: {
       signature,
       authorization,
     },
+  });
+}
+
+function paymentRequiredHeader(accepts = null) {
+  return encodePaymentRequiredHeader({
+    x402Version: 2,
+    resource: {
+      url: policy.serviceEndpoint,
+      description: "Warden endpoint audit",
+      mimeType: "application/json",
+    },
+    accepts: accepts || [{
+      scheme: "exact",
+      network: XLAYER.network,
+      asset: PAYMENT.asset,
+      amount: policy.servicePriceAtomic,
+      payTo: provider,
+      maxTimeoutSeconds: 600,
+      extra: { name: PAYMENT.name, version: PAYMENT.version },
+    }],
   });
 }
 
@@ -134,7 +159,7 @@ const fetchImpl = async (url, options, connection) => {
   assert.deepEqual(connection.records, [{ address: "93.184.216.34", family: 4 }]);
   elapsed += 250;
   const headers = responseStatus === 402
-    ? { "content-type": "application/json", "payment-required": "challenge" }
+    ? { "content-type": "application/json", "payment-required": paymentRequiredHeader() }
     : { "content-type": "application/json", "payment-response": settlementHeader() };
   return new Response(JSON.stringify({ status: responseStatus === 402 ? "payment_required" : "audit_complete" }), {
     status: responseStatus,
@@ -187,11 +212,69 @@ const relay = createProviderRelay({
   now: () => relayNowBase + elapsed,
 });
 
+const providerRequest = { target_url: "https://policypool.vercel.app/api/covered-job-receipt" };
+const probe = await relay.probe({
+  agentId: "3808",
+  serviceId: "33461",
+  providerRequest,
+});
+assert.equal(probe.accepted.amount, policy.servicePriceAtomic);
+assert.equal(probe.accepted.payTo, getAddress(provider));
+assert.match(probe.requestHash, /^sha256:[a-f0-9]{64}$/);
+assert.match(probe.providerRequirementsHash, /^sha256:[a-f0-9]{64}$/);
+boundGrant = {
+  ...grant,
+  grantId: "pprg-bound",
+  providerRequestHash: probe.requestHash,
+  providerRequirementsHash: probe.providerRequirementsHash,
+};
+await assert.rejects(
+  () => relay.execute({
+    agentId: "3808",
+    serviceId: "33461",
+    targetJobId,
+    providerRequest,
+    relayGrant: "bound-relay-grant",
+  }, {}),
+  (error) => error instanceof ProviderRelayError && error.code === "provider_payment_signature_required",
+  "a direct bound grant must not degrade into an unpaid provider replay",
+);
+await assert.rejects(
+  () => relay.execute({
+    agentId: "3808",
+    serviceId: "33461",
+    targetJobId,
+    providerRequest: { ...providerRequest, extra: "substituted" },
+    relayGrant: "bound-relay-grant",
+  }, {}),
+  (error) => error instanceof ProviderRelayError && error.code === "provider_request_does_not_match_grant",
+  "the paid relay body must exactly match the probed request",
+);
+const changedRequirementsPayment = await paymentHeader("changed-requirements", { maxTimeoutSeconds: 599 });
+await assert.rejects(
+  () => relay.execute({
+    agentId: "3808",
+    serviceId: "33461",
+    targetJobId,
+    providerRequest,
+    relayGrant: "bound-relay-grant",
+  }, { "payment-signature": changedRequirementsPayment }),
+  (error) => error instanceof ProviderRelayError && error.code === "provider_payment_challenge_changed",
+  "the signed provider requirements must exactly match the probe",
+);
+assert.throws(
+  () => __test.validateProviderChallenge(paymentRequiredHeader([
+    probe.accepted,
+    probe.accepted,
+  ]), policy, policy.serviceEndpoint),
+  (error) => error instanceof ProviderRelayError && error.code === "provider_payment_challenge_ambiguous",
+);
+
 const challenge = await relay.execute({
   agentId: "3808",
   serviceId: "33461",
   targetJobId,
-  providerRequest: { target_url: "https://policypool.vercel.app/api/covered-job-receipt" },
+  providerRequest,
   relayGrant: "signed-relay-grant",
 }, {});
 assert.equal(challenge.upstream.status, 402);
@@ -347,6 +430,11 @@ assert.equal(
   false,
 );
 assert.equal(await store.getRelayReceipt(delivered.receipt.receiptId) !== null, true);
+assert.deepEqual(
+  await store.getRelayResponse(delivered.receipt.receiptId),
+  delivered.upstream,
+  "the paid provider response must commit atomically with its relay receipt",
+);
 assert.equal(
   (await store.getLatestRelayReceiptForJob(targetJobId)).receiptId,
   delivered.receipt.receiptId,
@@ -357,6 +445,59 @@ assert.equal(
   delivered.receipt.receiptId,
   "relay receipt must be indexed by its exact covenant for reconciliation",
 );
+const onchainRecoveryStore = new MemoryProviderPolicyStore();
+let settlementSearches = 0;
+const onchainRecoveryRelay = createProviderRelay({
+  policyResolver: resolver,
+  store: onchainRecoveryStore,
+  fetchImpl: async () => assert.fail("on-chain recovery must not call the provider"),
+  resolveHost,
+  chain: {
+    ...chain,
+    async findProviderSettlement(input) {
+      settlementSearches += 1;
+      return {
+        txHash: paymentTransaction,
+        blockNumber: "123",
+        asset: getAddress(input.asset),
+        from: getAddress(input.payer),
+        to: getAddress(input.payTo),
+        amountAtomic: String(input.amountAtomic),
+        authorizationNonce: input.authorizationNonce,
+        settledAt: "2026-07-16T12:00:02.000Z",
+      };
+    },
+  },
+  signer,
+  receiptVerifierAddress: relayVerifier,
+  grantService,
+  now: () => relayNowBase + elapsed,
+});
+const recoveredPayment = await paymentHeader("recover-settled-provider", {
+  authorizationAtMs: relayNowBase + elapsed,
+});
+const recoveredFromChain = await onchainRecoveryRelay.recover({
+  agentId: "3808",
+  serviceId: "33461",
+  targetJobId,
+  providerRequest,
+  relayGrant: "signed-relay-grant",
+}, { "payment-signature": recoveredPayment });
+assert.equal(recoveredFromChain.recovered, true);
+assert.equal(recoveredFromChain.upstream, null);
+assert.equal(recoveredFromChain.receipt.clock.delivered, false);
+assert.equal(recoveredFromChain.receipt.settlement.transaction, paymentTransaction);
+assert.equal(await verifyProviderRelayReceipt(recoveredFromChain.receipt, signer.address, relayVerifier), true);
+assert.equal(settlementSearches, 1);
+const recoveredFromStore = await onchainRecoveryRelay.recover({
+  agentId: "3808",
+  serviceId: "33461",
+  targetJobId,
+  providerRequest,
+  relayGrant: "signed-relay-grant",
+}, { "payment-signature": recoveredPayment });
+assert.equal(recoveredFromStore.receipt.receiptId, recoveredFromChain.receipt.receiptId);
+assert.equal(settlementSearches, 1, "durable recovery must not scan the chain twice");
 responseStatus = 402;
 const unpaidAfterPaid = await relay.execute({
   agentId: "3808",
@@ -455,6 +596,7 @@ const atomicFetch = async () => new Response(JSON.stringify({ status: "audit_com
 });
 const retryableAtomicBacking = new MemoryProviderPolicyStore();
 let failBeforeAtomicCommit = true;
+let retryableProviderCalls = 0;
 const retryableAtomicStore = {
   saveRelayReceipt: (...args) => retryableAtomicBacking.saveRelayReceipt(...args),
   reserveRelayExecution: (...args) => retryableAtomicBacking.reserveRelayExecution(...args),
@@ -470,7 +612,10 @@ const retryableAtomicStore = {
 const retryableAtomicRelay = createProviderRelay({
   policyResolver: resolver,
   store: retryableAtomicStore,
-  fetchImpl: atomicFetch,
+  fetchImpl: async (...args) => {
+    retryableProviderCalls += 1;
+    return atomicFetch(...args);
+  },
   resolveHost,
   chain,
   signer,
@@ -481,20 +626,23 @@ const retryableAtomicPayment = await paymentHeader("retryable-atomic-commit");
 await assert.rejects(
   () => retryableAtomicRelay.execute(retryInput, { "payment-signature": retryableAtomicPayment }),
   (error) => error instanceof ProviderRelayError && error.code === "provider_relay_commit_failed",
-  "a store outage before the atomic commit must fail without consuming the grant",
+  "a store outage after verified settlement must fail without forgetting that the paid call occurred",
 );
 assert.equal(await retryableAtomicBacking.getLatestRelayReceiptForJob(targetJobId), null);
-const recoveredAtomicCommit = await retryableAtomicRelay.execute(
-  retryInput,
-  { "payment-signature": retryableAtomicPayment },
+await assert.rejects(
+  () => retryableAtomicRelay.execute(retryInput, { "payment-signature": retryableAtomicPayment }),
+  (error) => error instanceof ProviderRelayError && error.code === "relay_grant_already_used",
+  "a verified settlement with a failed durable commit must hold its reservation for chain recovery",
 );
-assert.equal(recoveredAtomicCommit.receipt.request.paymentVerified, true);
+assert.equal(retryableProviderCalls, 1, "a commit outage after settlement must not call the provider twice");
 
 const uncertainAtomicBacking = new MemoryProviderPolicyStore();
 let loseAtomicCommitReply = true;
 let uncertainProviderCalls = 0;
 const uncertainAtomicStore = {
   saveRelayReceipt: (...args) => uncertainAtomicBacking.saveRelayReceipt(...args),
+  getRelayReceiptForCovenant: (...args) => uncertainAtomicBacking.getRelayReceiptForCovenant(...args),
+  getRelayResponse: (...args) => uncertainAtomicBacking.getRelayResponse(...args),
   reserveRelayExecution: (...args) => uncertainAtomicBacking.reserveRelayExecution(...args),
   releaseRelayExecution: (...args) => uncertainAtomicBacking.releaseRelayExecution(...args),
   async commitRelayExecutionReceipt(...args) {
@@ -535,6 +683,13 @@ await assert.rejects(
   "an uncertain response after atomic commit must not forward or settle the provider twice",
 );
 assert.equal(uncertainProviderCalls, 1);
+const recoveredUncertain = await uncertainAtomicRelay.recover(
+  retryInput,
+  { "payment-signature": uncertainAtomicPayment },
+);
+assert.equal(recoveredUncertain.recovered, true);
+assert.equal(recoveredUncertain.upstream.status, 200);
+assert.equal(uncertainProviderCalls, 1, "recovery must not call the paid provider again");
 
 await assert.rejects(
   () => relay.execute({

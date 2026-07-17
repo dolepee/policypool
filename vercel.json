@@ -18,6 +18,10 @@
       "use": "@vercel/node"
     },
     {
+      "src": "api/direct-a2mcp.js",
+      "use": "@vercel/node"
+    },
+    {
       "src": "api/covered-job-receipt.js",
       "use": "@vercel/node"
     },
@@ -39,6 +43,10 @@
     },
     {
       "src": "api/reconcile-coverage.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/reconcile-direct-a2mcp.js",
       "use": "@vercel/node"
     },
     {

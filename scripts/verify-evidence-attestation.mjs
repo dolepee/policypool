@@ -37,6 +37,13 @@ assert.equal(calls[0].options.headers.authorization, "Bearer test-token");
 assert.equal(calls[0].body.evidence.coverageCapAtomic, "500000");
 assert.equal(calls[0].body.context.acceptanceTxHash, `0x${"44".repeat(32)}`);
 assert.deepEqual(calls[0].body.domain, domain);
+await client.attest({
+  action: "capture_fee",
+  digest,
+  evidence: { feeId: `0x${"77".repeat(32)}` },
+  domain,
+});
+assert.equal(calls[1].body.action, "capture_fee");
 
 const invalid = createEvidenceAttestationClient({
   url: "https://evidence.example/attest",

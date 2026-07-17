@@ -18,6 +18,13 @@ function optionalHttpsUrl(value) {
   }
 }
 
+function optionalHttpsOrigin(value) {
+  const parsed = optionalHttpsUrl(value);
+  if (!parsed) return null;
+  const url = new URL(parsed);
+  return url.pathname === "/" && !url.search ? url.origin : null;
+}
+
 export const UNIVERSAL = {
   version: "0.4.0",
   enabled: process.env.POLICYPOOL_UNIVERSAL_ENABLED === "true",
@@ -27,6 +34,12 @@ export const UNIVERSAL = {
   evidenceVerifier: optionalAddress(process.env.POLICYPOOL_EVIDENCE_VERIFIER_ADDRESS),
   recoveryEvidenceVerifier: optionalAddress(process.env.POLICYPOOL_RECOVERY_EVIDENCE_VERIFIER_ADDRESS),
   coverageManager: optionalAddress(process.env.POLICYPOOL_COVERAGE_MANAGER_ADDRESS),
+  feeEscrow: optionalAddress(process.env.POLICYPOOL_FEE_ESCROW_ADDRESS),
+  directA2mcpEnabled: process.env.POLICYPOOL_DIRECT_A2MCP_ENABLED === "true",
+  directFeeAtomic: Number(process.env.POLICYPOOL_DIRECT_FEE_ATOMIC || 100_000),
+  publicOrigin: optionalHttpsOrigin(
+    process.env.POLICYPOOL_PUBLIC_ORIGIN || "https://policypool.vercel.app",
+  ),
   a2aAdapter: optionalAddress(process.env.POLICYPOOL_OKX_A2A_ADAPTER_ADDRESS),
   relayAdapter: optionalAddress(process.env.POLICYPOOL_A2MCP_RELAY_ADAPTER_ADDRESS),
   relaySigner: optionalAddress(process.env.POLICYPOOL_RELAY_SIGNER_ADDRESS),
@@ -50,6 +63,9 @@ export function universalConfiguration() {
   if (!UNIVERSAL.evidenceVerifier) missing.push("POLICYPOOL_EVIDENCE_VERIFIER_ADDRESS");
   if (!UNIVERSAL.recoveryEvidenceVerifier) missing.push("POLICYPOOL_RECOVERY_EVIDENCE_VERIFIER_ADDRESS");
   if (!UNIVERSAL.coverageManager) missing.push("POLICYPOOL_COVERAGE_MANAGER_ADDRESS");
+  if (!Number.isSafeInteger(UNIVERSAL.directFeeAtomic) || UNIVERSAL.directFeeAtomic <= 0) {
+    missing.push("POLICYPOOL_DIRECT_FEE_ATOMIC");
+  }
   if (!UNIVERSAL.a2aAdapter) missing.push("POLICYPOOL_OKX_A2A_ADAPTER_ADDRESS");
   if (!UNIVERSAL.relayAdapter) missing.push("POLICYPOOL_A2MCP_RELAY_ADAPTER_ADDRESS");
   if (!UNIVERSAL.relaySigner) missing.push("POLICYPOOL_RELAY_SIGNER_ADDRESS");
@@ -74,6 +90,10 @@ export function universalConfiguration() {
     evidenceVerifier: UNIVERSAL.evidenceVerifier,
     recoveryEvidenceVerifier: UNIVERSAL.recoveryEvidenceVerifier,
     coverageManager: UNIVERSAL.coverageManager,
+    feeEscrow: UNIVERSAL.feeEscrow,
+    directA2mcpEnabled: UNIVERSAL.directA2mcpEnabled,
+    directFeeAtomic: UNIVERSAL.directFeeAtomic,
+    publicOrigin: UNIVERSAL.publicOrigin,
     a2aAdapter: UNIVERSAL.a2aAdapter,
     relayAdapter: UNIVERSAL.relayAdapter,
     relaySigner: UNIVERSAL.relaySigner,
