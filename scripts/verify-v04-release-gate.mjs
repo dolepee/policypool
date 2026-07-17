@@ -27,6 +27,7 @@ const [
   securityNotes,
   auditReport,
   vercel,
+  reconciliationWorkflow,
 ] = await Promise.all([
   read("package.json").then(JSON.parse),
   read("api/lib/universal-config.js"),
@@ -52,6 +53,7 @@ const [
   read("docs/SECURITY_NOTES.md"),
   read("docs/INTERNAL_SOLIDITY_AUDIT_V04.md"),
   read("vercel.json").then(JSON.parse),
+  read(".github/workflows/reconcile-agent-coverage.yml"),
 ]);
 const [
   feeEscrowContract,
@@ -205,6 +207,13 @@ assert.match(directHandler, /marketplaceTaskCompatible:\s*false/);
 assert.match(directHandler, /provider-payment-signature/);
 assert.match(directReconcileHandler, /upstash-signature/);
 assert.match(directSchedule, /policypool-direct-a2mcp-reconciler-v04/);
+assert.match(
+  reconciliationWorkflow,
+  /Reconcile direct A2MCP executions when enabled[\s\S]*if:\s*\$\{\{\s*always\(\)\s*\}\}/,
+);
+assert.match(reconciliationWorkflow, /https:\/\/policypool\.vercel\.app\/api\/direct-a2mcp/);
+assert.match(reconciliationWorkflow, /https:\/\/policypool\.vercel\.app\/api\/reconcile-direct-a2mcp/);
+assert.match(reconciliationWorkflow, /json\.load\(sys\.stdin\)\.get\("enabled"\) is True/);
 assert.match(universalPolicy, /servicePriceAtomic:\s*servicePriceAtomic\.toString\(\)/);
 assert.match(enrollment, /direct_fee_not_expressible_for_cap/);
 assert.match(enrollment, /direct_fee_premium_mismatch/);
@@ -300,6 +309,7 @@ assert.match(auditReport, /H-12: Relay claims were consumed before the paid rece
 assert.match(auditReport, /H-13: Consumed relay-grant claims expired before the longest grant window/);
 assert.match(auditReport, /H-14: A2A SLA-credit covenants could remain locked after verified late delivery/);
 assert.match(auditReport, /H-15: Relay receipts were not bound to the current covenant/);
+assert.match(auditReport, /M-07: Direct reconciliation depended on manual scheduler setup/);
 assert.ok(
   vercel.builds.some((build) => build.src === "api/direct-a2mcp.js" && build.use === "@vercel/node"),
   "direct A2MCP checkout must be included in the Vercel build",

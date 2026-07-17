@@ -432,6 +432,16 @@ Source remediation:
 
 Residual: byte-level source verification and a read-only post-deployment state audit remain mandatory. Script success alone is not proof that an explorer or RPC endpoint serves the reviewed bytecode.
 
+### M-07: Direct reconciliation depended on manual scheduler setup
+
+Severity: Medium operational liveness risk
+
+Status: Fixed in source, not deployed
+
+The direct A2MCP reconciler originally had a QStash setup script but no checked-in scheduler fallback. Enabling the direct route without manually creating that schedule could leave crash-interrupted executions unreconciled, delay fee refunds, and keep provider bond locked.
+
+The existing five-minute GitHub reconciliation workflow now discovers the public direct route and invokes `/api/reconcile-direct-a2mcp` whenever it reports `enabled: true`. The step uses `always()` so failure of the legacy reconciler cannot suppress direct recovery. QStash remains the one-minute primary with retries; GitHub is the independently configured fallback. The release gate requires the discovery check, direct endpoint, and failure isolation, so scheduler coverage cannot silently return to a manual-only state.
+
 ### L-01: Relay signatures lacked deployment domain separation
 
 Severity: Low
@@ -548,7 +558,7 @@ Redeployment is required. The remediated manager constructor adds the evidence v
 
 The next deployment must create an eight-contract stack flag-off: vault, registry, primary evidence verifier, disjoint recovery evidence verifier, manager, PolicyFeeEscrow, A2A adapter, and relay verifier. It must then verify bytecode, both 3-of-5 signer sets, zero signer overlap, fee treasury and amount, and immutable wiring before any pilot.
 
-No production endpoint, OKX listing, feature flag, scheduler, existing contract, or fund balance is changed by this source remediation.
+No production endpoint, OKX listing, feature flag, existing contract, or fund balance is changed by this source remediation. The checked-in GitHub workflow gains a dormant direct-reconciliation fallback, but the direct feature remains disabled and no QStash schedule is created.
 
 ## Next Review Questions
 

@@ -162,6 +162,8 @@ Provider execution is at most once. The paid response body and signed relay rece
 
 The direct scheduler is authenticated independently from the buyer route. It can relay only quorum-attested lifecycle actions and uses durable quote indexes rather than accepting caller-selected job or payment evidence. Ambiguous or conflicting states remain visible as holds instead of being guessed into release, cancellation, or payout.
 
+Direct reconciliation no longer depends on manually creating the QStash schedule. QStash remains the one-minute primary, while the checked-in five-minute GitHub workflow discovers whether the direct route is enabled and invokes it through an `always()`-isolated step. Both paths use the operator bearer token; scheduled QStash calls additionally carry its platform signature.
+
 Residual: a direct fee may time out and refund after a provider settlement if PolicyPool loses both the immediate transition and scheduled capture long enough. This loses PolicyPool's fee but does not remove buyer coverage or debit the provider twice. A settlement whose response bytes were never durable cannot automatically prove timely completion; it requires manual evidence resolution without slashing the provider for PolicyPool infrastructure loss.
 
 ### Static analysis
