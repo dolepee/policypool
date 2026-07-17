@@ -73,9 +73,11 @@ function harness({ receipt = relayReceipt(), covenantState = 1, feeState = 1, no
     refundAvailableAt: directRecord().providerAuthorizationValidBefore + 120,
   };
   let settlementSearchResult = null;
+  let rotations = 0;
   const calls = { cancel: 0, capture: 0, mark: 0, refund: 0, release: 0, settle: 0, start: 0 };
   const state = {
-    async list() { return [structuredClone(record)]; },
+    async listExecuting() { return record.state === "executing" ? [structuredClone(record)] : []; },
+    async markReconciled() { rotations += 1; return record.state === "executing"; },
     async reconcileCheckpoint(_id, _executionId, stage, value) {
       record.execution.stages[stage] = structuredClone(value);
       return structuredClone(record);
@@ -118,6 +120,7 @@ function harness({ receipt = relayReceipt(), covenantState = 1, feeState = 1, no
   return {
     calls,
     getRecord: () => structuredClone(record),
+    getRotations: () => rotations,
     reconcile: (input) => reconciler.reconcile(input),
     setReceipt(value) { currentReceipt = value; },
     setSettlementSearch(value) { settlementSearchResult = value; },
@@ -131,6 +134,7 @@ assert.equal(happyResult.ok, true);
 assert.deepEqual(happy.calls, { cancel: 0, capture: 1, mark: 0, refund: 0, release: 1, settle: 0, start: 1 });
 assert.equal(happy.getRecord().state, "complete");
 assert.equal(happy.getRecord().result.coverageState, 3);
+assert.equal(happy.getRotations(), 1);
 
 const unsettled = harness({
   receipt: null,
@@ -141,6 +145,7 @@ assert.equal(unsettledResult.ok, true);
 assert.deepEqual(unsettled.calls, { cancel: 1, capture: 0, mark: 0, refund: 1, release: 0, settle: 0, start: 0 });
 assert.equal(unsettled.getRecord().state, "complete");
 assert.equal(unsettled.getRecord().result.outcome, "cancelled_without_charge");
+assert.equal(unsettled.getRotations(), 1);
 
 const settlementFound = harness({
   receipt: null,
@@ -151,11 +156,13 @@ const settlementFoundResult = await settlementFound.reconcile();
 assert.equal(settlementFoundResult.holds[0].reason, "provider_settlement_found_receipt_recovery_required");
 assert.equal(settlementFound.calls.cancel, 0);
 assert.equal(settlementFound.calls.refund, 0);
+assert.equal(settlementFound.getRotations(), 1, "persistent holds must rotate behind unscanned executions");
 
 const indeterminate = harness({ receipt: relayReceipt({ delivered: false, recovered: true }), covenantState: 2 });
 const indeterminateResult = await indeterminate.reconcile();
 assert.equal(indeterminateResult.holds[0].reason, "provider_delivery_indeterminate_manual_resolution");
 assert.equal(indeterminate.calls.mark, 0, "PolicyPool infrastructure loss must not slash the provider");
+assert.equal(indeterminate.getRotations(), 1);
 
 const refundedAfterSettlement = harness({ covenantState: 1, feeState: 3 });
 const refundedAfterSettlementResult = await refundedAfterSettlement.reconcile();
@@ -165,11 +172,13 @@ assert.equal(refundedAfterSettlement.calls.capture, 0);
 assert.equal(refundedAfterSettlement.calls.release, 1);
 assert.equal(refundedAfterSettlement.getRecord().state, "complete");
 assert.equal(refundedAfterSettlement.getRecord().result.feeOutcome, "refunded_after_provider_settlement");
+assert.equal(refundedAfterSettlement.getRotations(), 1);
 
 const settledAfterCancellation = harness({ covenantState: 7, feeState: 3 });
 const settledAfterCancellationResult = await settledAfterCancellation.reconcile();
 assert.equal(settledAfterCancellationResult.holds[0].reason, "provider_settled_after_unpaid_cancellation_manual_resolution");
 assert.equal(settledAfterCancellation.getRecord().state, "executing");
+assert.equal(settledAfterCancellation.getRotations(), 1);
 
 const breach = harness({ receipt: relayReceipt({ delivered: false }), covenantState: 2, nowSeconds: 1784289700 });
 const marked = await breach.reconcile();
@@ -177,11 +186,22 @@ assert.equal(marked.ok, true);
 assert.equal(breach.calls.mark, 1);
 assert.equal(breach.calls.capture, 1);
 assert.equal(breach.getRecord().state, "executing");
+assert.equal(breach.getRotations(), 1);
 breach.tick(24 * 60 * 60 + 1);
 const settled = await breach.reconcile();
 assert.equal(settled.ok, true);
 assert.equal(breach.calls.settle, 1);
 assert.equal(breach.getRecord().state, "complete");
 assert.equal(breach.getRecord().result.coverageState, 5);
+assert.equal(breach.getRotations(), 2);
 
-console.log("PolicyPool direct A2MCP reconciler passed: unattended release, fee capture, no-settlement cancellation/refund, settlement ambiguity hold, and challenged breach settlement.");
+const dryRun = harness();
+assert.equal((await dryRun.reconcile({ dryRun: true })).ok, true);
+assert.equal(dryRun.getRotations(), 0, "dry-run reconciliation must remain read-only");
+
+const invalidReceipt = harness({ receipt: { receiptId: "malformed" } });
+const invalidReceiptResult = await invalidReceipt.reconcile();
+assert.equal(invalidReceiptResult.ok, false);
+assert.equal(invalidReceipt.getRotations(), 1, "failed executions must rotate instead of starving the queue");
+
+console.log("PolicyPool direct A2MCP reconciler passed: unattended lifecycle handling plus fair rotation for holds and failures.");

@@ -164,6 +164,8 @@ The direct scheduler is authenticated independently from the buyer route. It can
 
 Direct reconciliation no longer depends on manually creating the QStash schedule. QStash remains the one-minute primary, while the checked-in five-minute GitHub workflow discovers whether the direct route is enabled and invokes it through an `always()`-isolated step. Both paths use the operator bearer token; scheduled QStash calls additionally carry its platform signature.
 
+Reconciliation reads a dedicated execution-only queue rather than the newest general quotes. Claim, completion, and reversible release update that queue atomically. Every inspected live execution moves behind records not yet inspected, including when it remains on hold or an attempt fails, so probe traffic and persistent holds cannot starve an older covenant. Expired or terminal index members are removed without being treated as lifecycle evidence.
+
 Residual: a direct fee may time out and refund after a provider settlement if PolicyPool loses both the immediate transition and scheduled capture long enough. This loses PolicyPool's fee but does not remove buyer coverage or debit the provider twice. A settlement whose response bytes were never durable cannot automatically prove timely completion; it requires manual evidence resolution without slashing the provider for PolicyPool infrastructure loss.
 
 ### Static analysis

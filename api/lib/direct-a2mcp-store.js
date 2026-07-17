@@ -31,6 +31,7 @@ if current.state == 'executing' then
   local retention = tonumber(ARGV[4])
   if ttl < retention then ttl = retention end
   redis.call('SET', KEYS[1], ARGV[3], 'PX', ttl)
+  redis.call('ZADD', KEYS[2], 'NX', ARGV[6], ARGV[5])
   return {'reclaimed', ARGV[3]}
 end
 if current.state ~= 'bound' then return {'state_mismatch', raw} end
@@ -38,6 +39,7 @@ local ttl = redis.call('PTTL', KEYS[1])
 local retention = tonumber(ARGV[4])
 if ttl < retention then ttl = retention end
 redis.call('SET', KEYS[1], ARGV[3], 'PX', ttl)
+redis.call('ZADD', KEYS[2], 'NX', ARGV[6], ARGV[5])
 return {'claimed', ARGV[3]}
 `;
 
@@ -46,8 +48,14 @@ local raw = redis.call('GET', KEYS[1])
 if not raw then return {'missing'} end
 local current = cjson.decode(raw)
 if current.state ~= 'executing' or current.execution.id ~= ARGV[1] then return {'state_mismatch', raw} end
+local nextState = cjson.decode(ARGV[2])
 local ttl = redis.call('PTTL', KEYS[1])
 if ttl > 0 then redis.call('SET', KEYS[1], ARGV[2], 'PX', ttl) else redis.call('SET', KEYS[1], ARGV[2]) end
+if nextState.state == 'executing' then
+  redis.call('ZADD', KEYS[2], 'NX', ARGV[4], ARGV[3])
+else
+  redis.call('ZREM', KEYS[2], ARGV[3])
+end
 return {'updated', ARGV[2]}
 `;
 
@@ -59,7 +67,26 @@ if current.state ~= 'executing' or current.execution.id ~= ARGV[1] then return {
 if next(current.execution.stages) ~= nil then return {'irreversible', raw} end
 local ttl = redis.call('PTTL', KEYS[1])
 if ttl > 0 then redis.call('SET', KEYS[1], ARGV[2], 'PX', ttl) else redis.call('SET', KEYS[1], ARGV[2]) end
+redis.call('ZREM', KEYS[2], ARGV[3])
 return {'released', ARGV[2]}
+`;
+
+const MARK_SCANNED_SCRIPT = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  redis.call('ZREM', KEYS[2], ARGV[2])
+  return 0
+end
+local current = cjson.decode(raw)
+if current.state ~= 'executing' then
+  redis.call('ZREM', KEYS[2], ARGV[2])
+  return 0
+end
+local score = tonumber(ARGV[1])
+local tail = redis.call('ZREVRANGE', KEYS[2], 0, 0, 'WITHSCORES')
+if #tail == 2 and tonumber(tail[2]) >= score then score = tonumber(tail[2]) + 1 end
+redis.call('ZADD', KEYS[2], score, ARGV[2])
+return 1
 `;
 
 export class DirectA2mcpStateError extends Error {
@@ -73,6 +100,10 @@ export class DirectA2mcpStateError extends Error {
 
 function clone(value) {
   return value ? structuredClone(value) : null;
+}
+
+function normalizedListLimit(limit) {
+  return Number.isSafeInteger(limit) && limit > 0 ? limit : 0;
 }
 
 function tokenSecret(override) {
@@ -109,6 +140,7 @@ export class MemoryDirectA2mcpStore {
   constructor({ now = () => Date.now() } = {}) {
     this.now = now;
     this.quotes = new Map();
+    this.executing = new Map();
   }
 
   async create(record, ttlSeconds) {
@@ -122,6 +154,7 @@ export class MemoryDirectA2mcpStore {
     if (!stored) return null;
     if (stored.expiresAtMs <= this.now()) {
       this.quotes.delete(String(id));
+      this.executing.delete(String(id));
       return null;
     }
     return clone(stored.record);
@@ -133,6 +166,24 @@ export class MemoryDirectA2mcpStore {
       const record = await this.get(id);
       if (record) records.push(record);
       if (records.length >= limit) break;
+    }
+    return clone(records);
+  }
+
+  async listExecuting(limit = 100) {
+    const count = normalizedListLimit(limit);
+    if (count === 0) return [];
+    const records = [];
+    const ordered = [...this.executing.entries()]
+      .sort(([leftId, leftScore], [rightId, rightScore]) => leftScore - rightScore || leftId.localeCompare(rightId));
+    for (const [id] of ordered) {
+      const record = await this.get(id);
+      if (!record || record.state !== "executing") {
+        this.executing.delete(id);
+        continue;
+      }
+      records.push(record);
+      if (records.length >= count) break;
     }
     return clone(records);
   }
@@ -158,12 +209,14 @@ export class MemoryDirectA2mcpStore {
       const stored = this.quotes.get(String(id));
       stored.record = clone(next);
       stored.expiresAtMs = Math.max(stored.expiresAtMs, this.now() + retentionSeconds * 1_000);
+      if (!this.executing.has(String(id))) this.executing.set(String(id), next.execution.startedAtMs);
       return { status: "reclaimed", record: clone(next) };
     }
     if (current.state !== "bound") return { status: "state_mismatch", record: current };
     const stored = this.quotes.get(String(id));
     stored.record = clone(next);
     stored.expiresAtMs = Math.max(stored.expiresAtMs, this.now() + retentionSeconds * 1_000);
+    this.executing.set(String(id), next.execution.startedAtMs);
     return { status: "claimed", record: clone(next) };
   }
 
@@ -174,6 +227,11 @@ export class MemoryDirectA2mcpStore {
       return { status: "state_mismatch", record: current };
     }
     this.quotes.get(String(id)).record = clone(next);
+    if (next.state === "executing") {
+      if (!this.executing.has(String(id))) this.executing.set(String(id), next.execution.startedAtMs);
+    } else {
+      this.executing.delete(String(id));
+    }
     return { status: "updated", record: clone(next) };
   }
 
@@ -185,7 +243,20 @@ export class MemoryDirectA2mcpStore {
     }
     if (Object.keys(current.execution.stages || {}).length > 0) return { status: "irreversible", record: current };
     this.quotes.get(String(id)).record = clone(next);
+    this.executing.delete(String(id));
     return { status: "released", record: clone(next) };
+  }
+
+  async markExecutingScanned(id, scannedAtMs) {
+    const current = await this.get(String(id));
+    if (!current || current.state !== "executing") {
+      this.executing.delete(String(id));
+      return false;
+    }
+    let tailScore = 0;
+    for (const score of this.executing.values()) tailScore = Math.max(tailScore, score);
+    this.executing.set(String(id), Math.max(scannedAtMs, tailScore + 1));
+    return true;
   }
 }
 
@@ -201,6 +272,10 @@ export class RedisDirectA2mcpStore {
 
   indexKey() {
     return `${this.prefix}:quotes`;
+  }
+
+  executingIndexKey() {
+    return `${this.prefix}:executing`;
   }
 
   async create(record, ttlSeconds) {
@@ -238,6 +313,38 @@ export class RedisDirectA2mcpStore {
     return records;
   }
 
+  async listExecuting(limit = 100) {
+    const count = normalizedListLimit(limit);
+    if (count === 0) return [];
+    const records = [];
+    let offset = 0;
+    while (records.length < count) {
+      const remaining = count - records.length;
+      const ids = await this.redis.zrange(this.executingIndexKey(), offset, offset + remaining - 1);
+      if (!ids.length) break;
+      const values = await this.redis.mget(...ids.map((id) => this.key(String(id))));
+      const stale = [];
+      let live = 0;
+      values.forEach((value, index) => {
+        const id = String(ids[index]);
+        if (!value) {
+          stale.push(id);
+          return;
+        }
+        const record = typeof value === "string" ? JSON.parse(value) : value;
+        if (record.state !== "executing") stale.push(id);
+        else {
+          records.push(record);
+          live += 1;
+        }
+      });
+      if (stale.length) await this.redis.zrem(this.executingIndexKey(), ...stale);
+      offset += live;
+      if (ids.length < remaining && stale.length === 0) break;
+    }
+    return records;
+  }
+
   async bind(id, bindingHash, next) {
     return this._transition(BIND_SCRIPT, id, [bindingHash, JSON.stringify(next)]);
   }
@@ -248,19 +355,35 @@ export class RedisDirectA2mcpStore {
       String(nowMs),
       JSON.stringify(next),
       String(retentionSeconds * 1_000),
+      String(id),
+      String(next.execution.startedAtMs),
     ]);
   }
 
   async update(id, executionId, next) {
-    return this._transition(UPDATE_SCRIPT, id, [executionId, JSON.stringify(next)]);
+    return this._transition(UPDATE_SCRIPT, id, [
+      executionId,
+      JSON.stringify(next),
+      String(id),
+      String(next.execution?.startedAtMs || Date.parse(next.issuedAt)),
+    ]);
   }
 
   async release(id, executionId, next) {
-    return this._transition(RELEASE_SCRIPT, id, [executionId, JSON.stringify(next)]);
+    return this._transition(RELEASE_SCRIPT, id, [executionId, JSON.stringify(next), String(id)]);
+  }
+
+  async markExecutingScanned(id, scannedAtMs) {
+    const result = await this.redis.eval(
+      MARK_SCANNED_SCRIPT,
+      [this.key(id), this.executingIndexKey()],
+      [String(scannedAtMs), String(id)],
+    );
+    return Number(result) === 1;
   }
 
   async _transition(script, id, args) {
-    const result = await this.redis.eval(script, [this.key(id)], args);
+    const result = await this.redis.eval(script, [this.key(id), this.executingIndexKey()], args);
     const value = result?.[1];
     return {
       status: String(result?.[0] || "state_error"),
@@ -431,9 +554,14 @@ export function createDirectA2mcpState({
     return { ...result.record, token };
   }
 
-  async function list(limit = 100) {
-    if (!store.list) throw new DirectA2mcpStateError("direct_quote_index_unavailable", 503);
-    return store.list(limit);
+  async function listExecuting(limit = 100) {
+    if (!store.listExecuting) throw new DirectA2mcpStateError("direct_execution_index_unavailable", 503);
+    return store.listExecuting(limit);
+  }
+
+  async function markReconciled(id) {
+    if (!store.markExecutingScanned) throw new DirectA2mcpStateError("direct_execution_index_unavailable", 503);
+    return store.markExecutingScanned(String(id), now());
   }
 
   async function reconcileCheckpoint(id, executionId, stage, value) {
@@ -476,7 +604,8 @@ export function createDirectA2mcpState({
     claim,
     complete,
     issue,
-    list,
+    listExecuting,
+    markReconciled,
     reconcileCheckpoint,
     reconcileComplete,
     release,

@@ -152,6 +152,8 @@ If the provider never settles, the reconciler proves non-settlement after author
 
 QStash is the one-minute primary direct reconciler. The checked-in GitHub workflow independently checks `/api/direct-a2mcp` every five minutes and calls the direct reconciler whenever discovery reports it enabled. That fallback runs with `always()` isolation from the legacy reconciliation step, so direct recovery does not depend on manual QStash setup or on the health of the older path.
 
+Direct reconciliation is scheduled from a fair execution-only queue. Probe and bound quotes cannot occupy its scan window; claim and terminal transitions update membership atomically; and every inspected live execution rotates behind executions not yet scanned. A fixed batch limit therefore bounds work without allowing newer traffic or a persistent safety hold to strand an older covenant.
+
 The scheduled path can request quorum authorization to:
 
 - start a verified relay clock;

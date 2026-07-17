@@ -199,6 +199,13 @@ assert.match(directCoordinator, /policy_fee_refunded_provider_unsettled/);
 assert.match(directCoordinator, /refunded_after_provider_settlement/);
 assert.match(directState, /DEFAULT_EXECUTION_RETENTION_SECONDS = 10 \* 24 \* 60 \* 60/);
 assert.match(directState, /reconcileCheckpoint/);
+assert.match(directState, /executingIndexKey\(\)/);
+assert.match(directState, /MARK_SCANNED_SCRIPT/);
+assert.match(directState, /listExecuting/);
+assert.match(directState, /markExecutingScanned/);
+assert.match(directReconciler, /state\.listExecuting\(limit\)/);
+assert.match(directReconciler, /state\.markReconciled\(record\.id\)/);
+assert.doesNotMatch(directReconciler, /state\.list\(limit\)/);
 assert.match(directReconciler, /provider_delivery_indeterminate_manual_resolution/);
 assert.match(directReconciler, /provider_settled_after_unpaid_cancellation_manual_resolution/);
 assert.match(directReconciler, /cancel_unpaid_coverage/);
@@ -309,6 +316,7 @@ assert.match(auditReport, /H-12: Relay claims were consumed before the paid rece
 assert.match(auditReport, /H-13: Consumed relay-grant claims expired before the longest grant window/);
 assert.match(auditReport, /H-14: A2A SLA-credit covenants could remain locked after verified late delivery/);
 assert.match(auditReport, /H-15: Relay receipts were not bound to the current covenant/);
+assert.match(auditReport, /H-17: Newer quote traffic could starve older direct executions/);
 assert.match(auditReport, /M-07: Direct reconciliation depended on manual scheduler setup/);
 assert.ok(
   vercel.builds.some((build) => build.src === "api/direct-a2mcp.js" && build.use === "@vercel/node"),

@@ -354,6 +354,24 @@ Source remediation:
 
 Regression: `testHeldBreachEvidenceCannotConsumeChallengeWindow` holds otherwise-valid breach signatures beyond 24 hours, submits them, and proves immediate settlement still reverts until the newly committed challenge closes.
 
+### H-17: Newer quote traffic could starve older direct executions
+
+Severity: High / P1 runtime liveness risk
+
+Status: Fixed in source, not deployed
+
+The first direct reconciler read only the newest 100 entries from the all-quotes index and filtered that page for `executing` records. More than 100 newer probe or bound quotes could therefore hide an older execution indefinitely. Even an execution-only page would remain unfair if persistent safety holds always occupied its first 100 entries. An unresolved covenant and provider bond could remain locked despite healthy schedulers.
+
+Source remediation:
+
+- claim atomically adds the execution to a dedicated Redis sorted set, while completion and reversible release atomically remove it;
+- the reconciler reads the oldest execution scan scores, never the general quote index;
+- every inspected execution that remains live, including a safety hold or failed attempt, moves to the back of the queue;
+- missing, expired, and terminal records are removed from the execution index during reads or rotation;
+- probe-only and bound quotes never enter the execution queue.
+
+Regression: `scripts/verify-direct-a2mcp-state.mjs` proves that 150 newer probes cannot hide an older execution and that batch-limited holds rotate behind an omitted execution. `scripts/verify-direct-a2mcp-reconciler.mjs` proves successful, held, and failed inspections rotate correctly while dry runs remain read-only.
+
 ### M-01: Vault owner could replace the manager
 
 Severity: Medium

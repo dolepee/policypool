@@ -64,7 +64,12 @@ export function createDirectA2mcpReconciler({
   verifyReceipt = verifyProviderRelayReceipt,
   now = () => Date.now(),
 } = {}) {
-  if (!state?.list || !state?.reconcileCheckpoint || !state?.reconcileComplete) {
+  if (
+    !state?.listExecuting
+    || !state?.markReconciled
+    || !state?.reconcileCheckpoint
+    || !state?.reconcileComplete
+  ) {
     throw new Error("direct_reconciler_state_unavailable");
   }
   if (!relayStore?.getRelayReceiptForCovenant) throw new Error("direct_reconciler_relay_store_unavailable");
@@ -324,12 +329,11 @@ export function createDirectA2mcpReconciler({
   }
 
   async function reconcile({ dryRun = false, limit = 100 } = {}) {
-    const records = await state.list(limit);
+    const records = await state.listExecuting(limit);
     const changes = [];
     const holds = [];
     const failures = [];
     for (const record of records) {
-      if (record.state !== "executing") continue;
       try {
         const receipt = await relayStore.getRelayReceiptForCovenant(record.covenantId);
         if (receipt) await reconcileSettled(record, receipt, dryRun, changes, holds);
@@ -339,6 +343,19 @@ export function createDirectA2mcpReconciler({
           quoteId: record.id,
           error: error instanceof Error ? error.message : String(error),
         });
+      } finally {
+        if (!dryRun) {
+          try {
+            await state.markReconciled(record.id);
+          } catch (error) {
+            failures.push({
+              quoteId: record.id,
+              error: `direct_execution_index_rotation_failed:${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            });
+          }
+        }
       }
     }
     return {
