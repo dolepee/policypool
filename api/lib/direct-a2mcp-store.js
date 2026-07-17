@@ -1,4 +1,11 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 import { Redis } from "@upstash/redis";
 import { clean, sha256, stableStringify } from "./utils.js";
 
@@ -7,6 +14,8 @@ const DEFAULT_TTL_SECONDS = 10 * 60;
 const DEFAULT_LEASE_SECONDS = 2 * 60;
 const DEFAULT_EXECUTION_RETENTION_SECONDS = 10 * 24 * 60 * 60;
 const MINIMUM_SECRET_LENGTH = 32;
+const MAX_RECOVERY_CONTEXT_BYTES = 300_000;
+const RECOVERY_CIPHER_VERSION = 1;
 
 const BIND_SCRIPT = `
 local raw = redis.call('GET', KEYS[1])
@@ -122,6 +131,67 @@ function signatureFor(id, secret) {
 
 function tokenFor(id, secret) {
   return `ppd_${id}.${signatureFor(id, secret)}`;
+}
+
+function directRecoveryKey(secret) {
+  return createHash("sha256")
+    .update("policypool-direct-a2mcp:recovery:v1\0")
+    .update(secret)
+    .digest();
+}
+
+function directRecoveryAad(id, executionId) {
+  return Buffer.from(`policypool-direct-a2mcp:recovery:v1:${id}:${executionId}`);
+}
+
+function normalizedRecoveryContext(input) {
+  if (!input?.providerRequest || typeof input.providerRequest !== "object" || Array.isArray(input.providerRequest)) {
+    throw new DirectA2mcpStateError("direct_recovery_request_invalid", 503);
+  }
+  const providerPaymentSignature = clean(input.providerPaymentSignature, 16_000);
+  if (!providerPaymentSignature) {
+    throw new DirectA2mcpStateError("direct_recovery_payment_signature_invalid", 503);
+  }
+  const context = {
+    providerRequest: clone(input.providerRequest),
+    providerPaymentSignature,
+  };
+  if (Buffer.byteLength(stableStringify(context)) > MAX_RECOVERY_CONTEXT_BYTES) {
+    throw new DirectA2mcpStateError("direct_recovery_context_too_large", 503);
+  }
+  return context;
+}
+
+function sealRecoveryContext(id, executionId, context, key) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(directRecoveryAad(id, executionId));
+  const ciphertext = Buffer.concat([
+    cipher.update(stableStringify(context), "utf8"),
+    cipher.final(),
+  ]);
+  return {
+    version: RECOVERY_CIPHER_VERSION,
+    iv: iv.toString("base64url"),
+    tag: cipher.getAuthTag().toString("base64url"),
+    ciphertext: ciphertext.toString("base64url"),
+  };
+}
+
+function openRecoveryContext(id, executionId, envelope, key) {
+  try {
+    if (Number(envelope?.version) !== RECOVERY_CIPHER_VERSION) throw new Error("unsupported version");
+    const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(envelope.iv, "base64url"));
+    decipher.setAAD(directRecoveryAad(id, executionId));
+    decipher.setAuthTag(Buffer.from(envelope.tag, "base64url"));
+    const plaintext = Buffer.concat([
+      decipher.update(Buffer.from(envelope.ciphertext, "base64url")),
+      decipher.final(),
+    ]).toString("utf8");
+    return normalizedRecoveryContext(JSON.parse(plaintext));
+  } catch {
+    throw new DirectA2mcpStateError("direct_recovery_context_invalid", 503);
+  }
 }
 
 function parseToken(token, secret) {
@@ -415,6 +485,7 @@ export function createDirectA2mcpState({
   executionRetentionSeconds = DEFAULT_EXECUTION_RETENTION_SECONDS,
 } = {}) {
   const key = tokenSecret(secret);
+  const recoveryKey = directRecoveryKey(key);
   if (!Number.isSafeInteger(ttlSeconds) || ttlSeconds <= 0 || ttlSeconds > DEFAULT_TTL_SECONDS) {
     throw new DirectA2mcpStateError("direct_quote_ttl_invalid", 503);
   }
@@ -492,6 +563,61 @@ export function createDirectA2mcpState({
     throw new DirectA2mcpStateError(`direct_execution_${result.status}`);
   }
 
+  async function retainRecovery(token, executionId, input) {
+    const current = await resolve(token);
+    if (current.state !== "executing" || current.execution?.id !== executionId) {
+      throw new DirectA2mcpStateError("direct_execution_state_mismatch");
+    }
+    const context = normalizedRecoveryContext(input);
+    const contextHash = `sha256:${sha256(context)}`;
+    if (current.execution.recovery) {
+      const existing = openRecoveryContext(
+        current.id,
+        executionId,
+        current.execution.recovery.envelope,
+        recoveryKey,
+      );
+      if (current.execution.recovery.hash !== contextHash || sha256(existing) !== sha256(context)) {
+        throw new DirectA2mcpStateError("direct_recovery_context_mismatch", 409);
+      }
+      return { ...current, token };
+    }
+    const next = {
+      ...current,
+      token: undefined,
+      execution: {
+        ...current.execution,
+        recovery: {
+          hash: contextHash,
+          envelope: sealRecoveryContext(current.id, executionId, context, recoveryKey),
+        },
+      },
+    };
+    const result = await store.update(current.id, executionId, next);
+    if (result.status !== "updated") throw new DirectA2mcpStateError(`direct_execution_${result.status}`);
+    return { ...result.record, token };
+  }
+
+  async function recoveryContext(id, executionId) {
+    const current = await store.get(String(id));
+    if (!current || current.state !== "executing" || current.execution?.id !== executionId) {
+      throw new DirectA2mcpStateError("direct_execution_state_mismatch");
+    }
+    if (!current.execution.recovery?.envelope) {
+      throw new DirectA2mcpStateError("direct_recovery_context_unavailable", 503);
+    }
+    const context = openRecoveryContext(
+      current.id,
+      executionId,
+      current.execution.recovery.envelope,
+      recoveryKey,
+    );
+    if (`sha256:${sha256(context)}` !== current.execution.recovery.hash) {
+      throw new DirectA2mcpStateError("direct_recovery_context_invalid", 503);
+    }
+    return context;
+  }
+
   async function checkpoint(token, executionId, stage, value) {
     const current = await resolve(token);
     if (current.state !== "executing" || current.execution?.id !== executionId) {
@@ -513,13 +639,14 @@ export function createDirectA2mcpState({
 
   async function complete(token, executionId, resultValue) {
     const current = await resolve(token);
+    const { recovery: _recovery, ...execution } = current.execution || {};
     const next = {
       ...current,
       token: undefined,
       state: "complete",
       completedAt: new Date(now()).toISOString(),
       result: clone(resultValue),
-      execution: { ...current.execution, leaseExpiresAtMs: 0 },
+      execution: { ...execution, leaseExpiresAtMs: 0 },
     };
     const result = await store.update(current.id, executionId, next);
     if (result.status !== "updated") throw new DirectA2mcpStateError(`direct_execution_${result.status}`);
@@ -586,12 +713,13 @@ export function createDirectA2mcpState({
     if (!current || current.state !== "executing" || current.execution?.id !== executionId) {
       throw new DirectA2mcpStateError("direct_execution_state_mismatch");
     }
+    const { recovery: _recovery, ...execution } = current.execution || {};
     const next = {
       ...current,
       state: "complete",
       completedAt: new Date(now()).toISOString(),
       result: clone(resultValue),
-      execution: { ...current.execution, leaseExpiresAtMs: 0 },
+      execution: { ...execution, leaseExpiresAtMs: 0 },
     };
     const result = await store.update(current.id, executionId, next);
     if (result.status !== "updated") throw new DirectA2mcpStateError(`direct_execution_${result.status}`);
@@ -606,10 +734,12 @@ export function createDirectA2mcpState({
     issue,
     listExecuting,
     markReconciled,
+    recoveryContext,
     reconcileCheckpoint,
     reconcileComplete,
     release,
     resolve,
+    retainRecovery,
     yieldExecution,
   };
 }

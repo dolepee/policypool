@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createDirectA2mcpReconciler } from "../api/lib/direct-a2mcp-reconciler.js";
 import { PAYMENT } from "../api/lib/config.js";
+import { ProviderRelayError } from "../api/lib/provider-relay.js";
 
 const buyer = "0x3000000000000000000000000000000000000003";
 const provider = "0xf4c9fa07f3bb852547fdc4df7c1d9fd9991cfa51";
@@ -18,6 +19,9 @@ function directRecord() {
     state: "executing",
     issuedAt: "2026-07-17T12:00:00.000Z",
     buyer,
+    agentId: "3808",
+    serviceId: "33461",
+    endpoint: "https://warden.example/audit",
     servicePriceAtomic: "500000",
     providerAccepted: { payTo: provider, asset: PAYMENT.asset },
     providerAuthorizationId: authorizationId,
@@ -27,7 +31,10 @@ function directRecord() {
     covenantId,
     jobId,
     feeId,
-    execution: { id: `sha256:${"99".repeat(32)}`, stages: {} },
+    execution: {
+      id: `sha256:${"99".repeat(32)}`,
+      stages: { relayGrant: { token: "signed-direct-relay-grant" } },
+    },
   };
 }
 
@@ -72,12 +79,19 @@ function harness({ receipt = relayReceipt(), covenantState = 1, feeState = 1, no
     state: feeState,
     refundAvailableAt: directRecord().providerAuthorizationValidBefore + 120,
   };
-  let settlementSearchResult = null;
+  let recoveredProviderResult = null;
+  let recoveries = 0;
   let rotations = 0;
   const calls = { cancel: 0, capture: 0, mark: 0, refund: 0, release: 0, settle: 0, start: 0 };
   const state = {
     async listExecuting() { return record.state === "executing" ? [structuredClone(record)] : []; },
     async markReconciled() { rotations += 1; return record.state === "executing"; },
+    async recoveryContext() {
+      return {
+        providerRequest: { target_url: "https://policypool.vercel.app/api/covered-job-receipt" },
+        providerPaymentSignature: "provider-payment-signature",
+      };
+    },
     async reconcileCheckpoint(_id, _executionId, stage, value) {
       record.execution.stages[stage] = structuredClone(value);
       return structuredClone(record);
@@ -109,9 +123,20 @@ function harness({ receipt = relayReceipt(), covenantState = 1, feeState = 1, no
   const reconciler = createDirectA2mcpReconciler({
     state,
     relayStore: { async getRelayReceiptForCovenant() { return structuredClone(currentReceipt); } },
+    relay: {
+      async recover(input, headers) {
+        recoveries += 1;
+        assert.equal(input.relayGrant, "signed-direct-relay-grant");
+        assert.equal(headers["payment-signature"], "provider-payment-signature");
+        if (!recoveredProviderResult) {
+          throw new ProviderRelayError("provider_payment_settlement_not_found", 404);
+        }
+        currentReceipt = structuredClone(recoveredProviderResult.receipt);
+        return structuredClone(recoveredProviderResult);
+      },
+    },
     issuer,
     feeEscrow,
-    chain: { async findProviderSettlement() { return settlementSearchResult; } },
     relaySigner: "0x4000000000000000000000000000000000000004",
     relayVerifier: "0x5000000000000000000000000000000000000005",
     verifyReceipt: async () => true,
@@ -120,10 +145,11 @@ function harness({ receipt = relayReceipt(), covenantState = 1, feeState = 1, no
   return {
     calls,
     getRecord: () => structuredClone(record),
+    getRecoveries: () => recoveries,
     getRotations: () => rotations,
     reconcile: (input) => reconciler.reconcile(input),
     setReceipt(value) { currentReceipt = value; },
-    setSettlementSearch(value) { settlementSearchResult = value; },
+    setRecoveredProviderResult(value) { recoveredProviderResult = value; },
     tick(seconds) { nowMs += seconds * 1_000; },
   };
 }
@@ -151,11 +177,21 @@ const settlementFound = harness({
   receipt: null,
   nowSeconds: directRecord().providerAuthorizationValidBefore + 121,
 });
-settlementFound.setSettlementSearch({ txHash: settlementTransaction });
+settlementFound.setRecoveredProviderResult({
+  receipt: relayReceipt({ delivered: false, recovered: true }),
+  upstream: null,
+  recovered: true,
+});
 const settlementFoundResult = await settlementFound.reconcile();
-assert.equal(settlementFoundResult.holds[0].reason, "provider_settlement_found_receipt_recovery_required");
-assert.equal(settlementFound.calls.cancel, 0);
-assert.equal(settlementFound.calls.refund, 0);
+assert.equal(settlementFoundResult.holds[0].reason, "provider_delivery_indeterminate_manual_resolution");
+assert.deepEqual(
+  settlementFound.calls,
+  { cancel: 0, capture: 1, mark: 0, refund: 0, release: 0, settle: 0, start: 1 },
+);
+assert.equal(settlementFound.getRecoveries(), 1);
+assert.equal(settlementFound.getRecord().state, "executing");
+assert.equal(settlementFound.getRecord().execution.stages.clockStarted !== undefined, true);
+assert.equal(settlementFound.getRecord().execution.stages.feeCaptured !== undefined, true);
 assert.equal(settlementFound.getRotations(), 1, "persistent holds must rotate behind unscanned executions");
 
 const indeterminate = harness({ receipt: relayReceipt({ delivered: false, recovered: true }), covenantState: 2 });
@@ -198,6 +234,11 @@ assert.equal(breach.getRotations(), 2);
 const dryRun = harness();
 assert.equal((await dryRun.reconcile({ dryRun: true })).ok, true);
 assert.equal(dryRun.getRotations(), 0, "dry-run reconciliation must remain read-only");
+
+const dryRunMissingReceipt = harness({ receipt: null });
+const dryRunMissingResult = await dryRunMissingReceipt.reconcile({ dryRun: true });
+assert.equal(dryRunMissingResult.holds[0].reason, "provider_recovery_not_run_in_dry_run");
+assert.equal(dryRunMissingReceipt.getRecoveries(), 0, "dry runs must not persist a recovered receipt");
 
 const invalidReceipt = harness({ receipt: { receiptId: "malformed" } });
 const invalidReceiptResult = await invalidReceipt.reconcile();

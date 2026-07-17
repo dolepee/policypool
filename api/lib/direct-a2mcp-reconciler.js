@@ -1,5 +1,5 @@
 import { getAddress, keccak256, stringToHex } from "viem";
-import { verifyProviderRelayReceipt } from "./provider-relay.js";
+import { ProviderRelayError, verifyProviderRelayReceipt } from "./provider-relay.js";
 import { isBytes32, stableStringify } from "./utils.js";
 
 const COVENANT = {
@@ -56,9 +56,9 @@ function validateRelayBinding(record, receipt) {
 export function createDirectA2mcpReconciler({
   state,
   relayStore,
+  relay,
   issuer,
   feeEscrow,
-  chain,
   relaySigner,
   relayVerifier,
   verifyReceipt = verifyProviderRelayReceipt,
@@ -67,12 +67,14 @@ export function createDirectA2mcpReconciler({
   if (
     !state?.listExecuting
     || !state?.markReconciled
+    || !state?.recoveryContext
     || !state?.reconcileCheckpoint
     || !state?.reconcileComplete
   ) {
     throw new Error("direct_reconciler_state_unavailable");
   }
   if (!relayStore?.getRelayReceiptForCovenant) throw new Error("direct_reconciler_relay_store_unavailable");
+  if (!relay?.recover) throw new Error("direct_reconciler_relay_unavailable");
   if (
     !issuer?.getCovenant
     || !issuer?.startClock
@@ -86,7 +88,6 @@ export function createDirectA2mcpReconciler({
   if (!feeEscrow?.getFee || !feeEscrow?.capture || !feeEscrow?.refund) {
     throw new Error("direct_reconciler_fee_escrow_unavailable");
   }
-  if (!chain?.findProviderSettlement) throw new Error("direct_reconciler_chain_unavailable");
   if (!relaySigner || !relayVerifier) throw new Error("direct_reconciler_relay_identity_unavailable");
 
   async function checkpoint(record, stage, value, dryRun) {
@@ -96,6 +97,20 @@ export function createDirectA2mcpReconciler({
 
   async function complete(record, result, dryRun) {
     if (!dryRun) await state.reconcileComplete(record.id, record.execution.id, result);
+  }
+
+  async function recoverProviderResult(record) {
+    const recovery = await state.recoveryContext(record.id, record.execution.id);
+    const relayGrant = record.execution?.stages?.relayGrant;
+    if (!relayGrant?.token) throw new Error("direct_relay_grant_recovery_unavailable");
+    return relay.recover({
+      agentId: record.agentId,
+      serviceId: record.serviceId,
+      targetJobId: record.jobId,
+      endpoint: record.endpoint,
+      providerRequest: recovery.providerRequest,
+      relayGrant: relayGrant.token,
+    }, { "payment-signature": recovery.providerPaymentSignature });
   }
 
   async function reconcileSettled(record, receipt, dryRun, changes, holds) {
@@ -248,23 +263,6 @@ export function createDirectA2mcpReconciler({
       holds.push({ quoteId: record.id, reason: "provider_authorization_still_active" });
       return;
     }
-    const settlement = await chain.findProviderSettlement({
-      payer: record.buyer,
-      payTo: record.providerAccepted.payTo,
-      asset: record.providerAccepted.asset,
-      amountAtomic: record.servicePriceAtomic,
-      authorizationNonce: record.providerAuthorizationNonce,
-      notBeforeTimestamp: Math.floor(Date.parse(record.issuedAt) / 1_000),
-      notAfterTimestamp: Number(record.providerAuthorizationValidBefore),
-    });
-    if (settlement) {
-      holds.push({
-        quoteId: record.id,
-        reason: "provider_settlement_found_receipt_recovery_required",
-        settlementTransaction: settlement.txHash,
-      });
-      return;
-    }
     let covenant = await issuer.getCovenant(record.covenantId);
     let fee = await feeEscrow.getFee(record.feeId);
     const refundReadyAt = Number(fee.refundAvailableAt || record.providerAuthorizationValidBefore + 120);
@@ -335,7 +333,22 @@ export function createDirectA2mcpReconciler({
     const failures = [];
     for (const record of records) {
       try {
-        const receipt = await relayStore.getRelayReceiptForCovenant(record.covenantId);
+        let receipt = await relayStore.getRelayReceiptForCovenant(record.covenantId);
+        if (!receipt) {
+          if (dryRun) {
+            holds.push({ quoteId: record.id, reason: "provider_recovery_not_run_in_dry_run" });
+            continue;
+          }
+          try {
+            const recovered = await recoverProviderResult(record);
+            receipt = recovered?.receipt || null;
+          } catch (error) {
+            if (
+              !(error instanceof ProviderRelayError)
+              || error.code !== "provider_payment_settlement_not_found"
+            ) throw error;
+          }
+        }
         if (receipt) await reconcileSettled(record, receipt, dryRun, changes, holds);
         else await reconcileUnsettled(record, dryRun, changes, holds);
       } catch (error) {

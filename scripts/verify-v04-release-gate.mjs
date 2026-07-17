@@ -157,6 +157,10 @@ assert.match(providerRelay, /!sameAddress\(authorization\.authorization\.from, g
 assert.match(providerRelay, /provider_payment_payer_mismatch/);
 assert.match(providerRelay, /authorizationNonce:\s*authorization\.authorization\.nonce/);
 assert.match(providerRelay, /provider_payment_authorization_already_used/);
+assert.match(providerRelay, /requestDispatched = true/);
+assert.match(providerRelay, /definitelyUnsettled = response\.status === 402/);
+assert.match(providerRelay, /!requestDispatched \|\| definitelyUnsettled/);
+assert.doesNotMatch(providerRelay, /!settlementObserved/);
 assert.match(providerRelay, /source:\s*"policypool_relay_verified_x402_settlement"/);
 assert.doesNotMatch(providerRelay, /paymentHeaderPresent/);
 assert.match(providerPolicyStore, /reserveRelayExecution/);
@@ -165,6 +169,7 @@ assert.match(providerPolicyStore, /releaseRelayExecution/);
 assert.doesNotMatch(providerPolicyStore, /RELAY_GRANT_CLAIM_TTL_SECONDS/);
 assert.match(providerPolicyStore, /function relayGrantClaimTtlSeconds\(expiresAt/);
 assert.match(providerPolicyStore, /RELAY_GRANT_CLAIM_MAX_TTL_SECONDS = 8 \* 24 \* 60 \* 60/);
+assert.match(providerPolicyStore, /relayGrantClaimTtlSeconds\(grantExpiresAt, this\.now\(\)\)/);
 assert.match(
   providerPolicyStore,
   /redis\.call\("SET", KEYS\[1\], ARGV\[2\], "EX", ARGV\[5\]\)\s+redis\.call\("SET", KEYS\[2\], ARGV\[2\]\)/,
@@ -194,18 +199,27 @@ assert.match(chain, /findProviderSettlement/);
 assert.match(chain, /MAX_PROVIDER_SETTLEMENT_SEARCH_SECONDS = 20 \* 60/);
 assert.match(directCoordinator, /provider_authorization_expired_unsettled/);
 assert.match(directCoordinator, /await relay\.recover/);
+assert.match(directCoordinator, /await state\.retainRecovery/);
+assert.match(directCoordinator, /provider_delivery_indeterminate_manual_resolution/);
 assert.match(directCoordinator, /settled_response_unavailable_coverage_remains_active/);
 assert.match(directCoordinator, /policy_fee_refunded_provider_unsettled/);
 assert.match(directCoordinator, /refunded_after_provider_settlement/);
 assert.match(directState, /DEFAULT_EXECUTION_RETENTION_SECONDS = 10 \* 24 \* 60 \* 60/);
+assert.match(directState, /createCipheriv\("aes-256-gcm"/);
+assert.match(directState, /createDecipheriv\("aes-256-gcm"/);
+assert.match(directState, /async function retainRecovery/);
+assert.match(directState, /async function recoveryContext/);
 assert.match(directState, /reconcileCheckpoint/);
 assert.match(directState, /executingIndexKey\(\)/);
 assert.match(directState, /MARK_SCANNED_SCRIPT/);
 assert.match(directState, /listExecuting/);
 assert.match(directState, /markExecutingScanned/);
 assert.match(directReconciler, /state\.listExecuting\(limit\)/);
+assert.match(directReconciler, /state\.recoveryContext\(record\.id, record\.execution\.id\)/);
+assert.match(directReconciler, /relay\.recover/);
 assert.match(directReconciler, /state\.markReconciled\(record\.id\)/);
 assert.doesNotMatch(directReconciler, /state\.list\(limit\)/);
+assert.doesNotMatch(directReconciler, /provider_settlement_found_receipt_recovery_required/);
 assert.match(directReconciler, /provider_delivery_indeterminate_manual_resolution/);
 assert.match(directReconciler, /provider_settled_after_unpaid_cancellation_manual_resolution/);
 assert.match(directReconciler, /cancel_unpaid_coverage/);
@@ -317,6 +331,8 @@ assert.match(auditReport, /H-13: Consumed relay-grant claims expired before the 
 assert.match(auditReport, /H-14: A2A SLA-credit covenants could remain locked after verified late delivery/);
 assert.match(auditReport, /H-15: Relay receipts were not bound to the current covenant/);
 assert.match(auditReport, /H-17: Newer quote traffic could starve older direct executions/);
+assert.match(auditReport, /H-18: Settled direct executions could not recover without the buyer replaying/);
+assert.match(auditReport, /H-19: Uncertain forwarded provider calls could lose their one-shot reservation/);
 assert.match(auditReport, /M-07: Direct reconciliation depended on manual scheduler setup/);
 assert.ok(
   vercel.builds.some((build) => build.src === "api/direct-a2mcp.js" && build.use === "@vercel/node"),

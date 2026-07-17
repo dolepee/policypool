@@ -372,6 +372,41 @@ Source remediation:
 
 Regression: `scripts/verify-direct-a2mcp-state.mjs` proves that 150 newer probes cannot hide an older execution and that batch-limited holds rotate behind an omitted execution. `scripts/verify-direct-a2mcp-reconciler.mjs` proves successful, held, and failed inspections rotate correctly while dry runs remain read-only.
 
+### H-18: Settled direct executions could not recover without the buyer replaying
+
+Severity: High / P1 runtime liveness risk
+
+Status: Fixed in source, not deployed
+
+The first scheduled direct reconciler could detect an exact provider settlement on chain but only recorded a manual hold. The durable execution record retained hashes, not the canonical provider request and original x402 authorization needed by `provider-relay.recover`. A crash after provider settlement but before receipt persistence therefore required the buyer to replay the original checkout before PolicyPool could create the signed receipt, start the clock, or capture the fee.
+
+Source remediation:
+
+- before any irreversible transition, the coordinator stores the canonical provider request and original provider authorization in an AES-256-GCM recovery envelope;
+- the encryption key is domain-separated from the direct quote secret, and authenticated additional data binds the envelope to the quote ID and execution ID;
+- the scheduler decrypts that envelope only for the same live execution and calls the normal relay recovery path, which revalidates policy, grant, request hash, payer, authorization, and exact on-chain settlement before atomically persisting a signed receipt;
+- terminal direct records discard the recovery envelope;
+- a recovered payment with no durable provider response autonomously starts coverage and resolves fee custody, but remains an explicit delivery-evidence hold. PolicyPool does not infer provider breach from its own lost response.
+
+Regression: `scripts/verify-direct-a2mcp-state.mjs` proves encrypted round-trip, substitution rejection, and terminal secret removal. `scripts/verify-direct-a2mcp-reconciler.mjs` proves the scheduler recovers the receipt without a buyer retry, starts the clock, captures the fee, and preserves the indeterminate-delivery hold.
+
+### H-19: Uncertain forwarded provider calls could lose their one-shot reservation
+
+Severity: High / P1 duplicate-execution risk
+
+Status: Fixed in source, not deployed
+
+The relay originally released its grant and payment reservations whenever settlement had not yet been observed. If the provider received and processed a non-idempotent request but the relay timed out, lost the response, or could not verify the settlement header, a later retry could forward the same request again before chain indexing exposed the first settlement.
+
+Source remediation:
+
+- reservations now remain durable through the bounded relay-grant recovery window rather than expiring after 15 minutes;
+- once an authorized request is dispatched, timeout, connection loss, response loss, missing proof, malformed proof, and commit uncertainty retain the reservation;
+- only a definitely unpaid `402` response, or a failure before dispatch, permits immediate release;
+- chain recovery consumes the existing reservation and commits the exact covenant-bound receipt without calling the provider again.
+
+Regression: `scripts/verify-provider-relay.mjs` proves both a `200` response missing settlement proof and a post-dispatch timeout reject a second execution, then recover from the exact on-chain authorization nonce with exactly one provider call.
+
 ### M-01: Vault owner could replace the manager
 
 Severity: Medium

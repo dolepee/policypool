@@ -154,6 +154,8 @@ QStash is the one-minute primary direct reconciler. The checked-in GitHub workfl
 
 Direct reconciliation is scheduled from a fair execution-only queue. Probe and bound quotes cannot occupy its scan window; claim and terminal transitions update membership atomically; and every inspected live execution rotates behind executions not yet scanned. A fixed batch limit therefore bounds work without allowing newer traffic or a persistent safety hold to strand an older covenant.
 
+Before provider dispatch, the live execution retains an authenticated encrypted recovery envelope containing the canonical request and original provider authorization. If the request becomes uncertain, its one-shot reservation remains held and the scheduler can recover the exact settlement and signed relay receipt without the buyer or provider resending anything. Missing provider response bytes remain a visible manual-evidence hold after clock start; they are never treated as proof of provider breach.
+
 The scheduled path can request quorum authorization to:
 
 - start a verified relay clock;

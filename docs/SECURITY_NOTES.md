@@ -166,6 +166,10 @@ Direct reconciliation no longer depends on manually creating the QStash schedule
 
 Reconciliation reads a dedicated execution-only queue rather than the newest general quotes. Claim, completion, and reversible release update that queue atomically. Every inspected live execution moves behind records not yet inspected, including when it remains on hold or an attempt fails, so probe traffic and persistent holds cannot starve an older covenant. Expired or terminal index members are removed without being treated as lifecycle evidence.
 
+The canonical provider request and original provider x402 authorization needed for unattended chain recovery are retained only as an AES-256-GCM envelope. Its key is domain-separated from the direct quote secret, its authenticated data binds quote and execution IDs, substitution fails closed, and terminal direct records discard it. The reconciler decrypts it only to call the same policy-, grant-, payer-, request-, and nonce-validated relay recovery path used by an exact buyer retry.
+
+An authorized request becomes uncertain once dispatch begins. A timeout, lost response, missing settlement proof, or failed durable commit keeps the one-shot grant/payment reservation through the bounded recovery window; only a definitely unpaid `402` permits immediate release. If chain recovery proves payment but the provider response was not durable, PolicyPool starts the verified settlement clock and resolves fee custody but holds delivery judgment for manual evidence. It never calls the provider twice and never turns PolicyPool response loss into an automatic provider breach.
+
 Residual: a direct fee may time out and refund after a provider settlement if PolicyPool loses both the immediate transition and scheduled capture long enough. This loses PolicyPool's fee but does not remove buyer coverage or debit the provider twice. A settlement whose response bytes were never durable cannot automatically prove timely completion; it requires manual evidence resolution without slashing the provider for PolicyPool infrastructure loss.
 
 ### Static analysis

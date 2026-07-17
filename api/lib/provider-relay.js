@@ -561,9 +561,15 @@ export function createProviderRelay({
     })}`;
     let executionReserved = false;
     let executionCommitted = false;
-    let settlementObserved = false;
+    let requestDispatched = false;
+    let definitelyUnsettled = false;
     if (authorization) {
-      const reservation = await store.reserveRelayExecution(grant.grantId, authorization.id, requestId);
+      const reservation = await store.reserveRelayExecution(
+        grant.grantId,
+        authorization.id,
+        requestId,
+        grant.expiresAt,
+      );
       if (reservation === "grant_used") throw new ProviderRelayError("relay_grant_already_used", 409);
       if (reservation === "payment_used") {
         throw new ProviderRelayError("provider_payment_authorization_already_used", 409);
@@ -576,6 +582,7 @@ export function createProviderRelay({
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      requestDispatched = true;
       const response = await relayFetch(canonicalEndpoint, {
         method: "POST",
         headers,
@@ -584,6 +591,7 @@ export function createProviderRelay({
         cache: "no-store",
         signal: controller.signal,
       }, prepared.connection);
+      definitelyUnsettled = response.status === 402;
       const declaredLength = Number(response.headers.get("content-length") || 0);
       if (declaredLength > MAX_RESPONSE_BYTES) throw new ProviderRelayError("provider_response_too_large", 502);
       const responseBytes = Buffer.from(await response.arrayBuffer());
@@ -597,7 +605,6 @@ export function createProviderRelay({
       const providerSettlement = authorization && response.status !== 402
         ? await verifyProviderPaymentSettlement(authorization, returnedHeaders, chain)
         : null;
-      settlementObserved = Boolean(providerSettlement);
       const unsignedReceipt = {
         protocol: "PolicyPool Provider Relay",
         version: "0.4.0",
@@ -686,11 +693,11 @@ export function createProviderRelay({
       throw new ProviderRelayError("provider_endpoint_unreachable", 502);
     } finally {
       clearTimeout(timeout);
-      if (executionReserved && !executionCommitted && !settlementObserved) {
+      if (executionReserved && !executionCommitted && (!requestDispatched || definitelyUnsettled)) {
         try {
           await store.releaseRelayExecution(grant.grantId, authorization.id, requestId);
         } catch {
-          // The reservation expires after 15 minutes if Redis is temporarily unavailable.
+          // A stale definitely-unsettled reservation expires with the bounded relay grant.
         }
       }
     }
@@ -860,7 +867,12 @@ export function createProviderRelay({
       signedReceipt,
     );
     if (!stored) {
-      const reservation = await store.reserveRelayExecution(grant.grantId, authorization.id, requestId);
+      const reservation = await store.reserveRelayExecution(
+        grant.grantId,
+        authorization.id,
+        requestId,
+        grant.expiresAt,
+      );
       if (reservation === "reserved") {
         stored = await store.commitRelayExecutionReceipt(
           grant.grantId,

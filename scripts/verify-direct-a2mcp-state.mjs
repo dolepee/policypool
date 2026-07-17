@@ -41,6 +41,22 @@ await assert.rejects(
 const executionId = `sha256:${"66".repeat(32)}`;
 assert.equal((await state.claim(issued.token, executionId)).status, "claimed");
 assert.deepEqual((await state.listExecuting()).map((record) => record.id), [issued.id]);
+const recoveryContext = {
+  providerRequest: { target_url: "https://policypool.vercel.app/api/covered-job-receipt" },
+  providerPaymentSignature: "provider-payment-signature-sensitive-test-value",
+};
+await state.retainRecovery(issued.token, executionId, recoveryContext);
+assert.deepEqual(await state.recoveryContext(issued.id, executionId), recoveryContext);
+const encryptedExecution = await store.get(issued.id);
+assert.equal(JSON.stringify(encryptedExecution).includes(recoveryContext.providerPaymentSignature), false);
+assert.equal(JSON.stringify(encryptedExecution).includes(recoveryContext.providerRequest.target_url), false);
+await assert.rejects(
+  () => state.retainRecovery(issued.token, executionId, {
+    ...recoveryContext,
+    providerPaymentSignature: "substituted-provider-payment-signature",
+  }),
+  (error) => error instanceof DirectA2mcpStateError && error.code === "direct_recovery_context_mismatch",
+);
 await assert.rejects(
   () => state.claim(issued.token, executionId),
   (error) => error instanceof DirectA2mcpStateError && error.code === "direct_execution_in_progress",
@@ -60,6 +76,7 @@ await assert.rejects(
 );
 const completed = await state.complete(issued.token, executionId, { receiptId: "ppr-direct-test" });
 assert.equal(completed.state, "complete");
+assert.equal(completed.execution.recovery, undefined, "terminal records must discard the recovery secret");
 assert.deepEqual(await state.listExecuting(), []);
 const replay = await state.claim(issued.token, executionId);
 assert.equal(replay.status, "complete");

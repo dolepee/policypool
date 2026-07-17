@@ -10,7 +10,6 @@ function serviceKey(agentId, serviceId) {
   return `${normalizedId(agentId)}:${normalizedId(serviceId)}`;
 }
 
-const RELAY_GRANT_RESERVATION_TTL_SECONDS = 15 * 60;
 const RELAY_GRANT_CLAIM_EXPIRY_MARGIN_SECONDS = 60 * 60;
 const RELAY_GRANT_CLAIM_MAX_TTL_SECONDS = 8 * 24 * 60 * 60;
 
@@ -135,7 +134,7 @@ export class MemoryProviderPolicyStore {
     return value ? structuredClone(value) : null;
   }
 
-  async reserveRelayExecution(grantId, paymentId, requestId) {
+  async reserveRelayExecution(grantId, paymentId, requestId, _grantExpiresAt) {
     const grantKey = String(grantId);
     const paymentKey = String(paymentId);
     if (this.relayGrantClaims.has(grantKey)) return "grant_used";
@@ -317,9 +316,11 @@ export class RedisProviderPolicyStore {
     return typeof value === "string" ? JSON.parse(value) : value;
   }
 
-  async reserveRelayExecution(grantId, paymentId, requestId) {
+  async reserveRelayExecution(grantId, paymentId, requestId, grantExpiresAt) {
     const grantKey = this.key("relay-grant", String(grantId));
     const paymentKey = this.key("relay-payment", String(paymentId));
+    const reservationTtlSeconds = relayGrantClaimTtlSeconds(grantExpiresAt, this.now());
+    if (reservationTtlSeconds === null) return "invalid_expiry";
     const result = await this.redis.eval(
       `
         if redis.call("EXISTS", KEYS[1]) == 1 then return 1 end
@@ -329,7 +330,7 @@ export class RedisProviderPolicyStore {
         return 0
       `,
       [grantKey, paymentKey],
-      [`pending:${requestId}`, String(RELAY_GRANT_RESERVATION_TTL_SECONDS)],
+      [`pending:${requestId}`, String(reservationTtlSeconds)],
     );
     if (Number(result) === 1) return "grant_used";
     if (Number(result) === 2) return "payment_used";

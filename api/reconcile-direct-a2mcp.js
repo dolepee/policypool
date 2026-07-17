@@ -4,8 +4,11 @@ import { createDirectA2mcpReconciler } from "./lib/direct-a2mcp-reconciler.js";
 import { createDirectA2mcpState } from "./lib/direct-a2mcp-store.js";
 import { createPolicyFeeEscrowClient } from "./lib/policy-fee-escrow.js";
 import { createProviderPolicyStore } from "./lib/provider-policy-store.js";
+import { createProviderRelay } from "./lib/provider-relay.js";
+import { createRelayGrantService } from "./lib/relay-grant.js";
 import { createUniversalIssuer } from "./lib/universal-issuer.js";
 import { universalConfiguration } from "./lib/universal-config.js";
+import { createUniversalPolicyResolver } from "./lib/universal-policy.js";
 import { header, sendJson } from "./lib/utils.js";
 
 function rawRequestBody(req) {
@@ -53,6 +56,11 @@ function dryRunRequested(req) {
 export function createDirectA2mcpReconcileHandler(dependencies = {}) {
   const configuration = dependencies.configuration || universalConfiguration();
   let runtimeReconciler = dependencies.reconciler;
+  let runtimePolicyStore = dependencies.relayStore;
+  let runtimeGrantService = dependencies.grantService;
+  let runtimePolicyResolver = dependencies.policyResolver;
+  let runtimeRelay = dependencies.relay;
+  let runtimeChain = dependencies.chain;
 
   return async function handler(req, res) {
     if (req.method !== "GET" && req.method !== "POST") {
@@ -65,21 +73,36 @@ export function createDirectA2mcpReconcileHandler(dependencies = {}) {
       return sendJson(res, 503, { ok: false, error: "direct_a2mcp_not_active" });
     }
     try {
-      const chain = dependencies.chain || createChainService();
-      const relayStore = dependencies.relayStore || createProviderPolicyStore();
-      runtimeReconciler ||= createDirectA2mcpReconciler({
-        state: dependencies.state || createDirectA2mcpState(dependencies),
-        relayStore,
-        issuer: dependencies.issuer || createUniversalIssuer({ ...dependencies, configuration }),
-        feeEscrow: dependencies.feeEscrow || createPolicyFeeEscrowClient({
+      if (!runtimeReconciler) {
+        const chain = runtimeChain ||= createChainService();
+        const relayStore = runtimePolicyStore ||= createProviderPolicyStore();
+        const grantService = runtimeGrantService ||= createRelayGrantService(dependencies);
+        const policyResolver = runtimePolicyResolver ||= createUniversalPolicyResolver({
           ...dependencies,
-          configuration,
-        }),
-        chain,
-        relaySigner: configuration.relaySigner,
-        relayVerifier: configuration.relayAdapter,
-        now: dependencies.now,
-      });
+          store: relayStore,
+        });
+        const relay = runtimeRelay ||= createProviderRelay({
+          ...dependencies,
+          chain,
+          store: relayStore,
+          policyResolver,
+          grantService,
+          receiptVerifierAddress: configuration.relayAdapter,
+        });
+        runtimeReconciler = createDirectA2mcpReconciler({
+          state: dependencies.state || createDirectA2mcpState(dependencies),
+          relayStore,
+          relay,
+          issuer: dependencies.issuer || createUniversalIssuer({ ...dependencies, configuration }),
+          feeEscrow: dependencies.feeEscrow || createPolicyFeeEscrowClient({
+            ...dependencies,
+            configuration,
+          }),
+          relaySigner: configuration.relaySigner,
+          relayVerifier: configuration.relayAdapter,
+          now: dependencies.now,
+        });
+      }
       const result = await runtimeReconciler.reconcile({ dryRun: dryRunRequested(req) });
       return sendJson(res, result.ok ? 200 : 503, result);
     } catch (error) {

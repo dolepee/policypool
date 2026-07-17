@@ -231,7 +231,9 @@ export function createDirectA2mcpCoordinator({
   configuration,
   now = () => Date.now(),
 } = {}) {
-  if (!state?.issue || !state?.bind || !state?.claim) throw new DirectA2mcpError("direct_state_unavailable", 503);
+  if (!state?.issue || !state?.bind || !state?.claim || !state?.retainRecovery) {
+    throw new DirectA2mcpError("direct_state_unavailable", 503);
+  }
   if (!relay?.probe || !relay?.verifyAuthorization || !relay?.execute || !relay?.recover) {
     throw new DirectA2mcpError("direct_provider_relay_unavailable", 503);
   }
@@ -439,6 +441,10 @@ export function createDirectA2mcpCoordinator({
     let record = claim.record;
     let providerResult;
     try {
+      record = await state.retainRecovery(token, executionId, {
+        providerRequest,
+        providerPaymentSignature,
+      });
       const acceptedAtMs = record.execution.startedAtMs;
       const acceptedAt = new Date(acceptedAtMs).toISOString();
       const enrollmentClosesAt = new Date(
@@ -634,6 +640,31 @@ export function createDirectA2mcpCoordinator({
           covenant = await issuer.getCovenant(bound.covenantId);
         }
         if (Number(covenant.state) !== 3) throw new DirectA2mcpError("direct_coverage_release_pending", 503);
+      }
+      if (providerResult.receipt.response?.recovery) {
+        await state.yieldExecution(
+          token,
+          executionId,
+          "provider_delivery_indeterminate_manual_resolution",
+        );
+        return {
+          ok: true,
+          replay: false,
+          lifecyclePending: true,
+          pendingReason: "provider_delivery_indeterminate_manual_resolution",
+          quoteId: bound.id,
+          covenantId: bound.covenantId,
+          feeId: bound.feeId,
+          feeState: fee.state,
+          feeOutcome: fee.state === 2 ? "captured" : "refunded_after_provider_settlement",
+          coverageState: Number(covenant.state),
+          providerRelayReceiptId: providerResult.receipt.receiptId,
+          providerSettlementTransaction: providerResult.receipt.settlement.transaction,
+          providerDeliveryStatus: "settled_response_unavailable_coverage_remains_active",
+          completedStages: Object.keys(record.execution.stages || {}),
+          relayReceipt: providerResult.receipt,
+          providerResponse: null,
+        };
       }
       const durableResult = {
         ok: true,

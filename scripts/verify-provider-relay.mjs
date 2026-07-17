@@ -549,24 +549,27 @@ await assert.rejects(
   "a verified payment authorization must not be reusable under a fresh relay grant",
 );
 
-let includeSettlementProof = false;
 const retryStore = new MemoryProviderPolicyStore();
+let retryProviderCalls = 0;
+let retrySettlement = null;
 const retryRelay = createProviderRelay({
   policyResolver: resolver,
   store: retryStore,
   fetchImpl: async (url, options, connection) => {
+    retryProviderCalls += 1;
     assert.equal(url, policy.serviceEndpoint);
     assert.equal(options.method, "POST");
     assert.deepEqual(connection.records, [{ address: "93.184.216.34", family: 4 }]);
     return new Response(JSON.stringify({ status: "audit_complete" }), {
       status: 200,
-      headers: includeSettlementProof
-        ? { "content-type": "application/json", "payment-response": settlementHeader() }
-        : { "content-type": "application/json" },
+      headers: { "content-type": "application/json" },
     });
   },
   resolveHost,
-  chain,
+  chain: {
+    ...chain,
+    async findProviderSettlement() { return retrySettlement; },
+  },
   signer,
   receiptVerifierAddress: relayVerifier,
   grantService,
@@ -585,10 +588,78 @@ await assert.rejects(
   (error) => error instanceof ProviderRelayError && error.code === "provider_payment_response_missing",
   "an upstream 200 without settlement evidence must not start a clock or consume the grant",
 );
-includeSettlementProof = true;
-const retried = await retryRelay.execute(retryInput, { "payment-signature": retryPayment });
-assert.equal(retried.receipt.request.paymentVerified, true);
-assert.equal(retried.receipt.clock !== null, true, "released reservation must permit a verified retry");
+await assert.rejects(
+  () => retryRelay.execute(retryInput, { "payment-signature": retryPayment }),
+  (error) => error instanceof ProviderRelayError && error.code === "relay_grant_already_used",
+  "an uncertain paid response must remain reserved instead of forwarding twice",
+);
+assert.equal(retryProviderCalls, 1);
+const retryAuthorization = decodePaymentSignatureHeader(retryPayment).payload.authorization;
+retrySettlement = {
+  txHash: paymentTransaction,
+  blockNumber: "124",
+  asset: PAYMENT.asset,
+  from: buyer,
+  to: provider,
+  amountAtomic: policy.servicePriceAtomic,
+  authorizationNonce: retryAuthorization.nonce,
+  settledAt: "2026-07-16T12:00:02.000Z",
+};
+const recoveredMissingProof = await retryRelay.recover(
+  retryInput,
+  { "payment-signature": retryPayment },
+);
+assert.equal(recoveredMissingProof.recovered, true);
+assert.equal(recoveredMissingProof.receipt.request.paymentVerified, true);
+assert.equal(retryProviderCalls, 1, "chain recovery must never forward the uncertain request again");
+
+const timeoutStore = new MemoryProviderPolicyStore();
+let timeoutProviderCalls = 0;
+let timeoutSettlement = null;
+const timeoutRelay = createProviderRelay({
+  policyResolver: resolver,
+  store: timeoutStore,
+  fetchImpl: async () => {
+    timeoutProviderCalls += 1;
+    const error = new Error("response lost after request dispatch");
+    error.name = "AbortError";
+    throw error;
+  },
+  resolveHost,
+  chain: {
+    ...chain,
+    async findProviderSettlement() { return timeoutSettlement; },
+  },
+  signer,
+  receiptVerifierAddress: relayVerifier,
+  grantService,
+});
+const timeoutPayment = await paymentHeader("timeout-after-provider-dispatch");
+await assert.rejects(
+  () => timeoutRelay.execute(retryInput, { "payment-signature": timeoutPayment }),
+  (error) => error instanceof ProviderRelayError && error.code === "provider_response_timeout",
+);
+await assert.rejects(
+  () => timeoutRelay.execute(retryInput, { "payment-signature": timeoutPayment }),
+  (error) => error instanceof ProviderRelayError && error.code === "relay_grant_already_used",
+  "a response timeout after dispatch must retain the one-shot reservation",
+);
+const timeoutAuthorization = decodePaymentSignatureHeader(timeoutPayment).payload.authorization;
+timeoutSettlement = {
+  txHash: paymentTransaction,
+  blockNumber: "125",
+  asset: PAYMENT.asset,
+  from: buyer,
+  to: provider,
+  amountAtomic: policy.servicePriceAtomic,
+  authorizationNonce: timeoutAuthorization.nonce,
+  settledAt: "2026-07-16T12:00:03.000Z",
+};
+assert.equal(
+  (await timeoutRelay.recover(retryInput, { "payment-signature": timeoutPayment })).recovered,
+  true,
+);
+assert.equal(timeoutProviderCalls, 1, "timeout recovery must not execute a non-idempotent provider twice");
 
 const atomicFetch = async () => new Response(JSON.stringify({ status: "audit_complete" }), {
   status: 200,

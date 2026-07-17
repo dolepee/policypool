@@ -128,6 +128,9 @@ function createHarness({ loseProviderResponseOnce = false, failClockOnce = false
         receiptId: "ppr-direct-coordinator",
         receiptDigest: relayReceiptDigest,
         requestId: `sha256:${"bc".repeat(32)}`,
+        response: loseResponse
+          ? { status: null, recovery: "provider_settlement_found_without_durable_upstream_response" }
+          : { status: 200 },
         settlement: { transaction: settlementTransaction },
         clock: {
           startedAt,
@@ -427,6 +430,8 @@ const recovered = await lostResponse.coordinator.execute({
   policyFeePaymentSignature: lostResponseFlow.feePayment,
 });
 assert.equal(recovered.ok, true);
+assert.equal(recovered.lifecyclePending, true);
+assert.equal(recovered.pendingReason, "provider_delivery_indeterminate_manual_resolution");
 assert.equal(recovered.providerResponse, null);
 assert.equal(recovered.providerDeliveryStatus, "settled_response_unavailable_coverage_remains_active");
 assert.equal(lostResponse.calls.executeProvider, 1, "an uncertain settled provider call must never be replayed");
