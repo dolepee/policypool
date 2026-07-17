@@ -160,6 +160,8 @@ The ownerless `PolicyFeeEscrow` receives the PolicyPool fee before the provider 
 
 Provider execution is at most once. The paid response body and signed relay receipt persist in one atomic commit. Recovery first checks that durable record, then performs a bounded on-chain search for the exact indexed EIP-3009 nonce and USD₮0 transfer. A proven settlement with no durable response creates a safety hold: PolicyPool does not call the provider again and does not infer a provider breach from its own response-loss failure. If the PolicyPool fee was already refunded before a delayed settlement is recovered, coverage still follows the settled provider job while no second provider call or fee capture occurs.
 
+The settlement scan overlaps its timestamp-derived lower bound by one block so a grant timestamp slightly ahead of the chain clock cannot hide a payment in the boundary block. This overlap is safe because recovery still requires the exact authorization payer and nonce plus the exact asset, recipient, amount, and transfer receipt.
+
 The direct scheduler is authenticated independently from the buyer route. It can relay only quorum-attested lifecycle actions and uses durable quote indexes rather than accepting caller-selected job or payment evidence. Ambiguous or conflicting states remain visible as holds instead of being guessed into release, cancellation, or payout.
 
 Direct reconciliation no longer depends on manually creating the QStash schedule. QStash remains the one-minute primary, while the checked-in five-minute GitHub workflow discovers whether the direct route is enabled and invokes it through an `always()`-isolated step. Both paths use the operator bearer token; scheduled QStash calls additionally carry its platform signature.

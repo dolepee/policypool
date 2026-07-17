@@ -446,7 +446,9 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
     }
     if (latest.number === null || Number(latest.timestamp) < fromTimestamp) return null;
     const boundedThrough = Math.min(throughTimestamp, Number(latest.timestamp));
-    const fromBlock = await firstBlockAtOrAfter(fromTimestamp);
+    const firstEligibleBlock = await firstBlockAtOrAfter(fromTimestamp);
+    // Include the boundary block in case wall-clock issuance is just ahead of its block timestamp.
+    const fromBlock = firstEligibleBlock > 0n ? firstEligibleBlock - 1n : 0n;
     const throughBlock = boundedThrough === Number(latest.timestamp)
       ? latest.number
       : await firstBlockAtOrAfter(boundedThrough);

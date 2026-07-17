@@ -440,6 +440,22 @@ Source remediation:
 
 Regression: `scripts/verify-direct-a2mcp.mjs` uses a policy whose partial cap is otherwise within the global range, proves the partial request fails before issue or fee funding, and proves the full enrolled cap produces the expected fixed fee.
 
+### M-09: Settlement recovery could skip the grant-issuance block
+
+Severity: Medium / P2 false non-settlement risk
+
+Status: Fixed in source, not deployed
+
+The bounded provider-settlement scan originally began at the first block whose timestamp was at or after the relay grant's wall-clock `issuedAt`. If that timestamp was rounded or slightly ahead of the chain clock, a valid authorization could settle in the immediately preceding block and remain outside the scan. Reconciliation could then treat a paid provider execution as unpaid and move toward coverage cancellation and fee refund.
+
+Source remediation:
+
+- settlement recovery includes the block immediately before the timestamp-derived lower bound, with a genesis-safe floor;
+- the overlap does not weaken payment identity: the indexed authorization payer and nonce must still match exactly, and receipt verification still requires the exact asset, payer, provider recipient, amount, and authorization event;
+- the existing 20-minute timestamp window remains bounded.
+
+Regression: `scripts/verify-direct-settlement-recovery.mjs` places the exact settlement in a block timestamped one second before the grant time and proves the overlap recovers it, while preserving no-match and oversized-window rejection.
+
 ### M-01: Vault owner could replace the manager
 
 Severity: Medium

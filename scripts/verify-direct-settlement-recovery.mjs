@@ -18,22 +18,27 @@ const authorizationUsedEvent = parseAbiItem(
 );
 let returnSettlement = true;
 let observedRange;
+let settlementBlockNumber = 105n;
 const client = {
   async getBlockNumber() { return 200n; },
   async getBlock({ blockNumber } = {}) {
     if (blockNumber === undefined) return { number: 200n, timestamp: 2_000n };
-    return { number: BigInt(blockNumber), timestamp: BigInt(blockNumber) * 10n };
+    const number = BigInt(blockNumber);
+    const timestamp = number === 99n ? 999n : number * 10n;
+    return { number, timestamp };
   },
   async getLogs(input) {
     observedRange = { fromBlock: input.fromBlock, toBlock: input.toBlock };
     return returnSettlement
-      ? [{ transactionHash, blockNumber: 105n }]
+      && settlementBlockNumber >= input.fromBlock
+      && settlementBlockNumber <= input.toBlock
+      ? [{ transactionHash, blockNumber: settlementBlockNumber }]
       : [];
   },
   async waitForTransactionReceipt() {
     return {
       status: "success",
-      blockNumber: 105n,
+      blockNumber: settlementBlockNumber,
       logs: [
         {
           address: PAYMENT.asset,
@@ -67,11 +72,26 @@ const found = await chain.findProviderSettlement({
   notBeforeTimestamp: 1_000,
   notAfterTimestamp: 1_100,
 });
-assert.deepEqual(observedRange, { fromBlock: 100n, toBlock: 110n });
+assert.deepEqual(observedRange, { fromBlock: 99n, toBlock: 110n });
 assert.equal(found.txHash, transactionHash);
 assert.equal(found.settledAt, "1970-01-01T00:17:30.000Z");
 assert.equal(found.from, getAddress(payer));
 assert.equal(found.to, getAddress(provider));
+
+settlementBlockNumber = 99n;
+const boundarySettlement = await chain.findProviderSettlement({
+  payer,
+  payTo: provider,
+  asset: PAYMENT.asset,
+  amountAtomic: "500000",
+  authorizationNonce: nonce,
+  notBeforeTimestamp: 1_000,
+  notAfterTimestamp: 1_100,
+});
+assert.deepEqual(observedRange, { fromBlock: 99n, toBlock: 110n });
+assert.equal(boundarySettlement.blockNumber, "99");
+assert.equal(boundarySettlement.settledAt, "1970-01-01T00:16:39.000Z");
+
 returnSettlement = false;
 assert.equal(await chain.findProviderSettlement({
   payer,
@@ -95,4 +115,4 @@ await assert.rejects(
   (error) => error instanceof EvidenceError && error.code === "provider_settlement_search_window_invalid",
 );
 
-console.log("PolicyPool direct settlement recovery passed: bounded indexed nonce scan, exact transfer verification, timestamp recovery, no-match handling, and oversized-window rejection.");
+console.log("PolicyPool direct settlement recovery passed: bounded indexed nonce scan with preceding-block clock-skew overlap, exact transfer verification, timestamp recovery, no-match handling, and oversized-window rejection.");

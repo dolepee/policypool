@@ -197,6 +197,7 @@ assert.match(chain, /event AuthorizationUsed\(address indexed authorizer, bytes3
 assert.match(chain, /verifyProviderPaymentAuthorization/);
 assert.match(chain, /findProviderSettlement/);
 assert.match(chain, /MAX_PROVIDER_SETTLEMENT_SEARCH_SECONDS = 20 \* 60/);
+assert.match(chain, /firstEligibleBlock > 0n \? firstEligibleBlock - 1n : 0n/);
 assert.match(directCoordinator, /provider_authorization_expired_unsettled/);
 assert.match(directCoordinator, /direct_coverage_cap_must_equal_policy_cap/);
 assert.match(directCoordinator, /direct_policy_cap_unavailable/);
