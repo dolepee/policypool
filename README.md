@@ -22,6 +22,8 @@ PolicyPool does not rate subjective quality, accept caller-supplied policy overr
 
 > **Genesis submission scope:** Agent Coverage is the current OKX.AI product and submission. The v4 liquidity-covenant implementation is the historical X Layer foundation retained below, not the listed Genesis service.
 
+> **v0.4 development status:** the High single-operator evidence issue is remediated in source with an immutable threshold evidence quorum and permissionless execution. That source is not deployed. The old flag-off deployment is superseded, production remains v0.3, and third-party bonds remain blocked until independent review, operationally independent signers, redeployment, bytecode verification, and a fresh controlled pilot. See [Universal Coverage v0.4](docs/UNIVERSAL_COVERAGE_V04.md) and the [internal Solidity audit](docs/INTERNAL_SOLIDITY_AUDIT_V04.md).
+
 ## Agent Coverage Loop
 
 1. The target agent must have a versioned policy snapshot in `api/lib/policy-registry.js`.
@@ -50,6 +52,12 @@ The marketplace keeps its own escrow and order lifecycle. PolicyPool adds a capp
 Unknown targets are rejected before payment and produce no coverage receipt. Jobs that are already submitted or terminal are not issued new coverage. The cap cannot exceed the target-job value, configured maximum, or uncommitted reserve.
 
 The accepted-event service hash is preserved verbatim and checked for A2A/A2MCP consistency. OKX does not expose a documented public derivation from listed service ID to that hash, so the current verifier does not claim that mapping; proof packages pair the onchain hash with separate marketplace service evidence.
+
+## Universal Opt-In v0.4
+
+v0.4 replaces the manual allowlist as the growth path without creating unbacked provider-agnostic coverage. Any OKX.AI provider can enroll one exact service by proving agent ownership, depositing provider-owned first-loss USD₮0, and signing versioned objective terms. Every quote revalidates ownership, service fingerprint, policy state, expiry, and available bond. A changed listing fails closed until re-enrollment.
+
+The branch includes a bond vault, policy registry, immutable threshold evidence verifier, permissionless covenant manager, A2A and A2MCP clocks, covenant-bound relay grants, deduplicated buyer demand signals, an enrollment UI, a one-minute reconciler, and an SDK. Shared-reserve co-coverage and provider premiums are disabled. Issuance and every subjective lifecycle transition require threshold-attested evidence bound to the exact chain, verifier, manager, action, and payload; the runtime relayer only pays gas.
 
 ## Controlled Lifecycle Proof
 
@@ -99,10 +107,19 @@ api/lib/ledger.js                # atomic durable liability accounting
 api/lib/quote.js                 # signed quote issue, resolve, and payer recovery
 api/lib/notifier.js              # operator transition and failure alerts
 api/lib/policy-registry.js       # versioned server-owned policy snapshots
+api/provider-enrollment.js       # v0.4 signed provider policy enrollment
+api/provider-bond.js             # provider-owned first-loss deposit builder
+api/provider-relay.js            # covenant-authorized A2MCP clock relay
+api/reconcile-universal.js       # v0.4 threshold-attested lifecycle reconciler
+src/ProviderBondVault.sol        # provider first-loss custody and withdrawal queue
+src/AgentPolicyRegistry.sol      # versioned owner/fingerprint-bound policies
+src/CoverageEvidenceVerifier.sol # immutable threshold evidence quorum
+src/CoverageManager.sol          # permissionless provider-funded covenant lifecycle
 scripts/verify-agent-api.mjs     # adversarial unit/integration gate
 scripts/verify-okx-task-evidence.mjs # real OKX acceptance proof replay
 scripts/verify-coverage-preflight.mjs # preflight parser, eligibility, and request tests
 web/home.html                    # current multi-page agent-coverage entry
+web/enroll.html                  # v0.4 provider enrollment workbench
 ```
 
 ## v4 Foundation

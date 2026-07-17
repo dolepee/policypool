@@ -542,6 +542,104 @@ function preflightReason(reason) {
   return reasons[String(reason || "")] || String(reason || "Coverage could not be verified.").replaceAll("_", " ");
 }
 
+function providerCard(policy) {
+  const card = document.createElement("article");
+  card.className = "provider-card";
+  card.id = `provider-v04-${policy.agentId}-${policy.serviceId}`;
+  const header = document.createElement("header");
+  const monogram = document.createElement("div");
+  monogram.className = "provider-monogram";
+  monogram.textContent = String(policy.agentName || "A").slice(0, 1).toUpperCase();
+  const identity = document.createElement("div");
+  const eyebrow = document.createElement("span");
+  eyebrow.textContent = `${policy.serviceType} · AGENT #${policy.agentId}`;
+  const title = document.createElement("h3");
+  title.textContent = policy.agentName || `Agent #${policy.agentId}`;
+  const service = document.createElement("p");
+  service.textContent = policy.serviceName || `Service #${policy.serviceId}`;
+  identity.append(eyebrow, title, service);
+  const status = document.createElement("b");
+  status.textContent = "ENROLLED";
+  header.append(monogram, identity, status);
+
+  const band = document.createElement("div");
+  band.className = "policy-band";
+  const bandLabel = document.createElement("span");
+  bandLabel.textContent = "Provider-signed promise";
+  const promise = document.createElement("p");
+  promise.textContent = policy.scope?.deliveryPromise || "Objective delivery terms published on X Layer.";
+  band.append(bandLabel, promise);
+
+  const details = document.createElement("dl");
+  const cap = Number(policy.terms?.maxCapAtomic || 0) / 1_000_000;
+  const rows = [
+    ["Service", `#${policy.serviceId}`],
+    ["Cap", `${amount(cap)} USD₮0`],
+    ["Clock", Number(policy.terms?.clockMode) === 1 ? "PolicyPool provider relay" : "Verified OKX acceptance"],
+    ["Registration", policy.registrationTransactionHash ? short(policy.registrationTransactionHash) : "On-chain"],
+  ];
+  for (const [label, value] of rows) {
+    const row = document.createElement("div");
+    const term = document.createElement("dt");
+    const detail = document.createElement("dd");
+    term.textContent = label;
+    detail.textContent = value;
+    row.append(term, detail);
+    details.append(row);
+  }
+
+  const footer = document.createElement("footer");
+  footer.className = "provider-actions";
+  const link = document.createElement("a");
+  setLink(link, policy.servicePublicUrl || `https://www.okx.ai/agents/${policy.agentId}`, "Open listed agent ↗", true);
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.dataset.copyLink = `/providers#${card.id}`;
+  copy.textContent = "Copy policy link";
+  footer.append(link, copy);
+  card.append(header, band, details, footer);
+  return card;
+}
+
+async function hydrateUniversalProviders() {
+  const registry = document.querySelector("#universal-provider-registry");
+  const grid = document.querySelector("#universal-provider-grid");
+  const target = document.querySelector("#coverage-target");
+  if (!registry && !target) return;
+  try {
+    const response = await fetch("/api/universal-manifest", { cache: "no-store" });
+    if (!response.ok) return;
+    const manifest = await response.json();
+    if (!manifest.enabled) return;
+    const providers = Array.isArray(manifest.providers) ? manifest.providers : [];
+    if (registry && grid) {
+      registry.hidden = false;
+      document.querySelector("#universal-registry-state").textContent = `SIGNED REGISTRY / ${String(providers.length).padStart(2, "0")} ENROLLED`;
+      grid.replaceChildren(...providers.map(providerCard));
+      if (providers.length === 0) {
+        const empty = document.createElement("p");
+        empty.textContent = "The v0.4 contracts are active; no external provider has completed bonded enrollment yet.";
+        grid.append(empty);
+      }
+    }
+    if (target) {
+      const existing = new Set([...target.options].map((option) => `${option.value}:${option.dataset.serviceId || ""}`));
+      const custom = [...target.options].find((option) => option.value === "custom");
+      for (const policy of providers) {
+        const key = `${policy.agentId}:${policy.serviceId}`;
+        if (existing.has(key)) continue;
+        const option = document.createElement("option");
+        option.value = String(policy.agentId);
+        option.dataset.serviceId = String(policy.serviceId);
+        option.textContent = `${policy.agentName} #${policy.agentId} · ${policy.serviceName}`;
+        target.insertBefore(option, custom || null);
+      }
+    }
+  } catch {
+    // v0.3 founding policies remain usable when the optional v0.4 registry is unavailable.
+  }
+}
+
 function setPreflightStatus(message, state = "") {
   const status = document.querySelector("#coverage-form-status");
   if (!status) return;
@@ -588,13 +686,17 @@ function showPreflightResult(data) {
       ...(data.task ? [{ label: "Task", value: data.task.title, href: data.task.publicUrl }] : []),
       { label: "Reason", value: String(data.reason || "coverage_gate_failed") },
       { label: "Charge", value: "0 USD₮0" },
+      ...(data.enrollmentInvite ? [{ label: "Provider enrollment", value: "Open invite", href: data.enrollmentInvite }] : []),
     ]);
     return;
   }
   verdict.textContent = "Ready to cover";
   chip.textContent = "Verified";
   chip.className = "state-stamp state-released";
-  summary.textContent = "The accepted task, target policy, buyer/provider binding, enrollment window, SLA, and live reserve capacity all passed.";
+  const providerFunded = data.coverage.fundingSource === "provider_first_loss_bond";
+  summary.textContent = providerFunded
+    ? "The accepted task, signed provider policy, buyer/provider binding, enrollment window, SLA, and live provider bond all passed."
+    : "The accepted task, target policy, buyer/provider binding, enrollment window, SLA, and live reserve capacity all passed.";
   paid.hidden = false;
   renderPreflightValues([
     { label: "Task", value: data.task.title, href: data.task.publicUrl },
@@ -604,7 +706,10 @@ function showPreflightResult(data) {
     { label: "Deadline", value: dateTime(data.coverage.deadline) },
     { label: "Enrollment closes", value: dateTime(data.coverage.enrollmentClosesAt) },
     { label: "Quote expires", value: dateTime(data.quote.expiresAt) },
-    { label: "Reserve free", value: `${data.coverage.availableUSDT} USD₮0` },
+    {
+      label: providerFunded ? "Provider bond free" : "Reserve free",
+      value: `${providerFunded ? data.coverage.providerBondAvailableUSDT : data.coverage.availableUSDT} USD₮0`,
+    },
     { label: "Creation tx", value: short(data.evidence.creationTxHash), href: `${EXPLORER_TX}${data.evidence.creationTxHash}` },
     { label: "Acceptance tx", value: short(data.evidence.acceptanceTxHash), href: `${EXPLORER_TX}${data.evidence.acceptanceTxHash}` },
   ]);
@@ -626,6 +731,21 @@ function bindCoveragePreflight() {
   const submit = document.querySelector("#coverage-submit");
   const taskInput = document.querySelector("#coverage-task");
   const capInput = document.querySelector("#coverage-cap");
+  const targetSelect = document.querySelector("#coverage-target");
+  const targetService = document.querySelector("#coverage-target-service");
+  const customAgent = document.querySelector("#coverage-custom-agent");
+  const customService = document.querySelector("#coverage-custom-service");
+  const setTargetMode = () => {
+    const custom = targetSelect.value === "custom";
+    document.querySelector("#custom-agent-field").hidden = !custom;
+    document.querySelector("#custom-service-field").hidden = !custom;
+    customAgent.required = custom;
+    customService.required = custom;
+    targetService.value = custom ? customService.value : targetSelect.selectedOptions[0]?.dataset.serviceId || "";
+  };
+  targetSelect.addEventListener("change", setTargetMode);
+  customService.addEventListener("input", () => { targetService.value = customService.value.trim(); });
+  setTargetMode();
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     taskInput.removeAttribute("aria-invalid");
@@ -646,13 +766,33 @@ function bindCoveragePreflight() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          targetAgent: values.get("targetAgent"),
+          targetAgent: targetSelect.value === "custom" ? customAgent.value.trim() : values.get("targetAgent"),
+          targetServiceId: targetSelect.value === "custom" ? customService.value.trim() : values.get("targetServiceId"),
           taskReference: values.get("taskReference"),
           requestedCoverageUSDT: values.get("requestedCoverageUSDT"),
         }),
       });
       const data = await response.json();
       if (!response.ok || !data.ok) {
+        if (data.error === "target_policy_not_registered" && customAgent.value && customService.value) {
+          const demandResponse = await fetch("/api/coverage-demand", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              agentId: customAgent.value.trim(),
+              serviceId: customService.value.trim(),
+              taskReference: values.get("taskReference"),
+              requestedCoverageUSDT: values.get("requestedCoverageUSDT"),
+            }),
+          });
+          const demand = await demandResponse.json();
+          if (demandResponse.ok && demand.ok) {
+            showPreflightResult({ eligible: false, reason: data.error, enrollmentInvite: demand.enrollmentInvite });
+            setPreflightStatus("Provider demand recorded without charge. Share the enrollment link with the provider.", "error");
+            revealPreflightResult();
+            return;
+          }
+        }
         if (String(data.error || "").startsWith("okx_task_")) taskInput.setAttribute("aria-invalid", "true");
         throw new Error(preflightReason(data.error));
       }
@@ -701,6 +841,7 @@ async function hydrateLiveData() {
 bindMobileNavigation();
 bindCopyLinks();
 bindCoveragePreflight();
+hydrateUniversalProviders();
 initScrollReveals();
 hydrateLiveData();
 hydrateExternalProofs();

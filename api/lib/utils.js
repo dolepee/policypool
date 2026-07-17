@@ -20,7 +20,9 @@ export function stableStringify(value) {
 }
 
 export function sha256(value) {
-  const input = typeof value === "string" ? value : stableStringify(value);
+  const input = typeof value === "string" || Buffer.isBuffer(value) || ArrayBuffer.isView(value)
+    ? value
+    : stableStringify(value);
   return createHash("sha256").update(input).digest("hex");
 }
 

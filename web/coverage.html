@@ -65,16 +65,26 @@
               <div class="field-block">
                 <label for="coverage-target">Target provider policy</label>
                 <select id="coverage-target" name="targetAgent" required aria-describedby="coverage-target-help">
-                  <option value="GlassDesk#3465">GlassDesk #3465 · Evidence Pack Services</option>
-                  <option value="Foreman#4348">Foreman #4348 · Launch Readiness Pack</option>
-                  <option value="Warden#3808" disabled>Warden #3808 · opted in, clock adapter pending</option>
+                  <option value="GlassDesk#3465" data-service-id="">GlassDesk #3465 · Evidence Pack Services</option>
+                  <option value="Foreman#4348" data-service-id="33357">Foreman #4348 · Launch Readiness Pack</option>
+                  <option value="Warden#3808" data-service-id="33461" disabled>Warden #3808 · opted in, clock adapter pending</option>
+                  <option value="custom">Another OKX.AI service…</option>
                 </select>
-                <p id="coverage-target-help">Current operator-reviewed policy snapshots.</p>
+                <input id="coverage-target-service" name="targetServiceId" type="hidden" value="" />
+                <p id="coverage-target-help">Founding policies plus live provider-signed v0.4 enrollments.</p>
               </div>
               <div class="field-block">
                 <label for="coverage-cap">Requested coverage cap</label>
                 <div class="amount-input"><input id="coverage-cap" name="requestedCoverageUSDT" type="number" min="0.5" max="5" step="0.01" value="0.5" required aria-describedby="coverage-cap-help coverage-form-status" /><span>USD₮0</span></div>
                 <p id="coverage-cap-help">Minimum 0.5 USD₮0; further bounded by job value, provider policy, and reserve.</p>
+              </div>
+              <div class="field-block custom-target-field" id="custom-agent-field" hidden>
+                <label for="coverage-custom-agent">OKX.AI agent ID</label>
+                <input id="coverage-custom-agent" inputmode="numeric" autocomplete="off" placeholder="3808" />
+              </div>
+              <div class="field-block custom-target-field" id="custom-service-field" hidden>
+                <label for="coverage-custom-service">OKX.AI service ID</label>
+                <input id="coverage-custom-service" inputmode="numeric" autocomplete="off" placeholder="33461" />
               </div>
               <div class="field-block field-wide">
                 <label for="coverage-task">Accepted OKX.AI task URL or public task ID</label>

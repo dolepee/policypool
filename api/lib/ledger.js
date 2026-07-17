@@ -38,7 +38,7 @@ const RELEASE_SCRIPT = `
 local current = redis.call('GET', KEYS[3])
 if not current then return {'missing'} end
 local decoded = cjson.decode(current)
-if decoded.state ~= 'pending' then return {'not_pending'} end
+if decoded.state ~= 'pending' and decoded.state ~= 'compensation_required' then return {'not_pending'} end
 redis.call('INCRBY', KEYS[4], -tonumber(ARGV[1]))
 redis.call('DEL', KEYS[1], KEYS[2], KEYS[3])
 return {'released'}
@@ -77,6 +77,19 @@ if decoded.state ~= 'active' then return {'not_active', current} end
 redis.call('INCRBY', KEYS[2], -tonumber(ARGV[2]))
 redis.call('SET', KEYS[1], ARGV[1])
 return {'released', ARGV[1]}
+`;
+
+const TRANSITION_UNIVERSAL_SCRIPT = `
+local current = redis.call('GET', KEYS[1])
+if not current then return {'missing'} end
+local decoded = cjson.decode(current)
+local allowed = false
+for index = 2, #ARGV do
+  if decoded.state == ARGV[index] then allowed = true break end
+end
+if not allowed then return {'state_mismatch', current} end
+redis.call('SET', KEYS[1], ARGV[1])
+return {'updated', ARGV[1]}
 `;
 
 function prefixValue(value = "pp:coverage:v1") {
@@ -158,7 +171,7 @@ export class MemoryLedger {
 
   async release(record) {
     const current = this.records.get(record.receiptId);
-    if (!current || current.state !== "pending") return;
+    if (!current || !["pending", "compensation_required"].includes(current.state)) return;
     this.pendingAtomic -= BigInt(current.liabilityAtomic);
     this.records.delete(record.receiptId);
     this.requests.delete(record.requestId);
@@ -192,6 +205,15 @@ export class MemoryLedger {
     const current = this.records.get(record.receiptId);
     if (!current || current.state !== "active") return current || null;
     this.activeAtomic -= BigInt(current.liabilityAtomic);
+    this.records.set(record.receiptId, structuredClone(record));
+    return record;
+  }
+
+  async transitionUniversal(record, expectedStates) {
+    const current = this.records.get(record.receiptId);
+    if (!current) return null;
+    if (!Array.isArray(expectedStates) || !expectedStates.includes(current.state)) return current;
+    if (!current.universalCovenant?.covenantId) throw new Error("universal_covenant_missing");
     this.records.set(record.receiptId, structuredClone(record));
     return record;
   }
@@ -324,6 +346,16 @@ export class RedisLedger {
       this.key("receipt", record.receiptId),
       this.key("liability", "active"),
     ], [JSON.stringify(record), record.liabilityAtomic]);
+    return parseRecord(result[1]);
+  }
+
+  async transitionUniversal(record, expectedStates) {
+    if (!Array.isArray(expectedStates) || expectedStates.length === 0) {
+      throw new Error("universal_transition_states_required");
+    }
+    const result = await this.redis.eval(TRANSITION_UNIVERSAL_SCRIPT, [
+      this.key("receipt", record.receiptId),
+    ], [JSON.stringify(record), ...expectedStates]);
     return parseRecord(result[1]);
   }
 
