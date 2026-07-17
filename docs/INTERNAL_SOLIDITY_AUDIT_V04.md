@@ -407,6 +407,22 @@ Source remediation:
 
 Regression: `scripts/verify-provider-relay.mjs` proves both a `200` response missing settlement proof and a post-dispatch timeout reject a second execution, then recover from the exact on-chain authorization nonce with exactly one provider call.
 
+### H-20: Completed direct results became inaccessible after authorization expiry
+
+Severity: High / P1 paid-result availability risk
+
+Status: Fixed in source, not deployed
+
+Direct execution validated the provider and fee authorizations before asking the state store whether the exact execution had already completed. Expiry was permitted for an in-progress recovery but not for a completed replay. A buyer retry after the short authorization window therefore received an expiry error even though the durable result and provider response remain retained for ten days.
+
+Source remediation:
+
+- exact completed replays use the same expiry exception as an in-progress recovery;
+- provider request, provider authorization hash and ID, fee requirements, fee authorization fields, payer, and both signatures remain fully validated before the retained result is returned, and the state store independently requires the original execution ID derived from both payment headers;
+- completed replay never issues, funds, forwards, captures, or releases again.
+
+Regression: `scripts/verify-direct-a2mcp.mjs` advances beyond both authorization expiries, retrieves the exact retained result, proves no provider or fee action repeats, and rejects substituted provider and fee signatures.
+
 ### M-01: Vault owner could replace the manager
 
 Severity: Medium

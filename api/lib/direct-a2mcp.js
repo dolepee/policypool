@@ -388,13 +388,14 @@ export function createDirectA2mcpCoordinator({
     const bound = await state.resolve(token);
     if (!bound.bindingHash || bound.state === "probed") throw new DirectA2mcpError("direct_quote_not_bound", 409);
     validateProviderRequest(bound, providerRequest);
+    const recoveringExistingExecution = ["executing", "complete"].includes(bound.state);
     const providerAuthorization = await relay.verifyAuthorization({
       agentId: bound.agentId,
       serviceId: bound.serviceId,
       raw: providerPaymentSignature,
       buyer: bound.buyer,
       providerRequirementsHash: bound.providerRequirementsHash,
-      allowExpired: bound.state === "executing",
+      allowExpired: recoveringExistingExecution,
     });
     if (
       providerAuthorization.hash.toLowerCase() !== bound.providerAuthorizationHash
@@ -406,7 +407,7 @@ export function createDirectA2mcpCoordinator({
       token,
       chain,
       nowMs: now(),
-      allowExpired: bound.state === "executing",
+      allowExpired: recoveringExistingExecution,
     });
     const executionId = `sha256:${sha256({
       quoteId: bound.id,

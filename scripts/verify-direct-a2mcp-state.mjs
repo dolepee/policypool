@@ -81,6 +81,10 @@ assert.deepEqual(await state.listExecuting(), []);
 const replay = await state.claim(issued.token, executionId);
 assert.equal(replay.status, "complete");
 assert.equal(replay.record.result.receiptId, "ppr-direct-test");
+await assert.rejects(
+  () => state.claim(issued.token, `sha256:${"89".repeat(32)}`),
+  (error) => error instanceof DirectA2mcpStateError && error.code === "direct_execution_execution_mismatch",
+);
 
 const releasable = await state.issue({ buyer: issued.buyer, requestHash: `sha256:${"99".repeat(32)}` });
 await state.bind(releasable.token, binding);

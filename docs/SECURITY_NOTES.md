@@ -170,6 +170,8 @@ The canonical provider request and original provider x402 authorization needed f
 
 An authorized request becomes uncertain once dispatch begins. A timeout, lost response, missing settlement proof, or failed durable commit keeps the one-shot grant/payment reservation through the bounded recovery window; only a definitely unpaid `402` permits immediate release. If chain recovery proves payment but the provider response was not durable, PolicyPool starts the verified settlement clock and resolves fee custody but holds delivery judgment for manual evidence. It never calls the provider twice and never turns PolicyPool response loss into an automatic provider breach.
 
+Completed direct results remain retrievable for the execution-retention window after their payment authorizations expire, but only with the exact original provider request and both bound payment signatures. The store rechecks the execution ID derived from both payment headers before returning a terminal result. Expiry tolerance never applies to a new or merely bound execution.
+
 Residual: a direct fee may time out and refund after a provider settlement if PolicyPool loses both the immediate transition and scheduled capture long enough. This loses PolicyPool's fee but does not remove buyer coverage or debit the provider twice. A settlement whose response bytes were never durable cannot automatically prove timely completion; it requires manual evidence resolution without slashing the provider for PolicyPool infrastructure loss.
 
 ### Static analysis

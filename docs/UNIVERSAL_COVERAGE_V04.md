@@ -156,6 +156,8 @@ Direct reconciliation is scheduled from a fair execution-only queue. Probe and b
 
 Before provider dispatch, the live execution retains an authenticated encrypted recovery envelope containing the canonical request and original provider authorization. If the request becomes uncertain, its one-shot reservation remains held and the scheduler can recover the exact settlement and signed relay receipt without the buyer or provider resending anything. Missing provider response bytes remain a visible manual-evidence hold after clock start; they are never treated as proof of provider breach.
 
+The exact completed result remains replayable throughout the ten-day execution-retention window even after its short-lived authorizations expire. The original request and both original signatures must still match every stored binding; expiry tolerance cannot authorize new execution.
+
 The scheduled path can request quorum authorization to:
 
 - start a verified relay clock;

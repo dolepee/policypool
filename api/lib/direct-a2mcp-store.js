@@ -32,7 +32,10 @@ const CLAIM_SCRIPT = `
 local raw = redis.call('GET', KEYS[1])
 if not raw then return {'missing'} end
 local current = cjson.decode(raw)
-if current.state == 'complete' then return {'complete', raw} end
+if current.state == 'complete' then
+  if current.execution.id ~= ARGV[1] then return {'execution_mismatch', raw} end
+  return {'complete', raw}
+end
 if current.state == 'executing' then
   if current.execution.id ~= ARGV[1] then return {'execution_mismatch', raw} end
   if tonumber(current.execution.leaseExpiresAtMs) > tonumber(ARGV[2]) then return {'in_progress', raw} end
@@ -272,7 +275,10 @@ export class MemoryDirectA2mcpStore {
   async claim(id, executionId, next, _nowMs, retentionSeconds) {
     const current = await this.get(id);
     if (!current) return { status: "missing", record: null };
-    if (current.state === "complete") return { status: "complete", record: current };
+    if (current.state === "complete") {
+      if (current.execution.id !== executionId) return { status: "execution_mismatch", record: current };
+      return { status: "complete", record: current };
+    }
     if (current.state === "executing") {
       if (current.execution.id !== executionId) return { status: "execution_mismatch", record: current };
       if (current.execution.leaseExpiresAtMs > this.now()) return { status: "in_progress", record: current };

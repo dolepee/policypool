@@ -201,6 +201,8 @@ assert.match(directCoordinator, /provider_authorization_expired_unsettled/);
 assert.match(directCoordinator, /await relay\.recover/);
 assert.match(directCoordinator, /await state\.retainRecovery/);
 assert.match(directCoordinator, /provider_delivery_indeterminate_manual_resolution/);
+assert.match(directCoordinator, /\["executing", "complete"\]\.includes\(bound\.state\)/);
+assert.match(directCoordinator, /allowExpired:\s*recoveringExistingExecution/);
 assert.match(directCoordinator, /settled_response_unavailable_coverage_remains_active/);
 assert.match(directCoordinator, /policy_fee_refunded_provider_unsettled/);
 assert.match(directCoordinator, /refunded_after_provider_settlement/);
@@ -209,6 +211,7 @@ assert.match(directState, /createCipheriv\("aes-256-gcm"/);
 assert.match(directState, /createDecipheriv\("aes-256-gcm"/);
 assert.match(directState, /async function retainRecovery/);
 assert.match(directState, /async function recoveryContext/);
+assert.match(directState, /current\.state == 'complete'[\s\S]*current\.execution\.id ~= ARGV\[1\]/);
 assert.match(directState, /reconcileCheckpoint/);
 assert.match(directState, /executingIndexKey\(\)/);
 assert.match(directState, /MARK_SCANNED_SCRIPT/);
@@ -333,6 +336,7 @@ assert.match(auditReport, /H-15: Relay receipts were not bound to the current co
 assert.match(auditReport, /H-17: Newer quote traffic could starve older direct executions/);
 assert.match(auditReport, /H-18: Settled direct executions could not recover without the buyer replaying/);
 assert.match(auditReport, /H-19: Uncertain forwarded provider calls could lose their one-shot reservation/);
+assert.match(auditReport, /H-20: Completed direct results became inaccessible after authorization expiry/);
 assert.match(auditReport, /M-07: Direct reconciliation depended on manual scheduler setup/);
 assert.ok(
   vercel.builds.some((build) => build.src === "api/direct-a2mcp.js" && build.use === "@vercel/node"),

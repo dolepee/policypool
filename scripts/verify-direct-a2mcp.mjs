@@ -54,6 +54,7 @@ function createHarness({ loseProviderResponseOnce = false, failClockOnce = false
   let loseResponse = loseProviderResponseOnce;
   let failClock = failClockOnce;
   let driftChallenge = false;
+  let providerAuthorizationValidBefore = null;
   const calls = {
     capture: 0,
     executeProvider: 0,
@@ -103,15 +104,19 @@ function createHarness({ loseProviderResponseOnce = false, failClockOnce = false
         },
       };
     },
-    async verifyAuthorization({ raw, buyer: expectedBuyer }) {
+    async verifyAuthorization({ raw, buyer: expectedBuyer, allowExpired = false }) {
       if (!raw) throw new ProviderRelayError("provider_payment_signature_required", 402);
       if (getAddress(expectedBuyer) !== buyer.address) throw new ProviderRelayError("provider_payment_payer_mismatch", 400);
+      providerAuthorizationValidBefore ||= Math.floor(nowMs / 1_000) + 500;
+      if (!allowExpired && providerAuthorizationValidBefore <= Math.floor(nowMs / 1_000)) {
+        throw new ProviderRelayError("provider_payment_authorization_expired", 400);
+      }
       return {
         id: `sha256:${sha256(raw)}`,
         hash: `0x${sha256(raw)}`,
         payer: buyer.address,
         validAfter: "0",
-        validBefore: String(Math.floor(nowMs / 1_000) + 500),
+        validBefore: String(providerAuthorizationValidBefore),
         nonce: `0x${"ab".repeat(32)}`,
         requirementsHash,
       };
@@ -322,6 +327,35 @@ const replayed = await happy.coordinator.execute({
 });
 assert.equal(replayed.replay, true);
 assert.equal(replayed.providerResponse.status, 200);
+happy.tick(600_000);
+const replayedAfterExpiry = await happy.coordinator.execute({
+  token: happyFlow.quoted.quote.token,
+  providerRequest,
+  providerPaymentSignature,
+  policyFeePaymentSignature: happyFlow.feePayment,
+});
+assert.equal(replayedAfterExpiry.replay, true);
+assert.equal(replayedAfterExpiry.providerResponse.status, 200);
+assert.equal(happy.calls.executeProvider, 1, "expired exact replay must not call the provider again");
+assert.equal(happy.calls.fund, 1, "expired exact replay must not fund the fee again");
+await assert.rejects(
+  () => happy.coordinator.execute({
+    token: happyFlow.quoted.quote.token,
+    providerRequest,
+    providerPaymentSignature: "substituted-provider-payment-signature",
+    policyFeePaymentSignature: happyFlow.feePayment,
+  }),
+  (error) => error instanceof DirectA2mcpError && error.code === "provider_authorization_changed",
+);
+await assert.rejects(
+  () => happy.coordinator.execute({
+    token: happyFlow.quoted.quote.token,
+    providerRequest,
+    providerPaymentSignature,
+    policyFeePaymentSignature: "substituted-policy-fee-signature",
+  }),
+  (error) => error instanceof DirectA2mcpError && error.code === "policy_fee_signature_malformed",
+);
 
 const refundedAfterSettlement = createHarness({ failClockOnce: true });
 const refundedFlow = await refundedAfterSettlement.bindAndSign();
