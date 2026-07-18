@@ -198,6 +198,7 @@ assert.match(providerRelay, /protocol:\s*"eip3009"/);
 assert.doesNotMatch(providerRelay, /id:\s*`sha256:\$\{sha256\(raw\)\}`/);
 assert.match(directCoordinator, /canonicalEip3009AuthorizationIdentity/);
 assert.doesNotMatch(directCoordinator, /paymentHash:\s*`sha256:\$\{sha256\(raw\)\}`/);
+assert.match(directCoordinator, /provider_delivery_breach_reconciliation_pending/);
 assert.match(chain, /event AuthorizationUsed\(address indexed authorizer, bytes32 indexed nonce\)/);
 assert.match(chain, /verifyProviderPaymentAuthorization/);
 assert.match(chain, /findProviderSettlement/);

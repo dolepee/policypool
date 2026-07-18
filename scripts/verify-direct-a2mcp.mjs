@@ -87,6 +87,10 @@ function policy(overrides = {}) {
 function createHarness({
   loseProviderResponseOnce = false,
   failClockOnce = false,
+  providerResponseStatus = 200,
+  providerDelivered = true,
+  providerCompletedWithinSla = true,
+  providerDurationMs = 1_000,
   policyOverrides = {},
 } = {}) {
   let nowMs = Date.parse("2026-07-17T12:00:00.000Z");
@@ -182,19 +186,19 @@ function createHarness({
         requestId: `sha256:${"bc".repeat(32)}`,
         response: loseResponse
           ? { status: null, recovery: "provider_settlement_found_without_durable_upstream_response" }
-          : { status: 200 },
+          : { status: providerResponseStatus },
         settlement: { transaction: settlementTransaction },
         clock: {
           startedAt,
-          completedAt: new Date(nowMs + 1_000).toISOString(),
-          delivered: true,
-          completedWithinSla: true,
+          completedAt: new Date(nowMs + providerDurationMs).toISOString(),
+          delivered: providerDelivered,
+          completedWithinSla: providerCompletedWithinSla,
         },
       };
       durableProviderResult = {
         receipt,
         upstream: loseResponse ? null : {
-          status: 200,
+          status: providerResponseStatus,
           headers: { "content-type": "application/json" },
           contentType: "application/json",
           bodyBase64: Buffer.from(JSON.stringify({ grade: "PASS" })).toString("base64"),
@@ -343,6 +347,7 @@ function createHarness({
     coordinator,
     drift() { driftChallenge = true; },
     now() { return nowMs; },
+    resolve(token) { return state.resolve(token); },
     setFeeState(value) { fee.state = value; },
     tick(milliseconds) { nowMs += milliseconds; },
   };
@@ -553,4 +558,43 @@ assert.equal(lostResponse.calls.executeProvider, 1, "an uncertain settled provid
 assert.equal(lostResponse.calls.issue, 1);
 assert.equal(lostResponse.calls.fund, 1);
 
-console.log("PolicyPool direct A2MCP coordinator passed: immutable two-payment binding, canonical authorization replay, pre-fund drift rejection, one-time provider settlement, durable deliverable replay, crash resume, and no duplicate issue/fund/capture.");
+for (const providerOutcome of [
+  {
+    name: "unsuccessful response",
+    providerResponseStatus: 500,
+    providerDelivered: false,
+    providerCompletedWithinSla: false,
+  },
+  {
+    name: "late response",
+    providerResponseStatus: 200,
+    providerDelivered: true,
+    providerCompletedWithinSla: false,
+    providerDurationMs: 301_000,
+  },
+]) {
+  const pendingBreach = createHarness(providerOutcome);
+  const pendingBreachFlow = await pendingBreach.bindAndSign();
+  const pendingBreachResult = await pendingBreach.coordinator.execute({
+    token: pendingBreachFlow.quoted.quote.token,
+    providerRequest,
+    providerPaymentSignature,
+    policyFeePaymentSignature: pendingBreachFlow.feePayment,
+  });
+  assert.equal(pendingBreachResult.lifecyclePending, true, providerOutcome.name);
+  assert.equal(
+    pendingBreachResult.pendingReason,
+    "provider_delivery_breach_reconciliation_pending",
+    providerOutcome.name,
+  );
+  assert.equal(
+    (await pendingBreach.resolve(pendingBreachFlow.quoted.quote.token)).state,
+    "executing",
+    `${providerOutcome.name} must remain in the reconciliation queue`,
+  );
+  assert.equal(pendingBreach.calls.executeProvider, 1, providerOutcome.name);
+  assert.equal(pendingBreach.calls.capture, 1, providerOutcome.name);
+  assert.equal(pendingBreach.calls.release, 0, providerOutcome.name);
+}
+
+console.log("PolicyPool direct A2MCP coordinator passed: immutable two-payment binding, canonical authorization replay, pre-fund drift rejection, one-time provider settlement, durable deliverable replay, crash resume, breach reconciliation, and no duplicate issue/fund/capture.");

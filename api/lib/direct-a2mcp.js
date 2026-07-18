@@ -686,6 +686,24 @@ export function createDirectA2mcpCoordinator({
           ? "response_available"
           : "settled_response_unavailable_coverage_remains_active",
       };
+      if (
+        !(providerResult.receipt.clock.delivered && providerResult.receipt.clock.completedWithinSla)
+        && ![3, 5, 6].includes(Number(covenant.state))
+      ) {
+        await state.yieldExecution(
+          token,
+          executionId,
+          "provider_delivery_breach_reconciliation_pending",
+        );
+        return {
+          ...durableResult,
+          replay: false,
+          lifecyclePending: true,
+          pendingReason: "provider_delivery_breach_reconciliation_pending",
+          relayReceipt: providerResult.receipt,
+          providerResponse: providerResult.upstream,
+        };
+      }
       await state.complete(token, executionId, durableResult);
       return {
         ...durableResult,
