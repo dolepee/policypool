@@ -234,6 +234,8 @@ assert.match(directReconciler, /if \(!relayGrant\?\.token\) return null/);
 assert.match(directReconciler, /coverage_clock_recovery_expired/);
 assert.match(reconciler, /relay_clock_recovery_pending/);
 assert.match(chain, /event AuthorizationUsed\(address indexed authorizer, bytes32 indexed nonce\)/);
+assert.match(chain, /provider_payment_authorization_transfer_mismatch/);
+assert.match(chain, /receipt\.logs\[authorizationIndex \+ 1\]/);
 assert.match(chain, /verifyProviderPaymentAuthorization/);
 assert.match(chain, /findProviderSettlement/);
 assert.match(chain, /MAX_PROVIDER_SETTLEMENT_SEARCH_SECONDS = 20 \* 60/);
