@@ -257,6 +257,21 @@ await assert.rejects(
   () => service.prepare({ ...input, premiumBps: 1 }),
   (error) => error instanceof ProviderEnrollmentError && error.code === "direct_fee_premium_mismatch",
 );
+const maximumDirectWindow = await service.prepare({
+  ...input,
+  slaSeconds: 570,
+  enrollmentWindowSeconds: 570,
+});
+assert.equal(maximumDirectWindow.terms.enrollmentWindowSeconds, 570);
+await assert.rejects(
+  () => service.prepare({
+    ...input,
+    slaSeconds: 571,
+    enrollmentWindowSeconds: 571,
+  }),
+  (error) => error instanceof ProviderEnrollmentError
+    && error.code === "direct_enrollment_window_exceeds_authorization_limit",
+);
 const derivedPremium = await service.prepare({ ...input, premiumBps: undefined });
 assert.equal(derivedPremium.terms.premiumBps, 2000);
 await assert.rejects(

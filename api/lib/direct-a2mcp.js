@@ -7,6 +7,11 @@ import {
 } from "viem";
 import { COVERAGE, PAYMENT, XLAYER } from "./config.js";
 import { createChainService } from "./chain.js";
+import {
+  MAX_DIRECT_AUTHORIZATION_WINDOW_SECONDS,
+  MAX_DIRECT_ENROLLMENT_WINDOW_SECONDS,
+  MIN_DIRECT_EXECUTION_WINDOW_SECONDS,
+} from "./direct-a2mcp-constants.js";
 import { DirectA2mcpStateError } from "./direct-a2mcp-store.js";
 import { PolicyFeeEscrowError } from "./policy-fee-escrow.js";
 import {
@@ -28,9 +33,6 @@ const DIRECT_JOB_TYPEHASH = keccak256(stringToHex(
 const DIRECT_ACCEPTANCE_TYPEHASH = keccak256(stringToHex(
   "PolicyPoolDirectA2MCPAcceptance(bytes32 jobId,bytes32 policyId,address buyer,bytes32 requestHash,bytes32 providerRequirementsHash,bytes32 providerAuthorizationHash,bytes32 quoteId)",
 ));
-const MAX_AUTHORIZATION_WINDOW_SECONDS = 15 * 60;
-const MINIMUM_EXECUTION_WINDOW_SECONDS = 30;
-
 export class DirectA2mcpError extends Error {
   constructor(code, status = 422) {
     super(code);
@@ -115,6 +117,18 @@ function sameAddress(left, right) {
   } catch {
     return false;
   }
+}
+
+function directEnrollmentWindowSeconds(value) {
+  const parsed = Number(value);
+  if (
+    !Number.isSafeInteger(parsed)
+    || parsed <= 0
+    || parsed > MAX_DIRECT_ENROLLMENT_WINDOW_SECONDS
+  ) {
+    throw new DirectA2mcpError("direct_enrollment_window_unfundable");
+  }
+  return parsed;
 }
 
 function normalizedAccepted(accepted) {
@@ -263,6 +277,7 @@ export function createDirectA2mcpCoordinator({
     const servicePriceAtomic = BigInt(policy.servicePriceAtomic);
     const policyCapAtomic = BigInt(policy.maxCoverageAtomic);
     const availableBondAtomic = BigInt(policy.providerAvailableBondAtomic);
+    const enrollmentWindowSeconds = directEnrollmentWindowSeconds(policy.enrollmentWindowSeconds);
     const requested = input?.requestedCoverageUSDT
       ? parseUsdtAtomic(input.requestedCoverageUSDT, PAYMENT.decimals)
       : policyCapAtomic;
@@ -296,7 +311,7 @@ export function createDirectA2mcpCoordinator({
       providerRequirementsHash: probe.providerRequirementsHash,
       providerAccepted: probe.accepted,
       endpoint: probe.endpoint,
-      enrollmentWindowSeconds: Number(policy.enrollmentWindowSeconds),
+      enrollmentWindowSeconds,
     });
     return {
       stage: "provider_authorization_required",
@@ -319,13 +334,17 @@ export function createDirectA2mcpCoordinator({
     const providerValidAfter = Number(authorization.validAfter);
     const providerValidBefore = Number(authorization.validBefore);
     const quoteExpiresAt = Math.floor(Date.parse(current.expiresAt) / 1_000);
+    const enrollmentWindowSeconds = directEnrollmentWindowSeconds(current.enrollmentWindowSeconds);
+    const minimumProviderValidBefore = nowSeconds
+      + enrollmentWindowSeconds
+      + MIN_DIRECT_EXECUTION_WINDOW_SECONDS;
     if (
       !Number.isSafeInteger(providerValidAfter)
       || !Number.isSafeInteger(providerValidBefore)
       || !isBytes32(authorization.nonce)
       || providerValidAfter > nowSeconds
-      || providerValidBefore <= nowSeconds + MINIMUM_EXECUTION_WINDOW_SECONDS
-      || providerValidBefore > nowSeconds + MAX_AUTHORIZATION_WINDOW_SECONDS
+      || providerValidBefore < minimumProviderValidBefore
+      || providerValidBefore > nowSeconds + MAX_DIRECT_AUTHORIZATION_WINDOW_SECONDS
       || providerValidBefore > quoteExpiresAt
     ) throw new DirectA2mcpError("provider_authorization_window_invalid", 400);
     const jobId = directJobId({
@@ -414,6 +433,17 @@ export function createDirectA2mcpCoordinator({
       nowMs: now(),
       allowExpired: recoveringExistingExecution,
     });
+    const enrollmentWindowSeconds = directEnrollmentWindowSeconds(bound.enrollmentWindowSeconds);
+    const executionNowSeconds = Math.floor(now() / 1_000);
+    if (
+      !recoveringExistingExecution
+      && (
+        bound.providerAuthorizationValidBefore < executionNowSeconds + enrollmentWindowSeconds
+        || bound.feeValidBefore < executionNowSeconds + enrollmentWindowSeconds
+      )
+    ) {
+      throw new DirectA2mcpError("direct_authorization_window_elapsed_before_execution", 409);
+    }
     const executionId = `sha256:${sha256({
       quoteId: bound.id,
       providerPayment: providerAuthorization.id,

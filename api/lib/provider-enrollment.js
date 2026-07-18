@@ -13,6 +13,7 @@ import {
   verifyTypedData,
 } from "viem";
 import { PAYMENT, XLAYER } from "./config.js";
+import { MAX_DIRECT_ENROLLMENT_WINDOW_SECONDS } from "./direct-a2mcp-constants.js";
 import {
   fetchOkxAgentPage,
   findOkxAgentService,
@@ -225,6 +226,9 @@ export function createProviderEnrollmentService({
     if (maxCapAtomic <= 0n) throw new ProviderEnrollmentError("max_cap_invalid");
     let premiumBps = integer(input?.premiumBps ?? 0, "premium_bps", 0, 10_000);
     if (service.serviceType === "A2MCP") {
+      if (enrollmentWindowSeconds > MAX_DIRECT_ENROLLMENT_WINDOW_SECONDS) {
+        throw new ProviderEnrollmentError("direct_enrollment_window_exceeds_authorization_limit");
+      }
       const servicePriceAtomic = parseUsdtAtomic(service.price, PAYMENT.decimals);
       if (servicePriceAtomic <= 0n) {
         throw new ProviderEnrollmentError("direct_service_price_invalid");

@@ -7,10 +7,11 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { Redis } from "@upstash/redis";
+import { DIRECT_QUOTE_TTL_SECONDS } from "./direct-a2mcp-constants.js";
 import { clean, sha256, stableStringify } from "./utils.js";
 
 const TOKEN_PATTERN = /^ppd_([a-f0-9]{32})\.([a-f0-9]{64})$/;
-const DEFAULT_TTL_SECONDS = 10 * 60;
+const DEFAULT_TTL_SECONDS = DIRECT_QUOTE_TTL_SECONDS;
 const DEFAULT_LEASE_SECONDS = 2 * 60;
 const DEFAULT_EXECUTION_RETENTION_SECONDS = 10 * 24 * 60 * 60;
 const MINIMUM_SECRET_LENGTH = 32;

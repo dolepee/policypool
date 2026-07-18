@@ -58,6 +58,7 @@ const [
 const [
   feeEscrowContract,
   feeEscrowClient,
+  directConstants,
   directCoordinator,
   directState,
   directReconciler,
@@ -67,6 +68,7 @@ const [
 ] = await Promise.all([
   read("src/PolicyFeeEscrow.sol"),
   read("api/lib/policy-fee-escrow.js"),
+  read("api/lib/direct-a2mcp-constants.js"),
   read("api/lib/direct-a2mcp.js"),
   read("api/lib/direct-a2mcp-store.js"),
   read("api/lib/direct-a2mcp-reconciler.js"),
@@ -218,6 +220,13 @@ assert.match(
 );
 assert.match(directCoordinator, /direct_coverage_cap_must_equal_policy_cap/);
 assert.match(directCoordinator, /direct_policy_cap_unavailable/);
+assert.match(directConstants, /DIRECT_QUOTE_TTL_SECONDS = 10 \* 60/);
+assert.match(directConstants, /MIN_DIRECT_EXECUTION_WINDOW_SECONDS = 30/);
+assert.match(directConstants, /MAX_DIRECT_ENROLLMENT_WINDOW_SECONDS = Math\.min/);
+assert.match(enrollment, /direct_enrollment_window_exceeds_authorization_limit/);
+assert.match(directCoordinator, /direct_enrollment_window_unfundable/);
+assert.match(directCoordinator, /minimumProviderValidBefore/);
+assert.match(directCoordinator, /direct_authorization_window_elapsed_before_execution/);
 assert.match(directCoordinator, /await relay\.recover/);
 assert.match(directCoordinator, /await state\.retainRecovery/);
 assert.match(directCoordinator, /provider_delivery_indeterminate_manual_resolution/);

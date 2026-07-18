@@ -137,9 +137,9 @@ Bodyless OKX replay is supported by the verified payer: exactly one live quote m
 
 1. The buyer submits its wallet, target agent and service, requested cap, and exact provider request. PolicyPool probes the enrolled endpoint without payment and validates one canonical x402 challenge against the live policy, endpoint, provider wallet, service price, X Layer USD₮0 asset, and token domain.
 2. PolicyPool returns the provider's original payment challenge plus a signed ten-minute quote. Nothing is locked or charged.
-3. The buyer signs the provider authorization and resubmits it as `PROVIDER-PAYMENT-SIGNATURE`. PolicyPool verifies its signer, nonce, amount, destination, expiry, and original challenge hash without settling it.
+3. The buyer signs the provider authorization and resubmits it as `PROVIDER-PAYMENT-SIGNATURE`. PolicyPool verifies its signer, nonce, amount, destination, expiry, and original challenge hash without settling it. The authorization must cover the full enrolled clock-start window plus a 30-second execution margin.
 4. PolicyPool derives the synthetic direct job and covenant IDs, then returns its separate refundable fee challenge. The buyer signs that authorization as `PAYMENT-SIGNATURE`.
-5. On the final call, PolicyPool reruns the live policy and provider challenge. The evidence quorum issues the covenant and locks provider bond, then the `PolicyFeeEscrow` funds the buyer's refundable `0.1 USD₮0` fee.
+5. On the final call, PolicyPool reruns the live policy and provider challenge and confirms that both authorizations still cover a fresh full enrollment window before claiming execution. The evidence quorum then issues the covenant and locks provider bond, and the `PolicyFeeEscrow` funds the buyer's refundable `0.1 USD₮0` fee.
 6. Only after both protections exist does the one-use relay submit the original provider authorization and request. The response, signed receipt, settlement transaction, exact transfer, and `AuthorizationUsed` nonce persist atomically.
 7. The relay receipt starts the objective provider clock. PolicyPool captures its fee, then releases a timely completed covenant or leaves the scheduled reconciler to follow the challenge and settlement lifecycle.
 8. Exact retries reuse the same quote and both original signatures. Request drift, signature substitution, ambiguous settlement, or a second provider call fails closed.
@@ -158,7 +158,7 @@ Before provider dispatch, the live execution retains an authenticated encrypted 
 
 The exact completed result remains replayable throughout the ten-day execution-retention window even after its short-lived authorizations expire. The original request and both original signatures must still match every stored binding; expiry tolerance cannot authorize new execution.
 
-Direct A2MCP checkout covers the provider's exact enrolled cap because the fee escrow amount is immutable and enrollment derives the premium from that cap. Omitted coverage defaults to the enrolled cap; partial or larger requests fail before payment rather than being silently overcharged.
+Direct A2MCP checkout covers the provider's exact enrolled cap because the fee escrow amount is immutable and enrollment derives the premium from that cap. Omitted coverage defaults to the enrolled cap; partial or larger requests fail before payment rather than being silently overcharged. A2MCP enrollment windows are capped at 570 seconds: the shorter ten-minute quote lifetime minus the 30-second execution margin. Longer policies fail before enrollment, and delayed buyers fail before execution or either payment is claimed.
 
 The scheduled path can request quorum authorization to:
 

@@ -91,6 +91,7 @@ function createHarness({
   providerDelivered = true,
   providerCompletedWithinSla = true,
   providerDurationMs = 1_000,
+  providerAuthorizationLifetimeSeconds = 500,
   policyOverrides = {},
 } = {}) {
   let nowMs = Date.parse("2026-07-17T12:00:00.000Z");
@@ -155,7 +156,8 @@ function createHarness({
     async verifyAuthorization({ raw, buyer: expectedBuyer, allowExpired = false }) {
       if (!raw) throw new ProviderRelayError("provider_payment_signature_required", 402);
       if (getAddress(expectedBuyer) !== buyer.address) throw new ProviderRelayError("provider_payment_payer_mismatch", 400);
-      providerAuthorizationValidBefore ||= Math.floor(nowMs / 1_000) + 500;
+      providerAuthorizationValidBefore ||=
+        Math.floor(nowMs / 1_000) + providerAuthorizationLifetimeSeconds;
       if (!allowExpired && providerAuthorizationValidBefore <= Math.floor(nowMs / 1_000)) {
         throw new ProviderRelayError("provider_payment_authorization_expired", 400);
       }
@@ -384,6 +386,54 @@ assert.equal(variableCap.calls.fund, 0);
 const variableFullCap = await variableCap.bindAndSign({ requestedCoverageUSDT: "1" });
 assert.equal(variableFullCap.quoted.quote.coverageCapAtomic, "1000000");
 assert.equal(variableFullCap.quoted.quote.feeAmountAtomic, "100000");
+
+const unusableEnrollment = createHarness({
+  policyOverrides: { enrollmentWindowSeconds: 571, slaSeconds: 571 },
+});
+await assert.rejects(
+  () => unusableEnrollment.bindAndSign(),
+  (error) => error instanceof DirectA2mcpError
+    && error.code === "direct_enrollment_window_unfundable",
+  "a direct policy whose enrollment window cannot fit inside the quote must fail before authorization",
+);
+assert.equal(unusableEnrollment.calls.issue, 0);
+assert.equal(unusableEnrollment.calls.fund, 0);
+
+const shortProviderAuthorization = createHarness({ providerAuthorizationLifetimeSeconds: 89 });
+await assert.rejects(
+  () => shortProviderAuthorization.bindAndSign(),
+  (error) => error instanceof DirectA2mcpError
+    && error.code === "provider_authorization_window_invalid",
+  "provider authorization must cover the enrollment window plus the execution margin",
+);
+assert.equal(shortProviderAuthorization.calls.issue, 0);
+assert.equal(shortProviderAuthorization.calls.fund, 0);
+
+const exactProviderAuthorization = createHarness({ providerAuthorizationLifetimeSeconds: 90 });
+const exactProviderFlow = await exactProviderAuthorization.bindAndSign();
+assert.equal(
+  exactProviderFlow.bound.quote.providerAuthorizationValidBefore,
+  Math.floor(exactProviderAuthorization.now() / 1_000) + 90,
+);
+
+const delayedExecution = createHarness();
+const delayedExecutionFlow = await delayedExecution.bindAndSign();
+delayedExecution.tick(441_000);
+await assert.rejects(
+  () => delayedExecution.coordinator.execute({
+    token: delayedExecutionFlow.quoted.quote.token,
+    providerRequest,
+    providerPaymentSignature,
+    policyFeePaymentSignature: delayedExecutionFlow.feePayment,
+  }),
+  (error) => error instanceof DirectA2mcpError
+    && error.code === "direct_authorization_window_elapsed_before_execution",
+  "a delayed final call must fail before claiming execution when a full enrollment window no longer remains",
+);
+assert.equal((await delayedExecution.resolve(delayedExecutionFlow.quoted.quote.token)).state, "bound");
+assert.equal(delayedExecution.calls.issue, 0);
+assert.equal(delayedExecution.calls.fund, 0);
+assert.equal(delayedExecution.calls.executeProvider, 0);
 
 const happy = createHarness();
 const happyFlow = await happy.bindAndSign();
