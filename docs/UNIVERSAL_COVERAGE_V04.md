@@ -141,10 +141,12 @@ Bodyless OKX replay is supported by the verified payer: exactly one live quote m
 4. PolicyPool derives the synthetic direct job and covenant IDs, then returns its separate refundable fee challenge. The buyer signs that authorization as `PAYMENT-SIGNATURE`.
 5. On the final call, PolicyPool reruns the live policy and provider challenge and confirms that both authorizations still cover a fresh full enrollment window before claiming execution. The evidence quorum then issues the covenant and locks provider bond, and the `PolicyFeeEscrow` funds the buyer's refundable `0.1 USD₮0` fee.
 6. Only after both protections exist does the one-use relay submit the original provider authorization and request. The response, signed receipt, settlement transaction, exact transfer, and `AuthorizationUsed` nonce persist atomically.
-7. The relay receipt starts the objective provider clock. PolicyPool captures its fee, then releases a timely completed covenant or leaves the scheduled reconciler to follow the challenge and settlement lifecycle.
+7. The relay receipt starts the objective provider clock. One shared terminalizer captures the PolicyPool fee before its refund boundary or refunds it at/after that boundary, then releases a timely completed covenant or leaves the scheduled reconciler to follow the challenge and settlement lifecycle.
 8. Exact retries reuse the same quote and both original signatures. Request drift, signature substitution, ambiguous settlement, or a second provider call fails closed.
 
 If the provider never settles, the reconciler proves non-settlement after authorization expiry, obtains quorum authorization to cancel the unpaid covenant, and makes the fee refundable to the buyer. If settlement is proven but the upstream response was lost, the provider is never called again and the covenant enters a manual safety hold rather than an automatic breach.
+
+The buyer path and scheduled reconciler do not implement separate fee decisions. Both call the same idempotent post-settlement transition: `Funded` captures before `refundAvailableAt`, refunds at or after it, and accepts a concurrently completed capture/refund after rereading chain state. If a capture attempt crosses the boundary while being mined, the transition falls through once to refund instead of retrying capture forever.
 
 ## Reconciliation
 

@@ -1,4 +1,9 @@
 import assert from "node:assert/strict";
+import {
+  directPolicyFeeSettlementAction,
+  DirectPolicyFeeError,
+  finalizeDirectPolicyFee,
+} from "../api/lib/direct-policy-fee.js";
 import { createPolicyFeeEscrowClient, PolicyFeeEscrowError } from "../api/lib/policy-fee-escrow.js";
 
 const feeEscrow = "0x1000000000000000000000000000000000000001";
@@ -113,4 +118,104 @@ assert.throws(
   (error) => error instanceof PolicyFeeEscrowError && error.code === "policy_fee_escrow_not_configured",
 );
 
-console.log("PolicyPool fee escrow client passed: canonical authorization preview, simulated writes, quorum capture, reads, and refund.");
+function feeResolutionHarness({
+  state = 1,
+  nowSeconds = 819,
+  refundAvailableAt = 820,
+  captureRace = null,
+  refundRace = null,
+} = {}) {
+  let nowMs = nowSeconds * 1_000;
+  let fee = { state, refundAvailableAt };
+  const calls = { capture: 0, refund: 0 };
+  const escrow = {
+    async getFee() { return structuredClone(fee); },
+    async capture() {
+      calls.capture += 1;
+      if (captureRace === "boundary") {
+        nowMs = refundAvailableAt * 1_000;
+        throw new Error("capture crossed refund boundary");
+      }
+      if (captureRace === "captured") {
+        fee.state = 2;
+        throw new Error("concurrent capture won");
+      }
+      fee.state = 2;
+      return { transactionHash: `0x${"91".repeat(32)}` };
+    },
+    async refund() {
+      calls.refund += 1;
+      if (refundRace === "refunded") {
+        fee.state = 3;
+        throw new Error("concurrent refund won");
+      }
+      fee.state = 3;
+      return { transactionHash: `0x${"92".repeat(32)}` };
+    },
+  };
+  return {
+    calls,
+    resolve: () => finalizeDirectPolicyFee({
+      feeEscrow: escrow,
+      feeId,
+      captureEvidence: {
+        feeId,
+        covenantId,
+        providerAuthorizationHash,
+        relayReceiptDigest,
+        providerSettlementTransaction: settlementTransaction,
+        observedAt: nowSeconds,
+      },
+      now: () => nowMs,
+    }),
+  };
+}
+
+assert.equal(directPolicyFeeSettlementAction({ state: 1, refundAvailableAt: 820 }, 819), "capture");
+assert.equal(directPolicyFeeSettlementAction({ state: 1, refundAvailableAt: 820 }, 820), "refund");
+assert.equal(directPolicyFeeSettlementAction({ state: 1, refundAvailableAt: 820 }, 821), "refund");
+assert.throws(
+  () => directPolicyFeeSettlementAction({ state: 1, refundAvailableAt: 820 }, Number.NaN),
+  (error) => error instanceof DirectPolicyFeeError
+    && error.code === "direct_policy_fee_clock_invalid",
+);
+
+const beforeBoundary = feeResolutionHarness();
+assert.equal((await beforeBoundary.resolve()).action, "capture");
+assert.deepEqual(beforeBoundary.calls, { capture: 1, refund: 0 });
+
+for (const nowSeconds of [820, 821]) {
+  const atOrAfterBoundary = feeResolutionHarness({ nowSeconds });
+  assert.equal((await atOrAfterBoundary.resolve()).action, "refund");
+  assert.deepEqual(atOrAfterBoundary.calls, { capture: 0, refund: 1 });
+}
+
+for (const [state, action] of [[2, "already_captured"], [3, "already_refunded"]]) {
+  const terminal = feeResolutionHarness({ state });
+  assert.equal((await terminal.resolve()).action, action);
+  assert.deepEqual(terminal.calls, { capture: 0, refund: 0 });
+}
+
+const crossedBoundary = feeResolutionHarness({ captureRace: "boundary" });
+assert.equal((await crossedBoundary.resolve()).action, "refund");
+assert.deepEqual(crossedBoundary.calls, { capture: 1, refund: 1 });
+
+const concurrentCapture = feeResolutionHarness({ captureRace: "captured" });
+const concurrentCaptureResult = await concurrentCapture.resolve();
+assert.equal(concurrentCaptureResult.action, "already_captured");
+assert.equal(concurrentCaptureResult.recovered, true);
+assert.deepEqual(concurrentCapture.calls, { capture: 1, refund: 0 });
+
+const concurrentRefund = feeResolutionHarness({ nowSeconds: 820, refundRace: "refunded" });
+const concurrentRefundResult = await concurrentRefund.resolve();
+assert.equal(concurrentRefundResult.action, "already_refunded");
+assert.equal(concurrentRefundResult.recovered, true);
+assert.deepEqual(concurrentRefund.calls, { capture: 0, refund: 1 });
+
+await assert.rejects(
+  () => feeResolutionHarness({ state: 0 }).resolve(),
+  (error) => error instanceof DirectPolicyFeeError
+    && error.code === "direct_policy_fee_state_invalid",
+);
+
+console.log("PolicyPool fee escrow client passed: canonical authorization preview plus one boundary-safe, idempotent post-settlement capture/refund transition.");

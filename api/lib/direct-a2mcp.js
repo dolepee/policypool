@@ -12,6 +12,7 @@ import {
   MAX_DIRECT_ENROLLMENT_WINDOW_SECONDS,
   MIN_DIRECT_EXECUTION_WINDOW_SECONDS,
 } from "./direct-a2mcp-constants.js";
+import { finalizeDirectPolicyFee } from "./direct-policy-fee.js";
 import { DirectA2mcpStateError } from "./direct-a2mcp-store.js";
 import { PolicyFeeEscrowError } from "./policy-fee-escrow.js";
 import {
@@ -253,7 +254,14 @@ export function createDirectA2mcpCoordinator({
   if (!relay?.probe || !relay?.verifyAuthorization || !relay?.execute || !relay?.recover) {
     throw new DirectA2mcpError("direct_provider_relay_unavailable", 503);
   }
-  if (!feeEscrow?.terms || !feeEscrow?.previewAuthorization || !feeEscrow?.fund || !feeEscrow?.capture) {
+  if (
+    !feeEscrow?.terms
+    || !feeEscrow?.previewAuthorization
+    || !feeEscrow?.fund
+    || !feeEscrow?.getFee
+    || !feeEscrow?.capture
+    || !feeEscrow?.refund
+  ) {
     throw new DirectA2mcpError("direct_fee_escrow_unavailable", 503);
   }
   if (!issuer?.issue || !issuer?.previewCovenantId || !issuer?.getCovenant || !issuer?.startClock) {
@@ -646,18 +654,27 @@ export function createDirectA2mcpCoordinator({
         });
       }
 
-      fee = await feeEscrow.getFee(bound.feeId);
-      if (fee.state === 1) {
-        const captured = await feeEscrow.capture({
+      const feeResolution = await finalizeDirectPolicyFee({
+        feeEscrow,
+        feeId: bound.feeId,
+        captureEvidence: {
           feeId: bound.feeId,
           covenantId: bound.covenantId,
           providerAuthorizationHash: bound.providerAuthorizationHash,
           relayReceiptDigest: providerResult.receipt.receiptDigest,
           providerSettlementTransaction: providerResult.receipt.settlement.transaction,
           observedAt: Math.floor(now() / 1_000),
-        }, { relayReceipt: providerResult.receipt });
-        record = await state.checkpoint(token, executionId, "feeCaptured", captured);
-        fee = await feeEscrow.getFee(bound.feeId);
+        },
+        context: { relayReceipt: providerResult.receipt },
+        now,
+      });
+      fee = feeResolution.fee;
+      const feeStage = fee.state === 2 ? "feeCaptured" : "feeRefunded";
+      if (!record.execution.stages[feeStage]) {
+        record = await state.checkpoint(token, executionId, feeStage, feeResolution.write || {
+          recoveredFromChain: true,
+          state: fee.state,
+        });
       }
       if (![2, 3].includes(fee.state)) {
         throw new DirectA2mcpError("direct_fee_capture_pending", 503);

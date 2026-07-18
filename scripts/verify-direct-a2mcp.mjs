@@ -111,6 +111,7 @@ function createHarness({
     issue: 0,
     probe: 0,
     recover: 0,
+    refund: 0,
     release: 0,
     startClock: 0,
   };
@@ -257,6 +258,7 @@ function createHarness({
         covenantId,
         providerAuthorizationHash: `0x${providerAuthorizationDigest}`,
         amountAtomic: "100000",
+        refundAvailableAt: providerAuthorizationValidBefore + 120,
         state: 1,
       };
       return { transactionHash: `0x${"04".repeat(32)}` };
@@ -265,6 +267,11 @@ function createHarness({
       calls.capture += 1;
       fee.state = 2;
       return { transactionHash: `0x${"05".repeat(32)}` };
+    },
+    async refund() {
+      calls.refund += 1;
+      fee.state = 3;
+      return { transactionHash: `0x${"06".repeat(32)}` };
     },
   };
   const chain = {
@@ -350,7 +357,6 @@ function createHarness({
     drift() { driftChallenge = true; },
     now() { return nowMs; },
     resolve(token) { return state.resolve(token); },
-    setFeeState(value) { fee.state = value; },
     tick(milliseconds) { nowMs += milliseconds; },
   };
 }
@@ -502,7 +508,7 @@ const interruptedAfterSettlement = await refundedAfterSettlement.coordinator.exe
   policyFeePaymentSignature: refundedFlow.feePayment,
 });
 assert.equal(interruptedAfterSettlement.lifecyclePending, true);
-refundedAfterSettlement.setFeeState(3);
+refundedAfterSettlement.tick(621_000);
 const recoveredAfterRefund = await refundedAfterSettlement.coordinator.execute({
   token: refundedFlow.quoted.quote.token,
   providerRequest,
@@ -515,6 +521,7 @@ assert.equal(recoveredAfterRefund.feeOutcome, "refunded_after_provider_settlemen
 assert.equal(recoveredAfterRefund.coverageState, 3);
 assert.equal(refundedAfterSettlement.calls.executeProvider, 1);
 assert.equal(refundedAfterSettlement.calls.capture, 0);
+assert.equal(refundedAfterSettlement.calls.refund, 1);
 assert.equal(refundedAfterSettlement.calls.release, 1);
 assert.equal(happy.calls.executeProvider, 1, "replay must never call or charge the provider twice");
 assert.equal(happy.calls.fund, 1, "replay must never fund the fee twice");

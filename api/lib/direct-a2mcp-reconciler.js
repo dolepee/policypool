@@ -1,4 +1,8 @@
 import { getAddress, keccak256, stringToHex } from "viem";
+import {
+  directPolicyFeeSettlementAction,
+  finalizeDirectPolicyFee,
+} from "./direct-policy-fee.js";
 import { ProviderRelayError, verifyProviderRelayReceipt } from "./provider-relay.js";
 import { isBytes32, stableStringify } from "./utils.js";
 
@@ -193,18 +197,32 @@ export function createDirectA2mcpReconciler({
       }
     }
     if (Number(fee.state) === FEE.funded && Number(covenant.state) !== COVENANT.pendingStart) {
-      changes.push({ quoteId: record.id, action: "capture_fee" });
+      const feeAction = directPolicyFeeSettlementAction(fee, Math.floor(now() / 1_000));
+      changes.push({
+        quoteId: record.id,
+        action: feeAction === "refund" ? "refund_policy_fee_after_settlement" : "capture_fee",
+      });
       if (!dryRun) {
-        const write = await feeEscrow.capture({
+        const feeResolution = await finalizeDirectPolicyFee({
+          feeEscrow,
           feeId: record.feeId,
-          covenantId: record.covenantId,
-          providerAuthorizationHash: record.providerAuthorizationHash,
-          relayReceiptDigest: receipt.receiptDigest,
-          providerSettlementTransaction: receipt.settlement.transaction,
-          observedAt: Math.floor(now() / 1_000),
-        }, { relayReceipt: receipt, directQuote: record.id });
-        record = await checkpoint(record, "feeCaptured", write, false);
-        fee = await feeEscrow.getFee(record.feeId);
+          captureEvidence: {
+            feeId: record.feeId,
+            covenantId: record.covenantId,
+            providerAuthorizationHash: record.providerAuthorizationHash,
+            relayReceiptDigest: receipt.receiptDigest,
+            providerSettlementTransaction: receipt.settlement.transaction,
+            observedAt: Math.floor(now() / 1_000),
+          },
+          context: { relayReceipt: receipt, directQuote: record.id },
+          now,
+        });
+        fee = feeResolution.fee;
+        const feeStage = Number(fee.state) === FEE.captured ? "feeCaptured" : "feeRefunded";
+        record = await checkpoint(record, feeStage, feeResolution.write || {
+          recoveredFromChain: true,
+          state: Number(fee.state),
+        }, false);
       }
     }
     if (receipt.clock?.delivered && receipt.clock.completedWithinSla) {

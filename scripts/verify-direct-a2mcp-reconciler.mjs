@@ -243,12 +243,12 @@ const settlementFoundResult = await settlementFound.reconcile();
 assert.equal(settlementFoundResult.holds[0].reason, "provider_delivery_indeterminate_manual_resolution");
 assert.deepEqual(
   settlementFound.calls,
-  { cancel: 0, capture: 1, mark: 0, refund: 0, release: 0, settle: 0, start: 1 },
+  { cancel: 0, capture: 0, mark: 0, refund: 1, release: 0, settle: 0, start: 1 },
 );
 assert.equal(settlementFound.getRecoveries(), 1);
 assert.equal(settlementFound.getRecord().state, "executing");
 assert.equal(settlementFound.getRecord().execution.stages.clockStarted !== undefined, true);
-assert.equal(settlementFound.getRecord().execution.stages.feeCaptured !== undefined, true);
+assert.equal(settlementFound.getRecord().execution.stages.feeRefunded !== undefined, true);
 assert.equal(settlementFound.getRotations(), 1, "persistent holds must rotate behind unscanned executions");
 
 const indeterminate = harness({ receipt: relayReceipt({ delivered: false, recovered: true }), covenantState: 2 });
@@ -266,6 +266,19 @@ assert.equal(refundedAfterSettlement.calls.release, 1);
 assert.equal(refundedAfterSettlement.getRecord().state, "complete");
 assert.equal(refundedAfterSettlement.getRecord().result.feeOutcome, "refunded_after_provider_settlement");
 assert.equal(refundedAfterSettlement.getRotations(), 1);
+
+const refundAtBoundary = harness({
+  covenantState: 1,
+  nowSeconds: directRecord().providerAuthorizationValidBefore + 120,
+});
+const refundAtBoundaryResult = await refundAtBoundary.reconcile();
+assert.equal(refundAtBoundaryResult.ok, true);
+assert.deepEqual(
+  refundAtBoundary.calls,
+  { cancel: 0, capture: 0, mark: 0, refund: 1, release: 1, settle: 0, start: 1 },
+);
+assert.equal(refundAtBoundary.getRecord().state, "complete");
+assert.equal(refundAtBoundary.getRecord().result.feeOutcome, "refunded_after_provider_settlement");
 
 const settledAfterCancellation = harness({ covenantState: 7, feeState: 3 });
 const settledAfterCancellationResult = await settledAfterCancellation.reconcile();
