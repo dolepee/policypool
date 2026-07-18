@@ -561,7 +561,7 @@ Source remediation:
 
 - the deployment script validates X Layer chain `196`, USD₮0, the canonical ERC-8004 registry, OKX task escrow, bond floor, SLA ceiling, exact disjoint 3-of-5 quorums, nonzero unique signers, and role separation before the first broadcast;
 - the cold owner is mandatory and cannot silently default to the deployer;
-- deployer, cold owner, relay signer, monitor, primary signers, and recovery signers cannot occupy conflicting ongoing roles;
+- deployer, cold owner, relay signer, monitor, immutable fee treasury, primary signers, and recovery signers cannot occupy conflicting ongoing roles;
 - the wire script independently reads every immutable link and parameter from chain before accepting ownership or setting the monitor;
 - both scripts compile under the normal and coverage compiler profiles.
 
@@ -691,7 +691,7 @@ The complete JavaScript/runtime/release gate passed and the final Slither findin
 
 Redeployment is required. The remediated manager constructor adds the evidence verifier, removes the operator model, changes every lifecycle ABI, and hardens relay domains. The old vault is permanently bound to its old manager, so the stack cannot be partially upgraded.
 
-The next deployment must create an eight-contract stack flag-off: vault, registry, primary evidence verifier, disjoint recovery evidence verifier, manager, PolicyFeeEscrow, A2A adapter, and relay verifier. It must then verify bytecode, both 3-of-5 signer sets, zero signer overlap, fee treasury and amount, and immutable wiring before any pilot.
+The next deployment must create an eight-contract stack flag-off: vault, registry, primary evidence verifier, disjoint recovery evidence verifier, manager, PolicyFeeEscrow, A2A adapter, and relay verifier. It must then verify bytecode, both 3-of-5 signer sets, zero signer overlap, the fee treasury's separation from every custody and evidence role, fee amount, and immutable wiring before any pilot.
 
 No production endpoint, OKX listing, feature flag, existing contract, or fund balance is changed by this source remediation. The checked-in GitHub workflow gains a dormant direct-reconciliation fallback, but the direct feature remains disabled and no QStash schedule is created.
 

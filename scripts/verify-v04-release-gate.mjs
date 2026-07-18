@@ -308,6 +308,11 @@ assert.match(deployment, /block\.chainid != XLAYER_CHAIN_ID/);
 assert.match(deployment, /config\.identityRegistry != OKX_AGENT_IDENTITY_REGISTRY/);
 assert.match(deployment, /config\.paymentAsset != XLAYER_USDT0/);
 assert.match(deployment, /_requireRoleOutsideQuorums/);
+assert.match(deployment, /config\.monitor = vm\.envAddress\("POLICYPOOL_V04_MONITOR"\)/);
+assert.match(deployment, /config\.monitor == config\.feeTreasury/);
+assert.match(deployment, /config\.feeTreasury == deployer/);
+assert.match(deployment, /_requireRoleOutsideQuorums\(config\.monitor/);
+assert.match(deployment, /_requireRoleOutsideQuorums\(config\.feeTreasury/);
 assert.match(deployment, /config\.evidenceSigners\.length != V04_EVIDENCE_SIGNER_COUNT/);
 assert.match(deployment, /config\.evidenceThreshold != V04_EVIDENCE_THRESHOLD/);
 assert.match(deployment, /config\.owner == deployer/);
@@ -319,6 +324,10 @@ assert.match(wiring, /address\(deployed\.feeEscrow\.coverageManager\(\)\) != add
 assert.match(wiring, /deployed\.feeEscrow\.feeAmountAtomic\(\) != V04_DIRECT_FEE_ATOMIC/);
 assert.match(wiring, /_requireRoleSeparation/);
 assert.match(wiring, /monitor == address\(0\)/);
+assert.match(wiring, /feeTreasury == address\(0\)/);
+assert.match(wiring, /coldOwner == feeTreasury/);
+assert.match(wiring, /primary\[index\] == feeTreasury/);
+assert.match(wiring, /recovery\[index\] == feeTreasury/);
 assert.match(wiring, /roles\.evidenceSigners\.length != V04_EVIDENCE_SIGNER_COUNT/);
 assert.match(wiring, /roles\.evidenceThreshold != V04_EVIDENCE_THRESHOLD/);
 for (const line of [

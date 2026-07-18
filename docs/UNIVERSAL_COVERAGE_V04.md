@@ -146,7 +146,7 @@ Bodyless OKX replay is supported by the verified payer: exactly one live quote m
 
 If the provider never settles, the reconciler proves non-settlement after authorization expiry, obtains quorum authorization to cancel the unpaid covenant, and makes the fee refundable to the buyer. If settlement is proven but the upstream response was lost, the provider is never called again and the covenant enters a manual safety hold rather than an automatic breach.
 
-The buyer path and scheduled reconciler do not implement separate fee decisions. Both call the same idempotent post-settlement transition: `Funded` captures before `refundAvailableAt`, refunds at or after it, and accepts a concurrently completed capture/refund after rereading chain state. If a capture attempt crosses the boundary while being mined, the transition falls through once to refund instead of retrying capture forever.
+The buyer path and scheduled reconciler do not implement separate fee decisions. Both call the same idempotent post-settlement transition: `Funded` captures before `refundAvailableAt`, refunds at or after it, and accepts a concurrently completed capture/refund after rereading chain state. If a capture attempt crosses the boundary while being mined, the transition falls through once to refund instead of retrying capture forever. Missing both the immediate and scheduled capture window forfeits PolicyPool's fee to the buyer refund; it never strands or redirects buyer funds.
 
 ## Reconciliation
 
@@ -268,6 +268,7 @@ Required before a fresh flag-off house-operated deployment:
 - Claude independently reviews the remediated commit and no unresolved Critical or High finding remains;
 - both internal adversarial reviews have no unresolved Critical or High finding;
 - the house signer manifest satisfies the exact, disjoint 3-of-5 topology and is suitable only for controlled drills;
+- the deployer, cold owner, monitor, relay signer, immutable fee treasury, and both evidence quorums are mutually separated as required by the deploy and wire scripts;
 - the evidence service independently verifies underlying context instead of signing relayer assertions;
 - the old deployment remains disabled and empty of third-party capital;
 - a new eight-contract stack is deployed flag-off and source/creation bytecode is verified;
@@ -280,7 +281,7 @@ Required before a fresh flag-off house-operated deployment:
 
 1. Deploy the vault, registry, primary evidence verifier, disjoint recovery evidence verifier, manager, fee escrow, A2A adapter, and relay verifier while the feature is off.
 2. Initialize the vault manager once, transfer vault ownership to the cold owner, accept ownership, and set the registry monitor.
-3. Verify bytecode, immutable dependencies, both 3-of-5 signer sets, zero signer overlap, thresholds, token, identity registry, ownership, monitor, and relay signer from chain state.
+3. Verify bytecode, immutable dependencies, both 3-of-5 signer sets, zero signer overlap, thresholds, token, identity registry, ownership, monitor, relay signer, and immutable fee treasury from chain state.
 4. Configure the unprivileged relayer and both independently operated evidence services while the feature remains off.
 5. Run the complete gate and read-only reconciliation.
 6. Run separately labeled house covenants for release, full payout, payout reduced by verified recovery, direct A2MCP success, direct no-settlement cancellation/refund, and fee capture.
@@ -303,5 +304,6 @@ Rollback stops new issuance by setting `POLICYPOOL_UNIVERSAL_ENABLED=false`. Exi
 - Direct checkout can recover a proven provider settlement without another call, but if the upstream response was not durably captured it cannot reconstruct the deliverable and therefore holds coverage for manual resolution.
 - The direct fee escrow is fixed at `0.1 USD₮0`; enrollment verifies that immutable on-chain amount, rejects a cap above the live service price, and accepts a direct policy cap only when its derived basis-point rate represents the fee exactly.
 - Coverage-fee failure never masquerades as provider delivery. The exact fee authorization is bound at issuance; uncertain issuance remains durable until expiry and chain recheck, after which quorum-attested non-settlement can cancel an unpaid covenant and unlock a clean retry.
+- Fee capture is time-bounded. If both immediate and scheduled capture miss `refundAvailableAt`, the buyer refunds and PolicyPool loses the fee; attesters must never sign `cancel_unpaid` while the bound escrow fee is still `Funded`.
 - Policy expiry is the last issuance time, not the deadline by which an existing covenant must finish.
 - Discretionary provider premiums, shared-reserve co-coverage, subjective quality claims, ratings, additional chains, and discretionary automated payouts remain out of scope.

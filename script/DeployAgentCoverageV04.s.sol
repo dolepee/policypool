@@ -29,6 +29,7 @@ contract DeployAgentCoverageV04 is Script {
 
     struct DeploymentConfig {
         address owner;
+        address monitor;
         address identityRegistry;
         address paymentAsset;
         address taskEscrow;
@@ -89,6 +90,7 @@ contract DeployAgentCoverageV04 is Script {
 
     function _configuration() private view returns (DeploymentConfig memory config) {
         config.owner = vm.envAddress("POLICYPOOL_V04_OWNER");
+        config.monitor = vm.envAddress("POLICYPOOL_V04_MONITOR");
         config.identityRegistry = vm.envAddress("OKX_AGENT_IDENTITY_REGISTRY");
         config.paymentAsset = vm.envOr("POLICYPOOL_PAYMENT_ASSET", XLAYER_USDT0);
         config.taskEscrow = vm.envOr("POLICYPOOL_OKX_TASK_ESCROW", OKX_TASK_ESCROW);
@@ -124,14 +126,19 @@ contract DeployAgentCoverageV04 is Script {
                 || config.directFeeAtomic != V04_DIRECT_FEE_ATOMIC
         ) revert InvalidDeploymentConfiguration();
         if (
-            config.owner == address(0) || config.relaySigner == address(0) || config.feeTreasury == address(0)
-                || deployer == address(0) || config.owner == config.relaySigner || config.owner == deployer
-                || config.relaySigner == deployer
+            config.owner == address(0) || config.monitor == address(0) || config.relaySigner == address(0)
+                || config.feeTreasury == address(0) || deployer == address(0) || config.owner == config.monitor
+                || config.owner == config.relaySigner || config.owner == config.feeTreasury || config.owner == deployer
+                || config.monitor == config.relaySigner || config.monitor == config.feeTreasury
+                || config.monitor == deployer || config.relaySigner == config.feeTreasury
+                || config.relaySigner == deployer || config.feeTreasury == deployer
         ) revert RoleCollision();
         _validateEvidenceQuorum(config.evidenceSigners);
         _validateEvidenceQuorum(config.recoveryEvidenceSigners);
         _requireRoleOutsideQuorums(config.owner, config.evidenceSigners, config.recoveryEvidenceSigners);
+        _requireRoleOutsideQuorums(config.monitor, config.evidenceSigners, config.recoveryEvidenceSigners);
         _requireRoleOutsideQuorums(config.relaySigner, config.evidenceSigners, config.recoveryEvidenceSigners);
+        _requireRoleOutsideQuorums(config.feeTreasury, config.evidenceSigners, config.recoveryEvidenceSigners);
         _requireRoleOutsideQuorums(deployer, config.evidenceSigners, config.recoveryEvidenceSigners);
     }
 

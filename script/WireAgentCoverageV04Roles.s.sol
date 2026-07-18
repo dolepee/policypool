@@ -122,7 +122,12 @@ contract WireAgentCoverageV04Roles is Script {
         ) revert StaticWiringMismatch();
         if (deployed.relay.trustedSigner() != roles.relaySigner) revert RoleWiringMismatch();
         _requireRoleSeparation(
-            roles.coldOwner, roles.monitor, roles.relaySigner, roles.evidenceSigners, roles.recoveryEvidenceSigners
+            roles.coldOwner,
+            roles.monitor,
+            roles.relaySigner,
+            roles.feeTreasury,
+            roles.evidenceSigners,
+            roles.recoveryEvidenceSigners
         );
         _validateEvidenceWiring(deployed, roles);
     }
@@ -177,22 +182,30 @@ contract WireAgentCoverageV04Roles is Script {
         address coldOwner,
         address monitor,
         address relaySigner,
+        address feeTreasury,
         address[] memory primary,
         address[] memory recovery
     ) private pure {
         if (
-            coldOwner == address(0) || monitor == address(0) || relaySigner == address(0) || coldOwner == monitor
-                || coldOwner == relaySigner || monitor == relaySigner
+            coldOwner == address(0) || monitor == address(0) || relaySigner == address(0) || feeTreasury == address(0)
+                || coldOwner == monitor || coldOwner == relaySigner || coldOwner == feeTreasury
+                || monitor == relaySigner || monitor == feeTreasury || relaySigner == feeTreasury
         ) {
             revert RoleCollision();
         }
         for (uint256 index; index < primary.length; ++index) {
-            if (primary[index] == coldOwner || primary[index] == monitor || primary[index] == relaySigner) {
+            if (
+                primary[index] == coldOwner || primary[index] == monitor || primary[index] == relaySigner
+                    || primary[index] == feeTreasury
+            ) {
                 revert RoleCollision();
             }
         }
         for (uint256 index; index < recovery.length; ++index) {
-            if (recovery[index] == coldOwner || recovery[index] == monitor || recovery[index] == relaySigner) {
+            if (
+                recovery[index] == coldOwner || recovery[index] == monitor || recovery[index] == relaySigner
+                    || recovery[index] == feeTreasury
+            ) {
                 revert RoleCollision();
             }
         }
