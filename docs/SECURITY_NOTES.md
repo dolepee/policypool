@@ -83,7 +83,7 @@ Third-party capital remains blocked until the remediated source receives indepen
 - Release binds the authoritative completion timestamp and rejects completion after the covenant deadline. The contract stores that timestamp for later inspection.
 - A breach is provisional for 24 hours measured from the mined `PayoutDue` transition, not from a potentially held observation. During that challenge period, quorum-attested proof of an on-time completion can move `PayoutDue` to `Released`; neither the primary nor emergency settlement path can win by transaction ordering alone.
 - Loss of the primary quorum no longer makes resolution impossible by itself. A contract-enforced, signer-disjoint recovery quorum may release, breach, or settle after 30 days.
-- The manager requires exactly five signers and threshold three in each verifier and rejects any signer overlap between the primary and recovery quorums. Deployment scripts repeat these checks, reject role reuse and noncanonical X Layer parameters before broadcast, and the release gate verifies them.
+- The manager requires exactly five signers and threshold three in each verifier and rejects any signer overlap between the primary and recovery quorums. Deployment scripts repeat these checks, reject role reuse across the deployer, cold owner, monitor, relay signer, immutable fee treasury, and both quorums, reject noncanonical X Layer parameters before broadcast, and the release gate verifies them.
 
 Residual: terminal recovery and completion time are facts attested by permissioned quorums, not facts derived directly from OKX contracts. Threshold collusion remains capable of false attestation. If both quorums become unavailable, no privileged reclaim path exists because any deterministic unilateral recipient would sacrifice either the buyer or provider.
 
@@ -136,6 +136,7 @@ Source remediation keeps the evidence meanings separate:
 - failed or unconfirmed coverage-fee settlement queues compensation rather than claiming provider delivery;
 - an uncertain issuance broadcast retains its planned covenant ID and cannot be discarded until the fee authorization expires and chain state proves no covenant exists;
 - after authorization expiry, a fresh quorum attestation that the authorization remains unused may call `cancelUnpaid`, release the bond, and clear only the unpaid job lock;
+- before signing `cancel_unpaid`, every attester must independently read the fee escrow and reject cancellation while the bound fee remains `Funded`; a timeout or relayer error is never proof of non-capture;
 - cancellation evidence expires after ten minutes, and the recovery quorum path remains delayed 30 days.
 
 Residual: fee non-settlement and terminal marketplace recovery are permissioned-oracle facts. Attesters must query the chain and OKX evidence directly. A settlement timeout or relayer error is never sufficient evidence by itself.
@@ -152,11 +153,44 @@ Verified relay receipts were indexed by target job, but reconciliation did not p
 
 Every signed relay receipt now includes the grant's covenant ID. Its durable atomic commit writes both the diagnostic job index and an exact covenant index. Reconciliation reads only the covenant index, verifies the receipt signature, and requires exact grant, covenant, job, agent, service, and grant-buyer/payment-payer equality before using any clock or delivery evidence. A prior receipt for the same job remains auditable but cannot drive a replacement covenant.
 
+### Direct A2MCP checkout and refundable fee escrow
+
+OKX Task Marketplace is an A2A accept/deliver transport and is not used for A2MCP services. `/api/direct-a2mcp` performs direct HTTP+x402 checkout through three fail-closed stages: probe and quote, provider authorization, then separate refundable PolicyPool fee authorization. The canonical provider request and x402 challenge are hashed into the quote; the buyer, policy, service fingerprint, endpoint, amount, provider destination, both nonces, and both authorization windows cannot change between stages. A direct policy's enrollment window cannot exceed 570 seconds, which leaves a 30-second execution margin inside the ten-minute quote lifetime. Bind requires the provider authorization to cover both periods, and the final call rechecks that a complete enrollment window remains before claiming execution or custody.
+
+The ownerless `PolicyFeeEscrow` receives the PolicyPool fee before the provider call but cannot send it to the treasury until the provider settlement and clock are quorum-attested. If no provider settlement exists after authorization expiry, the covenant is quorum-cancelled and only the buyer can refund the fee. After a verified settlement, both the buyer path and reconciler use one shared terminalizer: it captures before `refundAvailableAt`, refunds at/after it, rereads concurrent terminal state, and switches a capture that crosses the boundary to refund. If both immediate and scheduled capture miss that boundary, the buyer refunds and PolicyPool forfeits its fee even though the provider may have completed; this is a fee-collection liveness risk, not buyer fund loss. The escrow has no sweep or alternate recipient and verifies exact balance deltas.
+
+Provider execution is at most once. The paid response body and signed relay receipt persist in one atomic commit. Recovery first checks that durable record, then performs a bounded on-chain search for the exact indexed EIP-3009 nonce and USD₮0 transfer. A proven settlement with no durable response creates a safety hold: PolicyPool does not call the provider again and does not infer a provider breach from its own response-loss failure. If the PolicyPool fee was already refunded before a delayed settlement is recovered, coverage still follows the settled provider job while no second provider call or fee capture occurs.
+
+The settlement scan overlaps its timestamp-derived lower bound by one block so a grant timestamp slightly ahead of the chain clock cannot hide a payment in the boundary block. This overlap is safe because recovery still requires the exact authorization payer and nonce plus the exact asset, recipient, amount, and transfer receipt.
+
+Provider and PolicyPool-fee payment identities are derived from canonical signed EIP-3009 fields rather than encoded x402 headers. Equivalent JSON or base64 encodings therefore share one durable provider claim, one direct job, and one execution identity. The direct quote ID remains acceptance provenance but cannot make an already-signed provider authorization payable again.
+
+The direct scheduler is authenticated independently from the buyer route. It can relay only quorum-attested lifecycle actions and uses durable quote indexes rather than accepting caller-selected job or payment evidence. Ambiguous or conflicting states remain visible as holds instead of being guessed into release, cancellation, or payout.
+
+Direct reconciliation no longer depends on manually creating the QStash schedule. QStash remains the one-minute primary, while the checked-in five-minute GitHub workflow discovers whether the direct route is enabled and invokes it through an `always()`-isolated step. Both paths use the operator bearer token; scheduled QStash calls additionally carry its platform signature.
+
+Reconciliation reads a dedicated execution-only queue rather than the newest general quotes. Claim, completion, and reversible release update that queue atomically. Every inspected live execution moves behind records not yet inspected, including when it remains on hold or an attempt fails, so probe traffic and persistent holds cannot starve an older covenant. Expired or terminal index members are removed without being treated as lifecycle evidence.
+
+The canonical provider request and original provider x402 authorization needed for unattended chain recovery are retained only as an AES-256-GCM envelope. Its key is domain-separated from the direct quote secret, its authenticated data binds quote and execution IDs, substitution fails closed, and terminal direct records discard it. The reconciler decrypts it only to call the same policy-, grant-, payer-, request-, and nonce-validated relay recovery path used by an exact buyer retry.
+
+An authorized request becomes uncertain once dispatch begins. A timeout, lost response, missing settlement proof, or failed durable commit keeps the one-shot grant/payment reservation through the bounded recovery window; only a definitely unpaid `402` permits immediate release. If chain recovery proves payment but the provider response was not durable, PolicyPool starts the verified settlement clock and resolves fee custody but holds delivery judgment for manual evidence. It never calls the provider twice and never turns PolicyPool response loss into an automatic provider breach.
+
+A crash before the relay-grant checkpoint cannot strand an unpaid covenant: no provider dispatch was possible, so reconciliation skips relay recovery and follows the quorum-attested cancellation and fee-refund path after authorization expiry. A crash after provider settlement but before the clock write is handled separately. The signed relay start must remain inside enrollment, but the clock transaction may land through fee-authorization expiry plus a ten-minute recovery period. Permissionless unstarted expiry begins only after that cutoff; it releases the bond and refunds any uncaptured fee. Relay issuance rejects a fee authorization that ends before enrollment, and the contract gives clock recovery and expiry no overlapping valid timestamp.
+
+A paid provider response becomes terminal in the direct execution store only after coverage reaches a terminal state. An unsuccessful response or a response outside the enrolled SLA remains in the execution-only reconciliation queue so the scheduled lifecycle can mark breach after the deadline and settle after the challenge period; receiving response bytes never removes an unresolved covenant from reconciliation.
+
+Completed direct results remain retrievable for the execution-retention window after their payment authorizations expire, but only with the exact original provider request and both bound payment signatures. The store rechecks the execution ID derived from both payment headers before returning a terminal result. Expiry tolerance never applies to a new or merely bound execution.
+
+Direct A2MCP policies use a fixed escrow fee derived from the enrolled policy cap. Enrollment reads the fee escrow's immutable amount and rejects a configuration mismatch, a cap above the live listed service price, or a cap that cannot represent the fee exactly in basis points. Checkout therefore covers exactly that cap: omitting the amount selects it, while a different amount is declined before either payment authorization. Partial-cap pricing requires a future variable-fee escrow and is not emulated by overcharging.
+
+Residual: a direct fee may time out and refund after a provider settlement if PolicyPool loses both the immediate transition and scheduled capture long enough. The shared terminalizer now completes that state as a refund rather than retrying an impossible capture. This loses PolicyPool's fee but does not remove buyer coverage or debit the provider twice. A settlement whose response bytes were never durable cannot automatically prove timely completion; it requires manual evidence resolution without slashing the provider for PolicyPool infrastructure loss.
+
 ### Static analysis
 
-Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 33 raw results and no unclassified v0.4 manager/verifier custody bypass. Relevant warning dispositions are:
+Slither `0.11.5` analyzed 47 contracts with 101 detectors. It returned 44 raw results and no unclassified v0.4 manager, verifier, vault, or fee-escrow custody bypass. Relevant warning dispositions are:
 
 - `ProviderBondVault.depositFor` performs an external token call before crediting the bond. The function is protected by its `nonReentrant` guard, requires the exact vault balance delta, and rejects false-return and fee-on-transfer assets. A malicious callback test confirms re-entry fails and the outer deposit rolls back.
+- `PolicyFeeEscrow.fund` performs the buyer-authorized token call before recording the fee. Its `nonReentrant` guard blocks an authorization-token callback, the exact inbound delta is required, and any callback, tax, or token failure rolls back the authorization and state. Capture and refund write terminal state before an exact-delta outbound transfer.
 - `CoverageManager` calls immutable verifier and vault dependencies. Every state-changing entry point is `nonReentrant`, state is written before the vault call, and any dependency revert rolls back the full transaction.
 - `CoverageEvidenceVerifier` loops over at most 16 signatures and rejects duplicate, unordered, unauthorized, malformed, high-`s`, and cross-domain attestations.
 - `CoverageManager` validates exact 3-of-5 primary/recovery topology with bounded constructor-time calls to immutable verifier contracts. It fails deployment closed on any dependency revert, topology drift, or overlap.
@@ -169,7 +203,7 @@ Slither `0.11.5` analyzed 43 contracts with 101 detectors. It returned 33 raw re
 
 ### Adversarial coverage gate
 
-The remediated custody/state-transition suite passes 90 Foundry tests and includes executable hostile regressions for stale settlement, held breach evidence, terminal recovery, late completion, provisional-breach correction, primary and emergency challenge-period ordering, quorum separation, delayed recovery, exact outbound token transfers, primary and recovery-quorum expired-unused fee cancellation, and uncertain issuance reconciliation.
+The remediated custody/state-transition suite passes 118 Foundry tests and includes executable hostile regressions for stale settlement, held breach evidence, terminal recovery, late completion, provisional-breach correction, primary and emergency challenge-period ordering, quorum separation, delayed relay-clock recovery with non-overlapping expiry, exact outbound token transfers, primary and recovery-quorum expired-unused fee cancellation, uncertain issuance reconciliation, and the direct refundable fee escrow.
 
 - `AgentPolicyRegistry`: `100%` (`23/23`);
 - `ProviderBondVault`: `100%` (`30/30`);
@@ -177,6 +211,7 @@ The remediated custody/state-transition suite passes 90 Foundry tests and includ
 - `CoverageManager`: `93.33%` (`42/45`);
 - `OkxA2AClockAdapter`: `100%` (`6/6`);
 - `RelayReceiptVerifier`: `100%` (`8/8`).
+- `PolicyFeeEscrow`: `91.30%` (`21/23`).
 
 The three reported uncovered manager branches are defensive paths: Foundry does not attribute the explicit reentrancy regression to the guard branch, an A2A deadline cannot already be elapsed while its shorter enrollment window remains open under `enrollmentWindowSeconds <= slaSeconds`, and an `Active` or `PayoutDue` covenant cannot enter emergency resolution with an unset deadline.
 

@@ -18,7 +18,7 @@ Public enrollment remains blocked until:
 - no unresolved Critical or High source finding remains;
 - evidence signers are operated across genuinely independent failure domains;
 - a qualified independent human Solidity audit is complete;
-- a new seven-contract stack is deployed flag-off and bytecode-verified;
+- a new eight-contract stack is deployed flag-off and bytecode-verified;
 - fresh house pilots prove release, full payout, and recovery-reduced payout.
 
 ## Scope
@@ -33,6 +33,7 @@ Remediation scope:
 - `src/AgentPolicyRegistry.sol`
 - `src/CoverageEvidenceVerifier.sol`
 - `src/CoverageManager.sol`
+- `src/PolicyFeeEscrow.sol`
 - `src/adapters/OkxA2AClockAdapter.sol`
 - `src/adapters/RelayReceiptVerifier.sol`
 - `script/DeployAgentCoverageV04.s.sol`
@@ -353,6 +354,141 @@ Source remediation:
 
 Regression: `testHeldBreachEvidenceCannotConsumeChallengeWindow` holds otherwise-valid breach signatures beyond 24 hours, submits them, and proves immediate settlement still reverts until the newly committed challenge closes.
 
+### H-17: Newer quote traffic could starve older direct executions
+
+Severity: High / P1 runtime liveness risk
+
+Status: Fixed in source, not deployed
+
+The first direct reconciler read only the newest 100 entries from the all-quotes index and filtered that page for `executing` records. More than 100 newer probe or bound quotes could therefore hide an older execution indefinitely. Even an execution-only page would remain unfair if persistent safety holds always occupied its first 100 entries. An unresolved covenant and provider bond could remain locked despite healthy schedulers.
+
+Source remediation:
+
+- claim atomically adds the execution to a dedicated Redis sorted set, while completion and reversible release atomically remove it;
+- the reconciler reads the oldest execution scan scores, never the general quote index;
+- every inspected execution that remains live, including a safety hold or failed attempt, moves to the back of the queue;
+- missing, expired, and terminal records are removed from the execution index during reads or rotation;
+- probe-only and bound quotes never enter the execution queue.
+
+Regression: `scripts/verify-direct-a2mcp-state.mjs` proves that 150 newer probes cannot hide an older execution and that batch-limited holds rotate behind an omitted execution. `scripts/verify-direct-a2mcp-reconciler.mjs` proves successful, held, and failed inspections rotate correctly while dry runs remain read-only.
+
+### H-18: Settled direct executions could not recover without the buyer replaying
+
+Severity: High / P1 runtime liveness risk
+
+Status: Fixed in source, not deployed
+
+The first scheduled direct reconciler could detect an exact provider settlement on chain but only recorded a manual hold. The durable execution record retained hashes, not the canonical provider request and original x402 authorization needed by `provider-relay.recover`. A crash after provider settlement but before receipt persistence therefore required the buyer to replay the original checkout before PolicyPool could create the signed receipt, start the clock, or capture the fee.
+
+Source remediation:
+
+- before any irreversible transition, the coordinator stores the canonical provider request and original provider authorization in an AES-256-GCM recovery envelope;
+- the encryption key is domain-separated from the direct quote secret, and authenticated additional data binds the envelope to the quote ID and execution ID;
+- the scheduler decrypts that envelope only for the same live execution and calls the normal relay recovery path, which revalidates policy, grant, request hash, payer, authorization, and exact on-chain settlement before atomically persisting a signed receipt;
+- terminal direct records discard the recovery envelope;
+- a recovered payment with no durable provider response autonomously starts coverage and resolves fee custody, but remains an explicit delivery-evidence hold. PolicyPool does not infer provider breach from its own lost response.
+
+Regression: `scripts/verify-direct-a2mcp-state.mjs` proves encrypted round-trip, substitution rejection, and terminal secret removal. `scripts/verify-direct-a2mcp-reconciler.mjs` proves the scheduler recovers the receipt without a buyer retry, starts the clock, captures the fee, and preserves the indeterminate-delivery hold.
+
+### H-19: Uncertain forwarded provider calls could lose their one-shot reservation
+
+Severity: High / P1 duplicate-execution risk
+
+Status: Fixed in source, not deployed
+
+The relay originally released its grant and payment reservations whenever settlement had not yet been observed. If the provider received and processed a non-idempotent request but the relay timed out, lost the response, or could not verify the settlement header, a later retry could forward the same request again before chain indexing exposed the first settlement.
+
+Source remediation:
+
+- reservations now remain durable through the bounded relay-grant recovery window rather than expiring after 15 minutes;
+- once an authorized request is dispatched, timeout, connection loss, response loss, missing proof, malformed proof, and commit uncertainty retain the reservation;
+- only a definitely unpaid `402` response, or a failure before dispatch, permits immediate release;
+- chain recovery consumes the existing reservation and commits the exact covenant-bound receipt without calling the provider again.
+
+Regression: `scripts/verify-provider-relay.mjs` proves both a `200` response missing settlement proof and a post-dispatch timeout reject a second execution, then recover from the exact on-chain authorization nonce with exactly one provider call.
+
+### H-20: Completed direct results became inaccessible after authorization expiry
+
+Severity: High / P1 paid-result availability risk
+
+Status: Fixed in source, not deployed
+
+Direct execution validated the provider and fee authorizations before asking the state store whether the exact execution had already completed. Expiry was permitted for an in-progress recovery but not for a completed replay. A buyer retry after the short authorization window therefore received an expiry error even though the durable result and provider response remain retained for ten days.
+
+Source remediation:
+
+- exact completed replays use the same expiry exception as an in-progress recovery;
+- provider request, provider authorization hash and ID, fee requirements, fee authorization fields, payer, and both signatures remain fully validated before the retained result is returned, and the state store independently requires the original execution ID derived from both payment headers;
+- completed replay never issues, funds, forwards, captures, or releases again.
+
+Regression: `scripts/verify-direct-a2mcp.mjs` advances beyond both authorization expiries, retrieves the exact retained result, proves no provider or fee action repeats, and rejects substituted provider and fee signatures.
+
+### H-21: Raw payment-header identity allowed semantic authorization replay
+
+Severity: High / P1 duplicate-covenant risk
+
+Status: Fixed in source, not deployed
+
+Provider payment claims and direct job IDs originally depended on the hash of the encoded x402 header. JSON key order and equivalent base64 representations can change those bytes without changing the signed EIP-3009 authorization. A re-encoded authorization could therefore receive a new relay payment claim, while a fresh quote also produced a distinct direct job because its ephemeral quote ID was part of the job hash.
+
+Source remediation:
+
+- provider authorization identity is derived from canonical EIP-3009 domain and message fields: chain, network, token domain, asset, payer, recipient, amount, validity window, and nonce;
+- the same canonical digest drives the durable relay payment claim, signed relay receipt, direct binding, fee-escrow provider authorization hash, and execution identity;
+- a direct job is identified by policy, buyer, request, and canonical provider authorization, not by the replaceable quote ID;
+- the quote ID remains bound in the separate acceptance-evidence hash, preserving quote provenance without creating a second payable job.
+
+Regression: `scripts/verify-provider-relay.mjs` reorders the same signed x402 payload, proves both encodings have one canonical identity, and proves the second encoding is rejected as already used under a fresh grant. `scripts/verify-direct-a2mcp.mjs` proves distinct quotes map the same canonical authorization to one direct job.
+
+### M-08: Direct checkout advertised partial caps that its fixed fee could not honor
+
+Severity: Medium / P2 checkout-contract mismatch
+
+Status: Fixed in source, not deployed
+
+The direct quote accepted any requested cap between the global minimum and the live service, policy, and bond maximum. The deployed fee escrow, however, has one immutable fee derived from the provider's enrolled maximum cap. A smaller otherwise-valid request therefore passed the range check and failed only when its proportional fee did not equal the fixed escrow fee.
+
+Source remediation:
+
+- direct A2MCP checkout now has one explicit cap: the provider's enrolled policy cap;
+- an omitted request amount defaults to that cap, while any different amount fails before either payment authorization is requested;
+- the quote also fails if the enrolled cap exceeds the live job price or available provider bond;
+- the fixed escrow fee is checked against the same enrolled cap from which the enrollment premium was derived.
+
+Regression: `scripts/verify-direct-a2mcp.mjs` uses a policy whose partial cap is otherwise within the global range, proves the partial request fails before issue or fee funding, and proves the full enrolled cap produces the expected fixed fee.
+
+### M-09: Settlement recovery could skip the grant-issuance block
+
+Severity: Medium / P2 false non-settlement risk
+
+Status: Fixed in source, not deployed
+
+The bounded provider-settlement scan originally began at the first block whose timestamp was at or after the relay grant's wall-clock `issuedAt`. If that timestamp was rounded or slightly ahead of the chain clock, a valid authorization could settle in the immediately preceding block and remain outside the scan. Reconciliation could then treat a paid provider execution as unpaid and move toward coverage cancellation and fee refund.
+
+Source remediation:
+
+- settlement recovery includes the block immediately before the timestamp-derived lower bound, with a genesis-safe floor;
+- the overlap does not weaken payment identity: the indexed authorization payer and nonce must still match exactly, and receipt verification still requires the exact asset, payer, provider recipient, amount, and authorization event;
+- the existing 20-minute timestamp window remains bounded.
+
+Regression: `scripts/verify-direct-settlement-recovery.mjs` places the exact settlement in a block timestamped one second before the grant time and proves the overlap recovers it, while preserving no-match and oversized-window rejection.
+
+### M-10: Fee authorization recovery depended on header encoding
+
+Severity: Medium / P2 recovery-availability risk
+
+Status: Fixed in source, not deployed
+
+The provider authorization used canonical identity after H-21, but the separate PolicyPool fee authorization still contributed a raw x402-header hash to the direct execution ID. Re-encoding the same signed fee authorization could therefore make an interrupted or completed checkout look like a different execution and block its retained-result recovery.
+
+Source remediation:
+
+- provider and fee payments now use the same canonical EIP-3009 identity function;
+- execution identity is stable across equivalent encodings of either signed authorization;
+- all accepted requirements and signed fields remain fully validated before an existing execution can be recovered.
+
+Regression: `scripts/verify-direct-a2mcp.mjs` completes a checkout, reorders the same signed fee payload into different header bytes, and retrieves the retained result without issuing, funding, calling, capturing, or releasing again.
+
 ### M-01: Vault owner could replace the manager
 
 Severity: Medium
@@ -425,11 +561,21 @@ Source remediation:
 
 - the deployment script validates X Layer chain `196`, USD₮0, the canonical ERC-8004 registry, OKX task escrow, bond floor, SLA ceiling, exact disjoint 3-of-5 quorums, nonzero unique signers, and role separation before the first broadcast;
 - the cold owner is mandatory and cannot silently default to the deployer;
-- deployer, cold owner, relay signer, monitor, primary signers, and recovery signers cannot occupy conflicting ongoing roles;
+- deployer, cold owner, relay signer, monitor, immutable fee treasury, primary signers, and recovery signers cannot occupy conflicting ongoing roles;
 - the wire script independently reads every immutable link and parameter from chain before accepting ownership or setting the monitor;
 - both scripts compile under the normal and coverage compiler profiles.
 
 Residual: byte-level source verification and a read-only post-deployment state audit remain mandatory. Script success alone is not proof that an explorer or RPC endpoint serves the reviewed bytecode.
+
+### M-07: Direct reconciliation depended on manual scheduler setup
+
+Severity: Medium operational liveness risk
+
+Status: Fixed in source, not deployed
+
+The direct A2MCP reconciler originally had a QStash setup script but no checked-in scheduler fallback. Enabling the direct route without manually creating that schedule could leave crash-interrupted executions unreconciled, delay fee refunds, and keep provider bond locked.
+
+The existing five-minute GitHub reconciliation workflow now discovers the public direct route and invokes `/api/reconcile-direct-a2mcp` whenever it reports `enabled: true`. The step uses `always()` so failure of the legacy reconciler cannot suppress direct recovery. QStash remains the one-minute primary with retries; GitHub is the independently configured fallback. The release gate requires the discovery check, direct endpoint, and failure isolation, so scheduler coverage cannot silently return to a manual-only state.
 
 ### L-01: Relay signatures lacked deployment domain separation
 
@@ -485,6 +631,18 @@ Status: Documented
 - The configured USD₮0 asset is trusted; fee-on-transfer behavior is rejected.
 - Immutable signers and one-time manager initialization require planned migration rather than in-place recovery.
 
+## Direct A2MCP Refundable-Fee Extension
+
+The post-review direct A2MCP extension is source-only and has not been deployed. It adds `PolicyFeeEscrow` as the eighth contract and a direct HTTP+x402 checkout that is deliberately separate from OKX Task Marketplace A2A tasks.
+
+The escrow has no owner, upgrade, sweep, or treasury-change path. It accepts one fixed buyer-signed EIP-3009 fee authorization bound to the policy, synthetic direct job, provider authorization hash, and authorization windows. It captures only after the manager reports a started covenant and the primary evidence quorum signs the exact provider relay receipt and settlement transaction. After the provider authorization plus safety delay expires, only the fixed buyer can reclaim an uncaptured fee. Exact inbound and outbound balance deltas reject taxed or short-transfer behavior.
+
+Runtime ordering is covenant issue and provider-bond lock, refundable fee funding, one-time provider settlement, provider clock start, then fee capture. Provider challenge, request, authorization, payer, endpoint, service price, and policy fingerprint remain immutable across the three-step checkout. Provider response bytes and the signed receipt commit atomically. A lost HTTP reply recovers from durable state; a proven on-chain settlement without durable response never retries the paid provider and never automatically treats the provider as breached.
+
+The direct state store retains executing records for ten days, indexes them for authenticated minute reconciliation, and permits only the same quote and two original signatures to resume. Non-settlement after authorization expiry follows quorum-attested `cancelUnpaid` plus buyer fee refund. Settlement recovery scans only the bounded signed authorization window and requires the indexed `AuthorizationUsed` nonce and exact USD₮0 transfer in one transaction.
+
+The extension raises the Foundry suite from 103 to 116 passing tests through thirteen `PolicyFeeEscrow` tests. The escrow reaches `98.21%` line and `91.30%` branch coverage; its remaining branches are defensive terminal-state or timestamp-overflow paths. JavaScript gates additionally exercise request and challenge drift, wrong payer, authorization replay, crash recovery, no duplicate provider call, fee capture, fee refund, settled-response safety hold, and challenged breach settlement. These are internal source checks and do not authorize a deployment or third-party-funded bond.
+
 ## Automated Analysis
 
 Tooling:
@@ -496,9 +654,10 @@ Tooling:
 
 Relevant static-analysis dispositions:
 
-- Slither analyzed 43 contracts with 101 detectors and returned 33 raw results. No manager/verifier custody bypass remained after the checks-effects-interactions cleanup.
+- Slither analyzed 47 contracts with 101 detectors and returned 44 raw results. No manager, verifier, vault, or fee-escrow custody bypass remained after classification.
 - `ProviderBondVault.depositFor` is `nonReentrant`, verifies exact balance delta, and rejects false-return and fee-on-transfer assets. A malicious callback test confirms rollback.
 - Vault withdrawal and slash also verify the exact vault debit and recipient credit. Slither's balance-read/reentrancy warning is covered by the vault guard, exact post-call deltas, and rollback regressions.
+- `PolicyFeeEscrow.fund` and `_safeTransfer` use low-level optional-return token calls. Every state-changing entry point is `nonReentrant`, a malicious authorization-token callback is rejected, terminal state is written before outbound transfer, exact inbound/outbound balance deltas are required, and callback or token failure rolls the entire transaction back.
 - Manager calls cross immutable verifier/vault dependencies. Every state-changing manager entry point is `nonReentrant`, manager state is written before the vault call, and dependency failure reverts the complete transaction.
 - Signature loops are bounded by `MAX_SIGNERS = 16`; ordering also prevents duplicate signer credit.
 - The manager's constructor-time signer-topology loop makes bounded calls to the two immutable verifiers. The manager requires exactly five signers and threshold three for each verifier and fails deployment closed on a dependency revert, topology drift, or signer overlap.
@@ -511,7 +670,8 @@ No production credential is intentionally tracked. The local dirty `lib/v4-core`
 
 ## Verification Results
 
-- clean `forge test --summary`: 90 tests passed
+- clean `forge test --summary`: 118 tests passed
+- `PolicyFeeEscrow` branch coverage: 91.30% (`21/23`)
 - `AgentPolicyRegistry` branch coverage: 100% (`23/23`)
 - `ProviderBondVault` branch coverage: 100% (`30/30`)
 - `CoverageEvidenceVerifier` branch coverage: 100% (`13/13`)
@@ -525,15 +685,15 @@ No production credential is intentionally tracked. The local dirty `lib/v4-core`
 
 The three reported uncovered manager branches are defensive paths: Foundry does not attribute the explicit reentrancy regression to the guard branch, an acceptance-clock deadline cannot already be elapsed while its shorter enrollment window remains open under `enrollmentWindowSeconds <= slaSeconds`, and an `Active` or `PayoutDue` covenant cannot enter emergency resolution with an unset deadline.
 
-The complete JavaScript/runtime/release gate and final Slither rerun passed on the candidate worktree. They must be rerun after any reviewer-requested source change. These results do not turn this document into an independent audit.
+The complete JavaScript/runtime/release gate passed and the final Slither findings were classified on the candidate worktree. They must be rerun after any reviewer-requested source change. These results do not turn this document into an independent audit.
 
 ## Deployment Impact
 
 Redeployment is required. The remediated manager constructor adds the evidence verifier, removes the operator model, changes every lifecycle ABI, and hardens relay domains. The old vault is permanently bound to its old manager, so the stack cannot be partially upgraded.
 
-The next deployment must create a seven-contract stack flag-off: vault, registry, primary evidence verifier, disjoint recovery evidence verifier, manager, A2A adapter, and relay verifier. It must then verify bytecode, both 3-of-5 signer sets, zero signer overlap, and immutable wiring before any pilot.
+The next deployment must create an eight-contract stack flag-off: vault, registry, primary evidence verifier, disjoint recovery evidence verifier, manager, PolicyFeeEscrow, A2A adapter, and relay verifier. It must then verify bytecode, both 3-of-5 signer sets, zero signer overlap, the fee treasury's separation from every custody and evidence role, fee amount, and immutable wiring before any pilot.
 
-No production endpoint, OKX listing, feature flag, scheduler, existing contract, or fund balance is changed by this source remediation.
+No production endpoint, OKX listing, feature flag, existing contract, or fund balance is changed by this source remediation. The checked-in GitHub workflow gains a dormant direct-reconciliation fallback, but the direct feature remains disabled and no QStash schedule is created.
 
 ## Next Review Questions
 
@@ -544,7 +704,7 @@ Claude and the qualified independent auditor should attempt to disprove:
 3. that underlying evidence is recomputed rather than trusted from the relayer;
 4. that settlement recovery values and the fixed buyer cannot be substituted;
 5. that reentrancy or malicious immutable dependencies cannot create a partial lifecycle state;
-6. that the seven-contract deployment and disjoint signer topology preserve the reviewed assumptions;
+6. that the eight-contract deployment, fee escrow, and disjoint signer topology preserve the reviewed assumptions;
 7. that a fresh recovery-reduced pilot pays only net loss on X Layer.
 8. that stale or held breach and recovery evidence, late completion, release-versus-breach ordering, and primary-quorum loss cannot recreate the hostile findings above;
 9. that outbound token behavior and deployment configuration cannot silently weaken the reviewed custody or signer assumptions.

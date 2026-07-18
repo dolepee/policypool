@@ -24,6 +24,8 @@ const configuration = {
   bondVault: "0x2000000000000000000000000000000000000002",
   a2aAdapter: "0x3000000000000000000000000000000000000003",
   relayAdapter: "0x4000000000000000000000000000000000000004",
+  feeEscrow: "0x5000000000000000000000000000000000000005",
+  directFeeAtomic: 100_000,
   maximumSlaSeconds: 604800,
 };
 const snapshot = {
@@ -47,6 +49,7 @@ const reads = {
   nonces: 3n,
   minimumBondAtomic: 500_000n,
   availableBond: 2_000_000n,
+  feeAmountAtomic: 100_000n,
 };
 const onchainPolicyId = `0x${"11".repeat(32)}`;
 const serviceKey = `0x${"22".repeat(32)}`;
@@ -85,7 +88,7 @@ const input = {
   slaSeconds: 300,
   enrollmentWindowSeconds: 60,
   maxCapUSDT: "0.5",
-  premiumBps: 0,
+  premiumBps: 2000,
   payoutBasis: "provider_bonded_sla_credit",
   clockMode: "policypool_relay",
   expiresAt: Math.floor(nowMs / 1000) + 30 * 24 * 60 * 60,
@@ -98,7 +101,7 @@ assert.equal(prepared.nonce, "3");
 assert.equal(prepared.terms.maxCapAtomic, "500000");
 assert.equal(prepared.terms.payoutBasis, 1);
 assert.equal(prepared.terms.clockMode, 1);
-assert.equal(prepared.terms.premiumBps, 0);
+assert.equal(prepared.terms.premiumBps, 2000);
 assert.equal(prepared.bond.availableAtomic, "2000000");
 
 const signature = await provider.signTypedData({
@@ -252,8 +255,40 @@ await assert.rejects(
 );
 await assert.rejects(
   () => service.prepare({ ...input, premiumBps: 1 }),
-  (error) => error instanceof ProviderEnrollmentError && error.code === "provider_premium_not_supported_v04",
+  (error) => error instanceof ProviderEnrollmentError && error.code === "direct_fee_premium_mismatch",
 );
+const maximumDirectWindow = await service.prepare({
+  ...input,
+  slaSeconds: 570,
+  enrollmentWindowSeconds: 570,
+});
+assert.equal(maximumDirectWindow.terms.enrollmentWindowSeconds, 570);
+await assert.rejects(
+  () => service.prepare({
+    ...input,
+    slaSeconds: 571,
+    enrollmentWindowSeconds: 571,
+  }),
+  (error) => error instanceof ProviderEnrollmentError
+    && error.code === "direct_enrollment_window_exceeds_authorization_limit",
+);
+const derivedPremium = await service.prepare({ ...input, premiumBps: undefined });
+assert.equal(derivedPremium.terms.premiumBps, 2000);
+await assert.rejects(
+  () => service.prepare({ ...input, maxCapUSDT: "0.6", premiumBps: undefined }),
+  (error) => error instanceof ProviderEnrollmentError
+    && error.code === "direct_policy_cap_exceeds_service_price",
+);
+await assert.rejects(
+  () => service.prepare({ ...input, maxCapUSDT: "0.3", premiumBps: undefined }),
+  (error) => error instanceof ProviderEnrollmentError && error.code === "direct_fee_not_expressible_for_cap",
+);
+reads.feeAmountAtomic = 99_999n;
+await assert.rejects(
+  () => service.prepare(input),
+  (error) => error instanceof ProviderEnrollmentError && error.code === "direct_fee_escrow_mismatch",
+);
+reads.feeAmountAtomic = 100_000n;
 reads.availableBond = 100_000n;
 await assert.rejects(
   () => service.prepare(input),
@@ -310,4 +345,4 @@ const noDoubleRecovery = computeNetLossPayout({
 assert.equal(noDoubleRecovery.payoutAtomic, 0n);
 assert.equal(noDoubleRecovery.fullyRecovered, true);
 
-console.log("PolicyPool provider enrollment passed: ownership, bond, signed terms, deduplicated demand, exposure, and net-loss gates.");
+console.log("PolicyPool provider enrollment passed: ownership, live direct price/fee, bond, signed terms, deduplicated demand, exposure, and net-loss gates.");

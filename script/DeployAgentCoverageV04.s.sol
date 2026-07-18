@@ -6,6 +6,7 @@ import {Script, console2} from "forge-std/Script.sol";
 import {AgentPolicyRegistry} from "../src/AgentPolicyRegistry.sol";
 import {CoverageEvidenceVerifier} from "../src/CoverageEvidenceVerifier.sol";
 import {CoverageManager} from "../src/CoverageManager.sol";
+import {PolicyFeeEscrow} from "../src/PolicyFeeEscrow.sol";
 import {ProviderBondVault} from "../src/ProviderBondVault.sol";
 import {OkxA2AClockAdapter} from "../src/adapters/OkxA2AClockAdapter.sol";
 import {RelayReceiptVerifier} from "../src/adapters/RelayReceiptVerifier.sol";
@@ -24,19 +25,23 @@ contract DeployAgentCoverageV04 is Script {
     uint32 internal constant V04_MAXIMUM_SLA_SECONDS = 7 days;
     uint256 internal constant V04_EVIDENCE_SIGNER_COUNT = 5;
     uint8 internal constant V04_EVIDENCE_THRESHOLD = 3;
+    uint128 internal constant V04_DIRECT_FEE_ATOMIC = 100_000;
 
     struct DeploymentConfig {
         address owner;
+        address monitor;
         address identityRegistry;
         address paymentAsset;
         address taskEscrow;
         address relaySigner;
+        address feeTreasury;
         address[] evidenceSigners;
         address[] recoveryEvidenceSigners;
         uint256 minimumBondAtomic;
         uint32 maximumSlaSeconds;
         uint8 evidenceThreshold;
         uint8 recoveryEvidenceThreshold;
+        uint128 directFeeAtomic;
     }
 
     function run() external {
@@ -58,6 +63,9 @@ contract DeployAgentCoverageV04 is Script {
         CoverageManager manager = new CoverageManager(
             address(registry), address(vault), address(evidenceVerifier), address(recoveryEvidenceVerifier)
         );
+        PolicyFeeEscrow feeEscrow = new PolicyFeeEscrow(
+            config.paymentAsset, config.feeTreasury, address(evidenceVerifier), address(manager), config.directFeeAtomic
+        );
         OkxA2AClockAdapter a2aAdapter = new OkxA2AClockAdapter(config.taskEscrow);
         RelayReceiptVerifier relayAdapter = new RelayReceiptVerifier(config.owner, config.relaySigner);
         vault.initializeManager(address(manager));
@@ -69,34 +77,40 @@ contract DeployAgentCoverageV04 is Script {
         console2.log("POLICYPOOL_EVIDENCE_VERIFIER_ADDRESS", address(evidenceVerifier));
         console2.log("POLICYPOOL_RECOVERY_EVIDENCE_VERIFIER_ADDRESS", address(recoveryEvidenceVerifier));
         console2.log("POLICYPOOL_COVERAGE_MANAGER_ADDRESS", address(manager));
+        console2.log("POLICYPOOL_FEE_ESCROW_ADDRESS", address(feeEscrow));
         console2.log("POLICYPOOL_OKX_A2A_ADAPTER_ADDRESS", address(a2aAdapter));
         console2.log("POLICYPOOL_A2MCP_RELAY_ADAPTER_ADDRESS", address(relayAdapter));
         console2.log("Owner", config.owner);
         if (config.owner != deployer) console2.log("Bond vault ownership pending acceptance by", config.owner);
         console2.log("Relay signer", config.relaySigner);
+        console2.log("Fee treasury", config.feeTreasury);
         console2.log("Evidence signer threshold", config.evidenceThreshold);
         console2.log("Recovery evidence signer threshold", config.recoveryEvidenceThreshold);
     }
 
     function _configuration() private view returns (DeploymentConfig memory config) {
         config.owner = vm.envAddress("POLICYPOOL_V04_OWNER");
+        config.monitor = vm.envAddress("POLICYPOOL_V04_MONITOR");
         config.identityRegistry = vm.envAddress("OKX_AGENT_IDENTITY_REGISTRY");
         config.paymentAsset = vm.envOr("POLICYPOOL_PAYMENT_ASSET", XLAYER_USDT0);
         config.taskEscrow = vm.envOr("POLICYPOOL_OKX_TASK_ESCROW", OKX_TASK_ESCROW);
         config.relaySigner = vm.envAddress("POLICYPOOL_RELAY_SIGNER_ADDRESS");
+        config.feeTreasury = vm.envAddress("POLICYPOOL_FEE_TREASURY");
         config.evidenceSigners = vm.envAddress("POLICYPOOL_EVIDENCE_SIGNERS", ",");
         uint256 evidenceThreshold = vm.envUint("POLICYPOOL_EVIDENCE_THRESHOLD");
         config.recoveryEvidenceSigners = vm.envAddress("POLICYPOOL_RECOVERY_EVIDENCE_SIGNERS", ",");
         uint256 recoveryEvidenceThreshold = vm.envUint("POLICYPOOL_RECOVERY_EVIDENCE_THRESHOLD");
         uint256 maximumSlaSeconds = vm.envOr("POLICYPOOL_V04_MAX_SLA_SECONDS", uint256(7 days));
+        uint256 directFeeAtomic = vm.envOr("POLICYPOOL_DIRECT_FEE_ATOMIC", uint256(V04_DIRECT_FEE_ATOMIC));
         if (
             evidenceThreshold > type(uint8).max || recoveryEvidenceThreshold > type(uint8).max
-                || maximumSlaSeconds > type(uint32).max
+                || maximumSlaSeconds > type(uint32).max || directFeeAtomic > type(uint128).max
         ) revert InvalidDeploymentConfiguration();
         config.evidenceThreshold = uint8(evidenceThreshold);
         config.recoveryEvidenceThreshold = uint8(recoveryEvidenceThreshold);
         config.minimumBondAtomic = vm.envOr("POLICYPOOL_MINIMUM_PROVIDER_BOND_ATOMIC", V04_MINIMUM_BOND_ATOMIC);
         config.maximumSlaSeconds = uint32(maximumSlaSeconds);
+        config.directFeeAtomic = uint128(directFeeAtomic);
     }
 
     function _validateConfiguration(DeploymentConfig memory config, address deployer) private view {
@@ -109,15 +123,22 @@ contract DeployAgentCoverageV04 is Script {
                 || config.recoveryEvidenceSigners.length != V04_EVIDENCE_SIGNER_COUNT
                 || config.evidenceThreshold != V04_EVIDENCE_THRESHOLD
                 || config.recoveryEvidenceThreshold != V04_EVIDENCE_THRESHOLD
+                || config.directFeeAtomic != V04_DIRECT_FEE_ATOMIC
         ) revert InvalidDeploymentConfiguration();
         if (
-            config.owner == address(0) || config.relaySigner == address(0) || deployer == address(0)
-                || config.owner == config.relaySigner || config.owner == deployer || config.relaySigner == deployer
+            config.owner == address(0) || config.monitor == address(0) || config.relaySigner == address(0)
+                || config.feeTreasury == address(0) || deployer == address(0) || config.owner == config.monitor
+                || config.owner == config.relaySigner || config.owner == config.feeTreasury || config.owner == deployer
+                || config.monitor == config.relaySigner || config.monitor == config.feeTreasury
+                || config.monitor == deployer || config.relaySigner == config.feeTreasury
+                || config.relaySigner == deployer || config.feeTreasury == deployer
         ) revert RoleCollision();
         _validateEvidenceQuorum(config.evidenceSigners);
         _validateEvidenceQuorum(config.recoveryEvidenceSigners);
         _requireRoleOutsideQuorums(config.owner, config.evidenceSigners, config.recoveryEvidenceSigners);
+        _requireRoleOutsideQuorums(config.monitor, config.evidenceSigners, config.recoveryEvidenceSigners);
         _requireRoleOutsideQuorums(config.relaySigner, config.evidenceSigners, config.recoveryEvidenceSigners);
+        _requireRoleOutsideQuorums(config.feeTreasury, config.evidenceSigners, config.recoveryEvidenceSigners);
         _requireRoleOutsideQuorums(deployer, config.evidenceSigners, config.recoveryEvidenceSigners);
     }
 

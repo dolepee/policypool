@@ -33,6 +33,7 @@ async function seed({
   payoutDueAt = null,
   payoutBasis = 0,
   jobIdOverride = null,
+  feeAuthorizationValidBefore = null,
 }) {
   const jobId = jobIdOverride || `0x${id.repeat(64).slice(0, 64)}`;
   const covenantId = `0x${(Number.parseInt(id, 16) + 8).toString(16).repeat(64).slice(0, 64)}`;
@@ -66,12 +67,16 @@ async function seed({
     state: stateNumber(state),
     jobId,
     deadline: deadline ? Math.floor(Date.parse(deadline) / 1000) : 0,
+    enrollmentExpiresAt: Math.floor(Date.parse(enrollmentClosedAt) / 1_000),
     payoutDueAt: payoutDueAt ? Math.floor(Date.parse(payoutDueAt) / 1000) : 0,
     payoutBasis,
     buyerPaidAtomic: "500000",
     coverageCapAtomic: "500000",
     payoutAtomic: "0",
     feeAuthorizationHash: `0x${id.repeat(64).slice(0, 64)}`,
+    feeAuthorizationValidBefore: feeAuthorizationValidBefore
+      ? Math.floor(Date.parse(feeAuthorizationValidBefore) / 1_000)
+      : Math.floor((Date.parse(enrollmentClosedAt) + 5 * 60 * 1_000) / 1_000),
   });
   chainStates.set(jobId, 1);
   return { ...record, state, jobId, covenantId };
@@ -82,7 +87,7 @@ const relay = await seed({
   state: "pending_start",
   clockMode: "policypool_relay",
   deadline: null,
-  enrollmentClosedAt: "2026-07-16T13:02:00.000Z",
+  enrollmentClosedAt: "2026-07-16T12:59:30.000Z",
 });
 await store.saveRelayReceipt({
   receiptId: "relay-one",
@@ -147,6 +152,7 @@ const expired = await seed({
   clockMode: "policypool_relay",
   deadline: null,
   enrollmentClosedAt: "2026-07-16T12:58:00.000Z",
+  feeAuthorizationValidBefore: "2026-07-16T12:49:00.000Z",
 });
 
 const compensated = await seed({
@@ -353,8 +359,11 @@ const issuer = {
   },
   async startClock(covenantId, startedAt, evidenceHash) {
     assert.match(evidenceHash, /^0x[a-f0-9]{64}$/);
+    const covenant = covenantStates.get(covenantId);
+    assert.ok(Math.floor(Date.parse(startedAt) / 1_000) <= covenant.enrollmentExpiresAt);
+    assert.ok(Math.floor(now / 1_000) <= covenant.feeAuthorizationValidBefore + 10 * 60);
     writes.push({ action: "start", covenantId, startedAt });
-    covenantStates.get(covenantId).state = 2;
+    covenant.state = 2;
   },
   async release(covenantId) {
     writes.push({ action: "release", covenantId });
@@ -454,7 +463,7 @@ assert.ok(result.holds.some((hold) => (
   hold.receiptId === challengeActive.receiptId && hold.reason === "payout_due_challenge_period_active"
 )));
 assert.ok(result.holds.some((hold) => (
-  hold.receiptId === replacementRelay.receiptId && hold.reason === "relay_clock_not_started"
+  hold.receiptId === replacementRelay.receiptId && hold.reason === "relay_clock_recovery_pending"
 )));
 assert.ok(result.holds.some((hold) => (
   hold.receiptId === lateA2aNetLoss.receiptId && hold.reason === "marketplace_recovery_not_terminal"

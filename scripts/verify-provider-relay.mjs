@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { authorizationTypes } from "@x402/evm";
 import {
   decodePaymentSignatureHeader,
+  encodePaymentRequiredHeader,
   encodePaymentResponseHeader,
   encodePaymentSignatureHeader,
 } from "@x402/core/http";
@@ -55,13 +56,16 @@ const grant = {
   serviceId: "33461",
   targetJobId,
   buyer,
+  issuedAt: "2026-07-16T12:00:00.000Z",
   expiresAt: "2026-07-22T12:00:00.000Z",
 };
 const secondGrant = { ...grant, grantId: "pprg-test-second" };
+let boundGrant;
 const grantService = {
   resolve(token) {
     if (token === "signed-relay-grant") return grant;
     if (token === "second-relay-grant") return secondGrant;
+    if (token === "bound-relay-grant") return boundGrant;
     assert.fail(`unexpected relay grant token: ${token}`);
   },
 };
@@ -71,6 +75,7 @@ async function paymentHeader(tag, {
   signingAccount = buyerSigner,
   from = buyer,
   authorizationAtMs = Date.now(),
+  maxTimeoutSeconds = 600,
 } = {}) {
   const authorization = {
     from: getAddress(from),
@@ -104,13 +109,65 @@ async function paymentHeader(tag, {
       asset: PAYMENT.asset,
       amount,
       payTo,
-      maxTimeoutSeconds: 600,
+      maxTimeoutSeconds,
       extra: { name: PAYMENT.name, version: PAYMENT.version },
     },
     payload: {
       signature,
       authorization,
     },
+  });
+}
+
+function reencodePaymentHeader(raw) {
+  const decoded = decodePaymentSignatureHeader(raw);
+  const { accepted, payload } = decoded;
+  const authorization = payload.authorization;
+  return encodePaymentSignatureHeader({
+    payload: {
+      authorization: {
+        nonce: authorization.nonce,
+        validBefore: authorization.validBefore,
+        validAfter: authorization.validAfter,
+        value: authorization.value,
+        to: authorization.to,
+        from: authorization.from,
+      },
+      signature: payload.signature,
+    },
+    accepted: {
+      extra: {
+        version: accepted.extra.version,
+        name: accepted.extra.name,
+      },
+      maxTimeoutSeconds: accepted.maxTimeoutSeconds,
+      payTo: accepted.payTo,
+      amount: accepted.amount,
+      asset: accepted.asset,
+      network: accepted.network,
+      scheme: accepted.scheme,
+    },
+    x402Version: decoded.x402Version,
+  });
+}
+
+function paymentRequiredHeader(accepts = null) {
+  return encodePaymentRequiredHeader({
+    x402Version: 2,
+    resource: {
+      url: policy.serviceEndpoint,
+      description: "Warden endpoint audit",
+      mimeType: "application/json",
+    },
+    accepts: accepts || [{
+      scheme: "exact",
+      network: XLAYER.network,
+      asset: PAYMENT.asset,
+      amount: policy.servicePriceAtomic,
+      payTo: provider,
+      maxTimeoutSeconds: 600,
+      extra: { name: PAYMENT.name, version: PAYMENT.version },
+    }],
   });
 }
 
@@ -134,7 +191,7 @@ const fetchImpl = async (url, options, connection) => {
   assert.deepEqual(connection.records, [{ address: "93.184.216.34", family: 4 }]);
   elapsed += 250;
   const headers = responseStatus === 402
-    ? { "content-type": "application/json", "payment-required": "challenge" }
+    ? { "content-type": "application/json", "payment-required": paymentRequiredHeader() }
     : { "content-type": "application/json", "payment-response": settlementHeader() };
   return new Response(JSON.stringify({ status: responseStatus === 402 ? "payment_required" : "audit_complete" }), {
     status: responseStatus,
@@ -187,11 +244,69 @@ const relay = createProviderRelay({
   now: () => relayNowBase + elapsed,
 });
 
+const providerRequest = { target_url: "https://policypool.vercel.app/api/covered-job-receipt" };
+const probe = await relay.probe({
+  agentId: "3808",
+  serviceId: "33461",
+  providerRequest,
+});
+assert.equal(probe.accepted.amount, policy.servicePriceAtomic);
+assert.equal(probe.accepted.payTo, getAddress(provider));
+assert.match(probe.requestHash, /^sha256:[a-f0-9]{64}$/);
+assert.match(probe.providerRequirementsHash, /^sha256:[a-f0-9]{64}$/);
+boundGrant = {
+  ...grant,
+  grantId: "pprg-bound",
+  providerRequestHash: probe.requestHash,
+  providerRequirementsHash: probe.providerRequirementsHash,
+};
+await assert.rejects(
+  () => relay.execute({
+    agentId: "3808",
+    serviceId: "33461",
+    targetJobId,
+    providerRequest,
+    relayGrant: "bound-relay-grant",
+  }, {}),
+  (error) => error instanceof ProviderRelayError && error.code === "provider_payment_signature_required",
+  "a direct bound grant must not degrade into an unpaid provider replay",
+);
+await assert.rejects(
+  () => relay.execute({
+    agentId: "3808",
+    serviceId: "33461",
+    targetJobId,
+    providerRequest: { ...providerRequest, extra: "substituted" },
+    relayGrant: "bound-relay-grant",
+  }, {}),
+  (error) => error instanceof ProviderRelayError && error.code === "provider_request_does_not_match_grant",
+  "the paid relay body must exactly match the probed request",
+);
+const changedRequirementsPayment = await paymentHeader("changed-requirements", { maxTimeoutSeconds: 599 });
+await assert.rejects(
+  () => relay.execute({
+    agentId: "3808",
+    serviceId: "33461",
+    targetJobId,
+    providerRequest,
+    relayGrant: "bound-relay-grant",
+  }, { "payment-signature": changedRequirementsPayment }),
+  (error) => error instanceof ProviderRelayError && error.code === "provider_payment_challenge_changed",
+  "the signed provider requirements must exactly match the probe",
+);
+assert.throws(
+  () => __test.validateProviderChallenge(paymentRequiredHeader([
+    probe.accepted,
+    probe.accepted,
+  ]), policy, policy.serviceEndpoint),
+  (error) => error instanceof ProviderRelayError && error.code === "provider_payment_challenge_ambiguous",
+);
+
 const challenge = await relay.execute({
   agentId: "3808",
   serviceId: "33461",
   targetJobId,
-  providerRequest: { target_url: "https://policypool.vercel.app/api/covered-job-receipt" },
+  providerRequest,
   relayGrant: "signed-relay-grant",
 }, {});
 assert.equal(challenge.upstream.status, 402);
@@ -259,7 +374,23 @@ await assert.rejects(
 
 responseStatus = 200;
 const validPayment = await paymentHeader("valid-provider-payment");
+const reencodedValidPayment = reencodePaymentHeader(validPayment);
+assert.notEqual(reencodedValidPayment, validPayment);
 const validPayload = decodePaymentSignatureHeader(validPayment);
+const validIdentity = await __test.providerPaymentAuthorization(
+  validPayment,
+  policy,
+  chain,
+  relayNowBase + elapsed,
+);
+const reencodedIdentity = await __test.providerPaymentAuthorization(
+  reencodedValidPayment,
+  policy,
+  chain,
+  relayNowBase + elapsed,
+);
+assert.equal(reencodedIdentity.id, validIdentity.id);
+assert.equal(reencodedIdentity.hash, validIdentity.hash);
 const transferEvent = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
 const authorizationUsedEvent = parseAbiItem(
   "event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)",
@@ -347,6 +478,11 @@ assert.equal(
   false,
 );
 assert.equal(await store.getRelayReceipt(delivered.receipt.receiptId) !== null, true);
+assert.deepEqual(
+  await store.getRelayResponse(delivered.receipt.receiptId),
+  delivered.upstream,
+  "the paid provider response must commit atomically with its relay receipt",
+);
 assert.equal(
   (await store.getLatestRelayReceiptForJob(targetJobId)).receiptId,
   delivered.receipt.receiptId,
@@ -357,6 +493,59 @@ assert.equal(
   delivered.receipt.receiptId,
   "relay receipt must be indexed by its exact covenant for reconciliation",
 );
+const onchainRecoveryStore = new MemoryProviderPolicyStore();
+let settlementSearches = 0;
+const onchainRecoveryRelay = createProviderRelay({
+  policyResolver: resolver,
+  store: onchainRecoveryStore,
+  fetchImpl: async () => assert.fail("on-chain recovery must not call the provider"),
+  resolveHost,
+  chain: {
+    ...chain,
+    async findProviderSettlement(input) {
+      settlementSearches += 1;
+      return {
+        txHash: paymentTransaction,
+        blockNumber: "123",
+        asset: getAddress(input.asset),
+        from: getAddress(input.payer),
+        to: getAddress(input.payTo),
+        amountAtomic: String(input.amountAtomic),
+        authorizationNonce: input.authorizationNonce,
+        settledAt: "2026-07-16T12:00:02.000Z",
+      };
+    },
+  },
+  signer,
+  receiptVerifierAddress: relayVerifier,
+  grantService,
+  now: () => relayNowBase + elapsed,
+});
+const recoveredPayment = await paymentHeader("recover-settled-provider", {
+  authorizationAtMs: relayNowBase + elapsed,
+});
+const recoveredFromChain = await onchainRecoveryRelay.recover({
+  agentId: "3808",
+  serviceId: "33461",
+  targetJobId,
+  providerRequest,
+  relayGrant: "signed-relay-grant",
+}, { "payment-signature": recoveredPayment });
+assert.equal(recoveredFromChain.recovered, true);
+assert.equal(recoveredFromChain.upstream, null);
+assert.equal(recoveredFromChain.receipt.clock.delivered, false);
+assert.equal(recoveredFromChain.receipt.settlement.transaction, paymentTransaction);
+assert.equal(await verifyProviderRelayReceipt(recoveredFromChain.receipt, signer.address, relayVerifier), true);
+assert.equal(settlementSearches, 1);
+const recoveredFromStore = await onchainRecoveryRelay.recover({
+  agentId: "3808",
+  serviceId: "33461",
+  targetJobId,
+  providerRequest,
+  relayGrant: "signed-relay-grant",
+}, { "payment-signature": recoveredPayment });
+assert.equal(recoveredFromStore.receipt.receiptId, recoveredFromChain.receipt.receiptId);
+assert.equal(settlementSearches, 1, "durable recovery must not scan the chain twice");
 responseStatus = 402;
 const unpaidAfterPaid = await relay.execute({
   agentId: "3808",
@@ -402,30 +591,33 @@ await assert.rejects(
     targetJobId,
     providerRequest: { target_url: "https://policypool.vercel.app/api/covered-job-receipt" },
     relayGrant: "second-relay-grant",
-  }, { "payment-signature": validPayment }),
+  }, { "payment-signature": reencodedValidPayment }),
   (error) => error instanceof ProviderRelayError
     && error.code === "provider_payment_authorization_already_used",
-  "a verified payment authorization must not be reusable under a fresh relay grant",
+  "a re-encoded payment authorization must not be reusable under a fresh relay grant",
 );
 
-let includeSettlementProof = false;
 const retryStore = new MemoryProviderPolicyStore();
+let retryProviderCalls = 0;
+let retrySettlement = null;
 const retryRelay = createProviderRelay({
   policyResolver: resolver,
   store: retryStore,
   fetchImpl: async (url, options, connection) => {
+    retryProviderCalls += 1;
     assert.equal(url, policy.serviceEndpoint);
     assert.equal(options.method, "POST");
     assert.deepEqual(connection.records, [{ address: "93.184.216.34", family: 4 }]);
     return new Response(JSON.stringify({ status: "audit_complete" }), {
       status: 200,
-      headers: includeSettlementProof
-        ? { "content-type": "application/json", "payment-response": settlementHeader() }
-        : { "content-type": "application/json" },
+      headers: { "content-type": "application/json" },
     });
   },
   resolveHost,
-  chain,
+  chain: {
+    ...chain,
+    async findProviderSettlement() { return retrySettlement; },
+  },
   signer,
   receiptVerifierAddress: relayVerifier,
   grantService,
@@ -444,10 +636,78 @@ await assert.rejects(
   (error) => error instanceof ProviderRelayError && error.code === "provider_payment_response_missing",
   "an upstream 200 without settlement evidence must not start a clock or consume the grant",
 );
-includeSettlementProof = true;
-const retried = await retryRelay.execute(retryInput, { "payment-signature": retryPayment });
-assert.equal(retried.receipt.request.paymentVerified, true);
-assert.equal(retried.receipt.clock !== null, true, "released reservation must permit a verified retry");
+await assert.rejects(
+  () => retryRelay.execute(retryInput, { "payment-signature": retryPayment }),
+  (error) => error instanceof ProviderRelayError && error.code === "relay_grant_already_used",
+  "an uncertain paid response must remain reserved instead of forwarding twice",
+);
+assert.equal(retryProviderCalls, 1);
+const retryAuthorization = decodePaymentSignatureHeader(retryPayment).payload.authorization;
+retrySettlement = {
+  txHash: paymentTransaction,
+  blockNumber: "124",
+  asset: PAYMENT.asset,
+  from: buyer,
+  to: provider,
+  amountAtomic: policy.servicePriceAtomic,
+  authorizationNonce: retryAuthorization.nonce,
+  settledAt: "2026-07-16T12:00:02.000Z",
+};
+const recoveredMissingProof = await retryRelay.recover(
+  retryInput,
+  { "payment-signature": retryPayment },
+);
+assert.equal(recoveredMissingProof.recovered, true);
+assert.equal(recoveredMissingProof.receipt.request.paymentVerified, true);
+assert.equal(retryProviderCalls, 1, "chain recovery must never forward the uncertain request again");
+
+const timeoutStore = new MemoryProviderPolicyStore();
+let timeoutProviderCalls = 0;
+let timeoutSettlement = null;
+const timeoutRelay = createProviderRelay({
+  policyResolver: resolver,
+  store: timeoutStore,
+  fetchImpl: async () => {
+    timeoutProviderCalls += 1;
+    const error = new Error("response lost after request dispatch");
+    error.name = "AbortError";
+    throw error;
+  },
+  resolveHost,
+  chain: {
+    ...chain,
+    async findProviderSettlement() { return timeoutSettlement; },
+  },
+  signer,
+  receiptVerifierAddress: relayVerifier,
+  grantService,
+});
+const timeoutPayment = await paymentHeader("timeout-after-provider-dispatch");
+await assert.rejects(
+  () => timeoutRelay.execute(retryInput, { "payment-signature": timeoutPayment }),
+  (error) => error instanceof ProviderRelayError && error.code === "provider_response_timeout",
+);
+await assert.rejects(
+  () => timeoutRelay.execute(retryInput, { "payment-signature": timeoutPayment }),
+  (error) => error instanceof ProviderRelayError && error.code === "relay_grant_already_used",
+  "a response timeout after dispatch must retain the one-shot reservation",
+);
+const timeoutAuthorization = decodePaymentSignatureHeader(timeoutPayment).payload.authorization;
+timeoutSettlement = {
+  txHash: paymentTransaction,
+  blockNumber: "125",
+  asset: PAYMENT.asset,
+  from: buyer,
+  to: provider,
+  amountAtomic: policy.servicePriceAtomic,
+  authorizationNonce: timeoutAuthorization.nonce,
+  settledAt: "2026-07-16T12:00:03.000Z",
+};
+assert.equal(
+  (await timeoutRelay.recover(retryInput, { "payment-signature": timeoutPayment })).recovered,
+  true,
+);
+assert.equal(timeoutProviderCalls, 1, "timeout recovery must not execute a non-idempotent provider twice");
 
 const atomicFetch = async () => new Response(JSON.stringify({ status: "audit_complete" }), {
   status: 200,
@@ -455,6 +715,7 @@ const atomicFetch = async () => new Response(JSON.stringify({ status: "audit_com
 });
 const retryableAtomicBacking = new MemoryProviderPolicyStore();
 let failBeforeAtomicCommit = true;
+let retryableProviderCalls = 0;
 const retryableAtomicStore = {
   saveRelayReceipt: (...args) => retryableAtomicBacking.saveRelayReceipt(...args),
   reserveRelayExecution: (...args) => retryableAtomicBacking.reserveRelayExecution(...args),
@@ -470,7 +731,10 @@ const retryableAtomicStore = {
 const retryableAtomicRelay = createProviderRelay({
   policyResolver: resolver,
   store: retryableAtomicStore,
-  fetchImpl: atomicFetch,
+  fetchImpl: async (...args) => {
+    retryableProviderCalls += 1;
+    return atomicFetch(...args);
+  },
   resolveHost,
   chain,
   signer,
@@ -481,20 +745,23 @@ const retryableAtomicPayment = await paymentHeader("retryable-atomic-commit");
 await assert.rejects(
   () => retryableAtomicRelay.execute(retryInput, { "payment-signature": retryableAtomicPayment }),
   (error) => error instanceof ProviderRelayError && error.code === "provider_relay_commit_failed",
-  "a store outage before the atomic commit must fail without consuming the grant",
+  "a store outage after verified settlement must fail without forgetting that the paid call occurred",
 );
 assert.equal(await retryableAtomicBacking.getLatestRelayReceiptForJob(targetJobId), null);
-const recoveredAtomicCommit = await retryableAtomicRelay.execute(
-  retryInput,
-  { "payment-signature": retryableAtomicPayment },
+await assert.rejects(
+  () => retryableAtomicRelay.execute(retryInput, { "payment-signature": retryableAtomicPayment }),
+  (error) => error instanceof ProviderRelayError && error.code === "relay_grant_already_used",
+  "a verified settlement with a failed durable commit must hold its reservation for chain recovery",
 );
-assert.equal(recoveredAtomicCommit.receipt.request.paymentVerified, true);
+assert.equal(retryableProviderCalls, 1, "a commit outage after settlement must not call the provider twice");
 
 const uncertainAtomicBacking = new MemoryProviderPolicyStore();
 let loseAtomicCommitReply = true;
 let uncertainProviderCalls = 0;
 const uncertainAtomicStore = {
   saveRelayReceipt: (...args) => uncertainAtomicBacking.saveRelayReceipt(...args),
+  getRelayReceiptForCovenant: (...args) => uncertainAtomicBacking.getRelayReceiptForCovenant(...args),
+  getRelayResponse: (...args) => uncertainAtomicBacking.getRelayResponse(...args),
   reserveRelayExecution: (...args) => uncertainAtomicBacking.reserveRelayExecution(...args),
   releaseRelayExecution: (...args) => uncertainAtomicBacking.releaseRelayExecution(...args),
   async commitRelayExecutionReceipt(...args) {
@@ -535,6 +802,13 @@ await assert.rejects(
   "an uncertain response after atomic commit must not forward or settle the provider twice",
 );
 assert.equal(uncertainProviderCalls, 1);
+const recoveredUncertain = await uncertainAtomicRelay.recover(
+  retryInput,
+  { "payment-signature": uncertainAtomicPayment },
+);
+assert.equal(recoveredUncertain.recovered, true);
+assert.equal(recoveredUncertain.upstream.status, 200);
+assert.equal(uncertainProviderCalls, 1, "recovery must not call the paid provider again");
 
 await assert.rejects(
   () => relay.execute({

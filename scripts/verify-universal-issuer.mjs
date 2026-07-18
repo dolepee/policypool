@@ -115,6 +115,26 @@ assert.equal(writes[0].request.args[0].feeAuthorization.authorizationHash, payme
 assert.equal(writes[0].request.args[0].feeAuthorization.validBefore, BigInt(paymentAuthorization.validBefore));
 assert.equal(writes[0].request.args[1].length, 3);
 
+const directAcceptanceEvidenceHash = `0x${"77".repeat(32)}`;
+await issuer.issue({
+  policy: {
+    onchainPolicyId: `onchain:${policyId}`,
+    serviceFingerprint: `0x${"33".repeat(32)}`,
+    providerWallet: "0x5000000000000000000000000000000000000005",
+  },
+  targetOrder: {
+    jobId: `0x${"12".repeat(32)}`,
+    buyer: "0x6000000000000000000000000000000000000006",
+    amountAtomic: "500000",
+    acceptedAt: "2026-07-16T12:00:00.000Z",
+    acceptanceEvidenceHash: directAcceptanceEvidenceHash,
+  },
+  coverageCapAtomic: "500000",
+  enrollmentClosesAt: "2026-07-16T12:01:00.000Z",
+  paymentAuthorization,
+});
+assert.equal(writes[2].request.args[0].acceptanceEvidenceHash, directAcceptanceEvidenceHash);
+
 await issuer.startClock(issued.covenantId, "2026-07-16T12:00:10.000Z", `0x${"44".repeat(32)}`);
 await issuer.expireUnstarted(issued.covenantId);
 await issuer.markPayoutDue(issued.covenantId, `0x${"55".repeat(32)}`);
@@ -122,8 +142,11 @@ await issuer.settleNetLoss(issued.covenantId, 400000n, 0n, true, `0x${"66".repea
 await issuer.release(issued.covenantId, "2026-07-16T12:09:00.000Z", `0x${"77".repeat(32)}`);
 assert.equal((await issuer.getCovenant(issued.covenantId)).state, 2);
 assert.equal((await issuer.getCovenant(issued.covenantId)).recoveryFinalized, false);
-assert.equal(attestations.length, 5);
-assert.deepEqual(attestations.map((item) => item.action), ["issue", "start_clock", "breach", "settlement", "release"]);
+assert.equal(attestations.length, 6);
+assert.deepEqual(
+  attestations.map((item) => item.action),
+  ["issue", "issue", "start_clock", "breach", "settlement", "release"],
+);
 for (const attestation of attestations) {
   assert.deepEqual(attestation.domain, {
     chainId: 196,
@@ -133,7 +156,7 @@ for (const attestation of attestations) {
 }
 assert.deepEqual(
   writes.filter((item) => item.phase === "simulate").map((item) => item.request.functionName),
-  ["issue", "startClock", "expireUnstarted", "markPayoutDue", "settleNetLoss", "release"],
+  ["issue", "issue", "startClock", "expireUnstarted", "markPayoutDue", "settleNetLoss", "release"],
 );
 
 console.log("PolicyPool universal issuer passed: issue, clock start/expiry, release, breach, and net settlement transactions.");

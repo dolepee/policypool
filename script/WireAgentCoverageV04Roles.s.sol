@@ -6,6 +6,7 @@ import {Script, console2} from "forge-std/Script.sol";
 import {AgentPolicyRegistry} from "../src/AgentPolicyRegistry.sol";
 import {CoverageEvidenceVerifier} from "../src/CoverageEvidenceVerifier.sol";
 import {CoverageManager} from "../src/CoverageManager.sol";
+import {PolicyFeeEscrow} from "../src/PolicyFeeEscrow.sol";
 import {ProviderBondVault} from "../src/ProviderBondVault.sol";
 import {OkxA2AClockAdapter} from "../src/adapters/OkxA2AClockAdapter.sol";
 import {RelayReceiptVerifier} from "../src/adapters/RelayReceiptVerifier.sol";
@@ -27,12 +28,14 @@ contract WireAgentCoverageV04Roles is Script {
     uint32 internal constant V04_MAXIMUM_SLA_SECONDS = 7 days;
     uint256 internal constant V04_EVIDENCE_SIGNER_COUNT = 5;
     uint256 internal constant V04_EVIDENCE_THRESHOLD = 3;
+    uint128 internal constant V04_DIRECT_FEE_ATOMIC = 100_000;
 
     struct RoleConfiguration {
         uint256 ownerKey;
         address coldOwner;
         address monitor;
         address relaySigner;
+        address feeTreasury;
         address[] evidenceSigners;
         address[] recoveryEvidenceSigners;
         uint256 evidenceThreshold;
@@ -45,6 +48,7 @@ contract WireAgentCoverageV04Roles is Script {
         CoverageEvidenceVerifier evidenceVerifier;
         CoverageEvidenceVerifier recoveryEvidenceVerifier;
         CoverageManager manager;
+        PolicyFeeEscrow feeEscrow;
         OkxA2AClockAdapter a2a;
         RelayReceiptVerifier relay;
     }
@@ -70,6 +74,7 @@ contract WireAgentCoverageV04Roles is Script {
         roles.coldOwner = vm.addr(roles.ownerKey);
         roles.monitor = vm.envAddress("POLICYPOOL_V04_MONITOR");
         roles.relaySigner = vm.envAddress("POLICYPOOL_RELAY_SIGNER_ADDRESS");
+        roles.feeTreasury = vm.envAddress("POLICYPOOL_FEE_TREASURY");
         roles.evidenceSigners = vm.envAddress("POLICYPOOL_EVIDENCE_SIGNERS", ",");
         roles.evidenceThreshold = vm.envUint("POLICYPOOL_EVIDENCE_THRESHOLD");
         roles.recoveryEvidenceSigners = vm.envAddress("POLICYPOOL_RECOVERY_EVIDENCE_SIGNERS", ",");
@@ -83,6 +88,7 @@ contract WireAgentCoverageV04Roles is Script {
         deployed.recoveryEvidenceVerifier =
             CoverageEvidenceVerifier(vm.envAddress("POLICYPOOL_RECOVERY_EVIDENCE_VERIFIER_ADDRESS"));
         deployed.manager = CoverageManager(vm.envAddress("POLICYPOOL_COVERAGE_MANAGER_ADDRESS"));
+        deployed.feeEscrow = PolicyFeeEscrow(vm.envAddress("POLICYPOOL_FEE_ESCROW_ADDRESS"));
         deployed.a2a = OkxA2AClockAdapter(vm.envAddress("POLICYPOOL_OKX_A2A_ADAPTER_ADDRESS"));
         deployed.relay = RelayReceiptVerifier(vm.envAddress("POLICYPOOL_A2MCP_RELAY_ADAPTER_ADDRESS"));
     }
@@ -102,6 +108,11 @@ contract WireAgentCoverageV04Roles is Script {
                 || address(deployed.manager.policyRegistry()) != address(deployed.registry)
                 || address(deployed.manager.evidenceVerifier()) != address(deployed.evidenceVerifier)
                 || address(deployed.manager.recoveryEvidenceVerifier()) != address(deployed.recoveryEvidenceVerifier)
+                || address(deployed.feeEscrow.asset()) != XLAYER_USDT0
+                || address(deployed.feeEscrow.evidenceVerifier()) != address(deployed.evidenceVerifier)
+                || address(deployed.feeEscrow.coverageManager()) != address(deployed.manager)
+                || deployed.feeEscrow.treasury() != roles.feeTreasury
+                || deployed.feeEscrow.feeAmountAtomic() != V04_DIRECT_FEE_ATOMIC
                 || address(deployed.vault.asset()) != XLAYER_USDT0 || deployed.vault.withdrawalDelay() != 8 days
                 || !deployed.vault.managerInitialized()
                 || address(deployed.registry.identityRegistry()) != OKX_AGENT_IDENTITY_REGISTRY
@@ -111,7 +122,12 @@ contract WireAgentCoverageV04Roles is Script {
         ) revert StaticWiringMismatch();
         if (deployed.relay.trustedSigner() != roles.relaySigner) revert RoleWiringMismatch();
         _requireRoleSeparation(
-            roles.coldOwner, roles.monitor, roles.relaySigner, roles.evidenceSigners, roles.recoveryEvidenceSigners
+            roles.coldOwner,
+            roles.monitor,
+            roles.relaySigner,
+            roles.feeTreasury,
+            roles.evidenceSigners,
+            roles.recoveryEvidenceSigners
         );
         _validateEvidenceWiring(deployed, roles);
     }
@@ -158,28 +174,38 @@ contract WireAgentCoverageV04Roles is Script {
         console2.log("Policy registry monitor", deployed.registry.monitor());
         console2.log("Relay verifier owner", deployed.relay.owner());
         console2.log("Relay signer", deployed.relay.trustedSigner());
+        console2.log("Policy fee escrow", address(deployed.feeEscrow));
+        console2.log("Policy fee treasury", deployed.feeEscrow.treasury());
     }
 
     function _requireRoleSeparation(
         address coldOwner,
         address monitor,
         address relaySigner,
+        address feeTreasury,
         address[] memory primary,
         address[] memory recovery
     ) private pure {
         if (
-            coldOwner == address(0) || monitor == address(0) || relaySigner == address(0) || coldOwner == monitor
-                || coldOwner == relaySigner || monitor == relaySigner
+            coldOwner == address(0) || monitor == address(0) || relaySigner == address(0) || feeTreasury == address(0)
+                || coldOwner == monitor || coldOwner == relaySigner || coldOwner == feeTreasury
+                || monitor == relaySigner || monitor == feeTreasury || relaySigner == feeTreasury
         ) {
             revert RoleCollision();
         }
         for (uint256 index; index < primary.length; ++index) {
-            if (primary[index] == coldOwner || primary[index] == monitor || primary[index] == relaySigner) {
+            if (
+                primary[index] == coldOwner || primary[index] == monitor || primary[index] == relaySigner
+                    || primary[index] == feeTreasury
+            ) {
                 revert RoleCollision();
             }
         }
         for (uint256 index; index < recovery.length; ++index) {
-            if (recovery[index] == coldOwner || recovery[index] == monitor || recovery[index] == relaySigner) {
+            if (
+                recovery[index] == coldOwner || recovery[index] == monitor || recovery[index] == relaySigner
+                    || recovery[index] == feeTreasury
+            ) {
                 revert RoleCollision();
             }
         }

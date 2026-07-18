@@ -1,5 +1,13 @@
 const DEFAULT_TIMEOUT_MS = 10_000;
-const ACTIONS = new Set(["issue", "start_clock", "release", "breach", "settlement", "cancel_unpaid"]);
+const ACTIONS = new Set([
+  "issue",
+  "start_clock",
+  "release",
+  "breach",
+  "settlement",
+  "cancel_unpaid",
+  "capture_fee",
+]);
 
 export class EvidenceAttestationError extends Error {
   constructor(code, status = 503) {

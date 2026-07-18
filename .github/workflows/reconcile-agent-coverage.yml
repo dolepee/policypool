@@ -29,3 +29,28 @@ jobs:
             --request POST \
             --header "Authorization: Bearer $POLICYPOOL_OPERATOR_TOKEN" \
             https://policypool.vercel.app/api/reconcile-coverage
+
+      - name: Reconcile direct A2MCP executions when enabled
+        if: ${{ always() }}
+        env:
+          POLICYPOOL_OPERATOR_TOKEN: ${{ secrets.POLICYPOOL_OPERATOR_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$POLICYPOOL_OPERATOR_TOKEN"
+          discovery="$(curl --fail-with-body --silent --show-error \
+            --retry 3 \
+            --retry-all-errors \
+            --retry-delay 5 \
+            https://policypool.vercel.app/api/direct-a2mcp)"
+          enabled="$(python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("enabled") is True else "false")' <<<"$discovery")"
+          if [[ "$enabled" != "true" ]]; then
+            echo "Direct A2MCP reconciliation is disabled; no action required."
+            exit 0
+          fi
+          curl --fail-with-body --silent --show-error \
+            --retry 3 \
+            --retry-all-errors \
+            --retry-delay 5 \
+            --request POST \
+            --header "Authorization: Bearer $POLICYPOOL_OPERATOR_TOKEN" \
+            https://policypool.vercel.app/api/reconcile-direct-a2mcp

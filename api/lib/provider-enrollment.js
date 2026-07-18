@@ -13,6 +13,7 @@ import {
   verifyTypedData,
 } from "viem";
 import { PAYMENT, XLAYER } from "./config.js";
+import { MAX_DIRECT_ENROLLMENT_WINDOW_SECONDS } from "./direct-a2mcp-constants.js";
 import {
   fetchOkxAgentPage,
   findOkxAgentService,
@@ -52,6 +53,9 @@ const POLICY_REGISTERED_EVENT = parseAbiItem(
 );
 const BOND_ABI = parseAbi([
   "function availableBond(address provider) view returns (uint256)",
+]);
+const FEE_ESCROW_ABI = parseAbi([
+  "function feeAmountAtomic() view returns (uint128)",
 ]);
 
 export class ProviderEnrollmentError extends Error {
@@ -218,8 +222,55 @@ export function createProviderEnrollmentService({
       1,
       slaSeconds,
     );
-    const premiumBps = integer(input?.premiumBps ?? 0, "premium_bps", 0, 10_000);
-    if (premiumBps !== 0) throw new ProviderEnrollmentError("provider_premium_not_supported_v04");
+    const maxCapAtomic = parseUsdtAtomic(input?.maxCapUSDT, PAYMENT.decimals);
+    if (maxCapAtomic <= 0n) throw new ProviderEnrollmentError("max_cap_invalid");
+    let premiumBps = integer(input?.premiumBps ?? 0, "premium_bps", 0, 10_000);
+    if (service.serviceType === "A2MCP") {
+      if (enrollmentWindowSeconds > MAX_DIRECT_ENROLLMENT_WINDOW_SECONDS) {
+        throw new ProviderEnrollmentError("direct_enrollment_window_exceeds_authorization_limit");
+      }
+      const servicePriceAtomic = parseUsdtAtomic(service.price, PAYMENT.decimals);
+      if (servicePriceAtomic <= 0n) {
+        throw new ProviderEnrollmentError("direct_service_price_invalid");
+      }
+      if (maxCapAtomic > servicePriceAtomic) {
+        throw new ProviderEnrollmentError("direct_policy_cap_exceeds_service_price");
+      }
+      if (!configuration.feeEscrow) {
+        throw new ProviderEnrollmentError("direct_fee_escrow_unavailable", 503);
+      }
+      if (!Number.isSafeInteger(configuration.directFeeAtomic) || configuration.directFeeAtomic <= 0) {
+        throw new ProviderEnrollmentError("direct_fee_configuration_invalid", 503);
+      }
+      let escrowFeeAtomic;
+      try {
+        escrowFeeAtomic = BigInt(await client.readContract({
+          address: configuration.feeEscrow,
+          abi: FEE_ESCROW_ABI,
+          functionName: "feeAmountAtomic",
+        }));
+      } catch {
+        throw new ProviderEnrollmentError("direct_fee_escrow_unavailable", 503);
+      }
+      const directFeeAtomic = BigInt(configuration.directFeeAtomic);
+      if (escrowFeeAtomic !== directFeeAtomic) {
+        throw new ProviderEnrollmentError("direct_fee_escrow_mismatch", 503);
+      }
+      const premiumNumerator = directFeeAtomic * 10_000n;
+      if (premiumNumerator % maxCapAtomic !== 0n) {
+        throw new ProviderEnrollmentError("direct_fee_not_expressible_for_cap");
+      }
+      const derivedPremiumBps = Number(premiumNumerator / maxCapAtomic);
+      if (!Number.isSafeInteger(derivedPremiumBps) || derivedPremiumBps <= 0 || derivedPremiumBps > 10_000) {
+        throw new ProviderEnrollmentError("direct_fee_incompatible_with_cap");
+      }
+      if (input?.premiumBps !== undefined && premiumBps !== derivedPremiumBps) {
+        throw new ProviderEnrollmentError("direct_fee_premium_mismatch");
+      }
+      premiumBps = derivedPremiumBps;
+    } else if (premiumBps !== 0) {
+      throw new ProviderEnrollmentError("provider_premium_not_supported_v04");
+    }
     const payoutBasis = {
       net_loss: 0,
       provider_bonded_sla_credit: 1,
@@ -229,8 +280,6 @@ export function createProviderEnrollmentService({
     const expectedClock = service.serviceType === "A2A" ? "verified_acceptance" : "policypool_relay";
     if (requestedClock !== expectedClock) throw new ProviderEnrollmentError("clock_mode_service_type_mismatch");
     const clockMode = expectedClock === "verified_acceptance" ? 0 : 1;
-    const maxCapAtomic = parseUsdtAtomic(input?.maxCapUSDT, PAYMENT.decimals);
-    if (maxCapAtomic <= 0n) throw new ProviderEnrollmentError("max_cap_invalid");
     const currentSeconds = Math.floor(now() / 1000);
     const expiresAt = integer(
       input?.expiresAt,

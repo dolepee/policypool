@@ -15,6 +15,29 @@ const issued = service.issue({
   expiresAt: "2026-07-16T12:01:00.000Z",
 });
 assert.equal(service.resolve(issued.token).grantId, issued.payload.grantId);
+const direct = service.issue({
+  covenantId: `0x${"33".repeat(32)}`,
+  targetJobId: `0x${"44".repeat(32)}`,
+  buyer: "0x3000000000000000000000000000000000000003",
+  agentId: "3808",
+  serviceId: "33461",
+  providerRequestHash: `sha256:${"55".repeat(32)}`,
+  providerRequirementsHash: `sha256:${"66".repeat(32)}`,
+  expiresAt: "2026-07-16T12:01:00.000Z",
+});
+assert.equal(service.resolve(direct.token).providerRequestHash, `sha256:${"55".repeat(32)}`);
+assert.throws(
+  () => service.issue({
+    covenantId: `0x${"33".repeat(32)}`,
+    targetJobId: `0x${"44".repeat(32)}`,
+    buyer: "0x3000000000000000000000000000000000000003",
+    agentId: "3808",
+    serviceId: "33461",
+    providerRequestHash: `sha256:${"55".repeat(32)}`,
+    expiresAt: "2026-07-16T12:01:00.000Z",
+  }),
+  (error) => error instanceof RelayGrantError && error.code === "relay_grant_requirements_hash_invalid",
+);
 assert.throws(
   () => service.issue({
     covenantId: `0x${"11".repeat(32)}`,

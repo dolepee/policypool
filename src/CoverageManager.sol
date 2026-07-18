@@ -58,6 +58,7 @@ contract CoverageManager {
     uint256 public constant SETTLEMENT_EVIDENCE_MAX_AGE = 10 minutes;
     uint256 public constant CANCELLATION_EVIDENCE_MAX_AGE = 10 minutes;
     uint256 public constant MAX_FEE_AUTHORIZATION_WINDOW = 15 minutes;
+    uint256 public constant CLOCK_START_RECOVERY_PERIOD = 10 minutes;
     uint256 public constant SETTLEMENT_CHALLENGE_PERIOD = 24 hours;
     uint256 public constant EMERGENCY_EVIDENCE_DELAY = 30 days;
     uint256 public constant REQUIRED_EVIDENCE_SIGNERS = 5;
@@ -436,7 +437,9 @@ contract CoverageManager {
         if (covenant.state != CovenantState.PendingStart) revert CovenantNotActive();
         if (
             evidence.startedAt < covenant.issuedAt || evidence.startedAt > block.timestamp
-                || block.timestamp > covenant.enrollmentExpiresAt || evidence.evidenceHash == bytes32(0)
+                || evidence.startedAt > covenant.enrollmentExpiresAt
+                || block.timestamp > uint256(covenant.feeAuthorizationValidBefore) + CLOCK_START_RECOVERY_PERIOD
+                || evidence.evidenceHash == bytes32(0)
         ) revert InvalidCovenant();
         bytes32 digest = _consumeEvidence(
             evidenceVerifier, START_CLOCK_ACTION, hashClockEvidence(evidence), signatures, false, evidence.covenantId
@@ -452,7 +455,9 @@ contract CoverageManager {
     function expireUnstarted(bytes32 id) external nonReentrant {
         Covenant storage covenant = covenants[id];
         if (covenant.state != CovenantState.PendingStart) revert CovenantNotActive();
-        if (block.timestamp <= covenant.enrollmentExpiresAt) revert DeadlineNotElapsed();
+        if (block.timestamp <= uint256(covenant.feeAuthorizationValidBefore) + CLOCK_START_RECOVERY_PERIOD) {
+            revert DeadlineNotElapsed();
+        }
         covenant.state = CovenantState.Released;
         bondVault.release(id);
         emit CovenantReleased(id, 0, block.timestamp, keccak256("COVERAGE_CLOCK_NOT_STARTED"), bytes32(0));
@@ -718,6 +723,7 @@ contract CoverageManager {
                 || enrollmentWindowSeconds == 0
                 || uint256(evidence.enrollmentExpiresAt)
                     != uint256(evidence.verifiedAcceptanceAt) + enrollmentWindowSeconds
+                || (clockMode == 1 && evidence.feeAuthorization.validBefore < evidence.enrollmentExpiresAt)
         ) revert InvalidCovenant();
     }
 
