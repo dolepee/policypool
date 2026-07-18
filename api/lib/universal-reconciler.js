@@ -12,6 +12,7 @@ const ONCHAIN_STATES = new Map([
   [7, "cancelled_unpaid"],
 ]);
 const SETTLEMENT_CHALLENGE_MS = 24 * 60 * 60 * 1_000;
+const CLOCK_START_RECOVERY_MS = 10 * 60 * 1_000;
 
 function evidenceHash(value) {
   return `0x${sha256(value)}`;
@@ -365,17 +366,22 @@ export function createUniversalReconciler({
     }
 
     if (record.state === "pending_start") {
+      const clockRecoveryEndsAt = Number(onchain.feeAuthorizationValidBefore) * 1_000
+        + CLOCK_START_RECOVERY_MS;
+      if (!Number.isFinite(clockRecoveryEndsAt) || clockRecoveryEndsAt <= CLOCK_START_RECOVERY_MS) {
+        throw new Error("relay_clock_recovery_window_invalid");
+      }
+      if (now() > clockRecoveryEndsAt) {
+        changes.push(await apply(record, "expire_unstarted", {
+          reason: "coverage_clock_not_started_before_recovery_close",
+          enrollmentClosedAt: enrollmentClose(record),
+          clockRecoveryClosedAt: new Date(clockRecoveryEndsAt).toISOString(),
+        }, dryRun));
+        return { changes, hold: null };
+      }
       const relayReceipt = await relayReceiptForCovenant(record);
       if (!relayReceipt) {
-        const closeMs = Date.parse(enrollmentClose(record) || "");
-        if (Number.isFinite(closeMs) && now() > closeMs) {
-          changes.push(await apply(record, "expire_unstarted", {
-            reason: "coverage_clock_not_started_before_enrollment_close",
-            enrollmentClosedAt: enrollmentClose(record),
-          }, dryRun));
-          return { changes, hold: null };
-        }
-        return { changes, hold: "relay_clock_not_started" };
+        return { changes, hold: "relay_clock_recovery_pending" };
       }
       const observed = observeRelayClock({
         covenant: { ...record, targetJobId: record.targetOrder.jobId },

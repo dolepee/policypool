@@ -65,8 +65,15 @@ function relayReceipt({ delivered = true, recovered = false } = {}) {
   };
 }
 
-function harness({ receipt = relayReceipt(), covenantState = 1, feeState = 1, nowSeconds = 1784289700 } = {}) {
+function harness({
+  receipt = relayReceipt(),
+  covenantState = 1,
+  feeState = 1,
+  nowSeconds = 1784289700,
+  relayGrant = true,
+} = {}) {
   let record = directRecord();
+  if (!relayGrant) delete record.execution.stages.relayGrant;
   let currentReceipt = receipt;
   let nowMs = nowSeconds * 1_000;
   let covenant = {
@@ -74,19 +81,24 @@ function harness({ receipt = relayReceipt(), covenantState = 1, feeState = 1, no
     state: covenantState,
     deadline: nowSeconds - 1,
     payoutDueAt: 0,
+    enrollmentExpiresAt: Math.floor(Date.parse("2026-07-17T12:01:00.000Z") / 1_000),
+    feeAuthorizationValidBefore: directRecord().providerAuthorizationValidBefore,
   };
   let fee = {
     state: feeState,
     refundAvailableAt: directRecord().providerAuthorizationValidBefore + 120,
   };
   let recoveredProviderResult = null;
+  let recoveryContextReads = 0;
   let recoveries = 0;
+  let expiries = 0;
   let rotations = 0;
   const calls = { cancel: 0, capture: 0, mark: 0, refund: 0, release: 0, settle: 0, start: 0 };
   const state = {
     async listExecuting() { return record.state === "executing" ? [structuredClone(record)] : []; },
     async markReconciled() { rotations += 1; return record.state === "executing"; },
     async recoveryContext() {
+      recoveryContextReads += 1;
       return {
         providerRequest: { target_url: "https://policypool.vercel.app/api/covered-job-receipt" },
         providerPaymentSignature: "provider-payment-signature",
@@ -104,7 +116,20 @@ function harness({ receipt = relayReceipt(), covenantState = 1, feeState = 1, no
   };
   const issuer = {
     async getCovenant() { return structuredClone(covenant); },
-    async startClock() { calls.start += 1; covenant.state = 2; return { transactionHash: `0x${"01".repeat(32)}` }; },
+    async startClock(_covenantId, startedAt) {
+      const startedAtSeconds = Math.floor(Date.parse(startedAt) / 1_000);
+      assert.ok(startedAtSeconds <= covenant.enrollmentExpiresAt);
+      assert.ok(Math.floor(nowMs / 1_000) <= covenant.feeAuthorizationValidBefore + 10 * 60);
+      calls.start += 1;
+      covenant.state = 2;
+      return { transactionHash: `0x${"01".repeat(32)}` };
+    },
+    async expireUnstarted() {
+      assert.ok(Math.floor(nowMs / 1_000) > covenant.feeAuthorizationValidBefore + 10 * 60);
+      expiries += 1;
+      covenant.state = 3;
+      return { transactionHash: `0x${"08".repeat(32)}` };
+    },
     async release() { calls.release += 1; covenant.state = 3; return { transactionHash: `0x${"02".repeat(32)}` }; },
     async markPayoutDue() {
       calls.mark += 1;
@@ -145,6 +170,8 @@ function harness({ receipt = relayReceipt(), covenantState = 1, feeState = 1, no
   return {
     calls,
     getRecord: () => structuredClone(record),
+    getExpiries: () => expiries,
+    getRecoveryContextReads: () => recoveryContextReads,
     getRecoveries: () => recoveries,
     getRotations: () => rotations,
     reconcile: (input) => reconciler.reconcile(input),
@@ -158,6 +185,7 @@ const happy = harness();
 const happyResult = await happy.reconcile();
 assert.equal(happyResult.ok, true);
 assert.deepEqual(happy.calls, { cancel: 0, capture: 1, mark: 0, refund: 0, release: 1, settle: 0, start: 1 });
+assert.ok(1784289700 > Math.floor(Date.parse("2026-07-17T12:01:00.000Z") / 1_000));
 assert.equal(happy.getRecord().state, "complete");
 assert.equal(happy.getRecord().result.coverageState, 3);
 assert.equal(happy.getRotations(), 1);
@@ -172,6 +200,35 @@ assert.deepEqual(unsettled.calls, { cancel: 1, capture: 0, mark: 0, refund: 1, r
 assert.equal(unsettled.getRecord().state, "complete");
 assert.equal(unsettled.getRecord().result.outcome, "cancelled_without_charge");
 assert.equal(unsettled.getRotations(), 1);
+
+const missingGrant = harness({
+  receipt: null,
+  nowSeconds: directRecord().providerAuthorizationValidBefore + 121,
+  relayGrant: false,
+});
+const missingGrantResult = await missingGrant.reconcile();
+assert.equal(missingGrantResult.ok, true);
+assert.deepEqual(
+  missingGrant.calls,
+  { cancel: 1, capture: 0, mark: 0, refund: 1, release: 0, settle: 0, start: 0 },
+);
+assert.equal(missingGrant.getRecoveries(), 0);
+assert.equal(missingGrant.getRecoveryContextReads(), 0);
+assert.equal(missingGrant.getRecord().state, "complete");
+assert.equal(missingGrant.getRecord().result.outcome, "cancelled_without_charge");
+
+const expiredClockRecovery = harness({
+  nowSeconds: directRecord().providerAuthorizationValidBefore + 10 * 60 + 1,
+});
+const expiredClockRecoveryResult = await expiredClockRecovery.reconcile();
+assert.equal(expiredClockRecoveryResult.ok, true);
+assert.equal(expiredClockRecovery.getExpiries(), 1);
+assert.deepEqual(
+  expiredClockRecovery.calls,
+  { cancel: 0, capture: 0, mark: 0, refund: 1, release: 0, settle: 0, start: 0 },
+);
+assert.equal(expiredClockRecovery.getRecord().state, "complete");
+assert.equal(expiredClockRecovery.getRecord().result.outcome, "coverage_clock_recovery_expired");
 
 const settlementFound = harness({
   receipt: null,

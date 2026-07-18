@@ -616,7 +616,7 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
         manager.settleNetLoss(missing, new bytes[](0));
     }
 
-    function testRelayClockRejectsMissingEvidenceAndLateStart() public {
+    function testRelayClockRejectsMissingEvidenceAndStartOutsideEnrollment() public {
         AgentPolicyRegistry.PolicyTerms memory terms = _terms();
         terms.serviceId = 33464;
         terms.serviceFingerprint = SLA_FINGERPRINT;
@@ -642,6 +642,31 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
         manager.startClock(late, lateSignatures);
     }
 
+    function testRelayClockRecoversInWindowStartAfterEnrollmentCloses() public {
+        AgentPolicyRegistry.PolicyTerms memory terms = _terms();
+        terms.serviceId = 33465;
+        terms.serviceFingerprint = SLA_FINGERPRINT;
+        terms.clockMode = 1;
+        vm.prank(provider);
+        bytes32 relayPolicyId = registry.registerPolicy(terms);
+        bytes32 id = _issue(
+            manager,
+            _issueEvidence(relayPolicyId, SLA_FINGERPRINT, keccak256("relay-recovery-job"), buyer, 500_000, 500_000)
+        );
+        CoverageManager.Covenant memory covenant = manager.getCovenant(id);
+        CoverageManager.ClockEvidence memory recovered = CoverageManager.ClockEvidence({
+            covenantId: id, startedAt: covenant.issuedAt + 30, evidenceHash: keccak256("RECOVERED_RELAY_RECEIPT")
+        });
+
+        vm.warp(uint256(covenant.enrollmentExpiresAt) + 1);
+        manager.startClock(recovered, _signatures(manager.clockEvidenceDigest(recovered)));
+
+        CoverageManager.Covenant memory started = manager.getCovenant(id);
+        assertEq(uint256(started.state), uint256(CoverageManager.CovenantState.Active));
+        assertEq(started.startAt, recovered.startedAt);
+        assertEq(started.deadline, recovered.startedAt + started.slaSeconds);
+    }
+
     function testUnstartedRelayClockExpiresPermissionlesslyAndUnlocksBond() public {
         AgentPolicyRegistry.PolicyTerms memory terms = _terms();
         terms.serviceId = 33463;
@@ -652,11 +677,40 @@ contract CoverageManagerTest is CoverageEvidenceTestBase {
         bytes32 id = _issue(
             manager, _issueEvidence(relayPolicyId, SLA_FINGERPRINT, keccak256("unstarted-job"), buyer, 500_000, 500_000)
         );
-        vm.warp(block.timestamp + 61);
+        CoverageManager.Covenant memory covenant = manager.getCovenant(id);
+        uint256 recoveryCutoff = uint256(covenant.feeAuthorizationValidBefore) + manager.CLOCK_START_RECOVERY_PERIOD();
+        vm.warp(recoveryCutoff);
+        vm.expectRevert(CoverageManager.DeadlineNotElapsed.selector);
+        manager.expireUnstarted(id);
+
+        CoverageManager.ClockEvidence memory expiredClock = CoverageManager.ClockEvidence({
+            covenantId: id, startedAt: covenant.issuedAt + 30, evidenceHash: keccak256("TOO_LATE_TO_RECOVER")
+        });
+        bytes[] memory expiredClockSignatures = _signatures(manager.clockEvidenceDigest(expiredClock));
+        vm.warp(recoveryCutoff + 1);
+        vm.expectRevert(CoverageManager.InvalidCovenant.selector);
+        manager.startClock(expiredClock, expiredClockSignatures);
+
         vm.prank(makeAddr("expiry-keeper"));
         manager.expireUnstarted(id);
         assertEq(vault.availableBond(provider), 5_000_000);
         assertEq(uint256(manager.getCovenant(id).state), uint256(CoverageManager.CovenantState.Released));
+    }
+
+    function testRelayIssueRejectsFeeWindowBeforeEnrollmentClose() public {
+        AgentPolicyRegistry.PolicyTerms memory terms = _terms();
+        terms.serviceId = 33466;
+        terms.serviceFingerprint = SLA_FINGERPRINT;
+        terms.clockMode = 1;
+        vm.prank(provider);
+        bytes32 relayPolicyId = registry.registerPolicy(terms);
+        CoverageManager.IssueEvidence memory evidence =
+            _issueEvidence(relayPolicyId, SLA_FINGERPRINT, keccak256("inverted-window-job"), buyer, 500_000, 500_000);
+        evidence.feeAuthorization.validBefore = evidence.enrollmentExpiresAt - 1;
+
+        bytes[] memory signatures = _signatures(manager.issueEvidenceDigest(evidence));
+        vm.expectRevert(CoverageManager.InvalidCovenant.selector);
+        manager.issue(evidence, signatures);
     }
 
     function _issueDefault() internal returns (bytes32) {

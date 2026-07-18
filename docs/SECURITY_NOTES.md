@@ -174,6 +174,8 @@ The canonical provider request and original provider x402 authorization needed f
 
 An authorized request becomes uncertain once dispatch begins. A timeout, lost response, missing settlement proof, or failed durable commit keeps the one-shot grant/payment reservation through the bounded recovery window; only a definitely unpaid `402` permits immediate release. If chain recovery proves payment but the provider response was not durable, PolicyPool starts the verified settlement clock and resolves fee custody but holds delivery judgment for manual evidence. It never calls the provider twice and never turns PolicyPool response loss into an automatic provider breach.
 
+A crash before the relay-grant checkpoint cannot strand an unpaid covenant: no provider dispatch was possible, so reconciliation skips relay recovery and follows the quorum-attested cancellation and fee-refund path after authorization expiry. A crash after provider settlement but before the clock write is handled separately. The signed relay start must remain inside enrollment, but the clock transaction may land through fee-authorization expiry plus a ten-minute recovery period. Permissionless unstarted expiry begins only after that cutoff; it releases the bond and refunds any uncaptured fee. Relay issuance rejects a fee authorization that ends before enrollment, and the contract gives clock recovery and expiry no overlapping valid timestamp.
+
 A paid provider response becomes terminal in the direct execution store only after coverage reaches a terminal state. An unsuccessful response or a response outside the enrolled SLA remains in the execution-only reconciliation queue so the scheduled lifecycle can mark breach after the deadline and settle after the challenge period; receiving response bytes never removes an unresolved covenant from reconciliation.
 
 Completed direct results remain retrievable for the execution-retention window after their payment authorizations expire, but only with the exact original provider request and both bound payment signatures. The store rechecks the execution ID derived from both payment headers before returning a terminal result. Expiry tolerance never applies to a new or merely bound execution.
@@ -200,7 +202,7 @@ Slither `0.11.5` analyzed 47 contracts with 101 detectors. It returned 44 raw re
 
 ### Adversarial coverage gate
 
-The remediated custody/state-transition suite passes 116 Foundry tests and includes executable hostile regressions for stale settlement, held breach evidence, terminal recovery, late completion, provisional-breach correction, primary and emergency challenge-period ordering, quorum separation, delayed recovery, exact outbound token transfers, primary and recovery-quorum expired-unused fee cancellation, uncertain issuance reconciliation, and the direct refundable fee escrow.
+The remediated custody/state-transition suite passes 118 Foundry tests and includes executable hostile regressions for stale settlement, held breach evidence, terminal recovery, late completion, provisional-breach correction, primary and emergency challenge-period ordering, quorum separation, delayed relay-clock recovery with non-overlapping expiry, exact outbound token transfers, primary and recovery-quorum expired-unused fee cancellation, uncertain issuance reconciliation, and the direct refundable fee escrow.
 
 - `AgentPolicyRegistry`: `100%` (`23/23`);
 - `ProviderBondVault`: `100%` (`30/30`);

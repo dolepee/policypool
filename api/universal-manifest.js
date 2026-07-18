@@ -122,7 +122,7 @@ export function createUniversalManifestHandler(dependencies = {}) {
           "payout_due",
           "terminal_net_loss_settlement",
           "unpaid_issuance_cancellation",
-          "unstarted_expiry",
+          "bounded_relay_clock_recovery_or_unstarted_expiry",
           "direct_a2mcp_fee_capture_or_refund",
         ],
         payoutSettlement: "scheduled_after_challenge_and_threshold_attested_terminal_recovery",

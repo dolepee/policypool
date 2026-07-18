@@ -670,7 +670,7 @@ No production credential is intentionally tracked. The local dirty `lib/v4-core`
 
 ## Verification Results
 
-- clean `forge test --summary`: 116 tests passed
+- clean `forge test --summary`: 118 tests passed
 - `PolicyFeeEscrow` branch coverage: 91.30% (`21/23`)
 - `AgentPolicyRegistry` branch coverage: 100% (`23/23`)
 - `ProviderBondVault` branch coverage: 100% (`30/30`)

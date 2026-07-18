@@ -14,6 +14,7 @@ const COVENANT = {
 };
 const FEE = { none: 0, funded: 1, captured: 2, refunded: 3 };
 const SETTLEMENT_CHALLENGE_SECONDS = 24 * 60 * 60;
+const CLOCK_START_RECOVERY_SECONDS = 10 * 60;
 
 function evidenceHash(value) {
   return keccak256(stringToHex(stableStringify(value)));
@@ -78,6 +79,7 @@ export function createDirectA2mcpReconciler({
   if (
     !issuer?.getCovenant
     || !issuer?.startClock
+    || !issuer?.expireUnstarted
     || !issuer?.release
     || !issuer?.markPayoutDue
     || !issuer?.settleNetLoss
@@ -100,9 +102,9 @@ export function createDirectA2mcpReconciler({
   }
 
   async function recoverProviderResult(record) {
-    const recovery = await state.recoveryContext(record.id, record.execution.id);
     const relayGrant = record.execution?.stages?.relayGrant;
-    if (!relayGrant?.token) throw new Error("direct_relay_grant_recovery_unavailable");
+    if (!relayGrant?.token) return null;
+    const recovery = await state.recoveryContext(record.id, record.execution.id);
     return relay.recover({
       agentId: record.agentId,
       serviceId: record.serviceId,
@@ -129,6 +131,55 @@ export function createDirectA2mcpReconciler({
       return;
     }
     if (Number(covenant.state) === COVENANT.pendingStart) {
+      const nowSeconds = Math.floor(now() / 1_000);
+      const clockRecoveryEndsAt = Number(covenant.feeAuthorizationValidBefore)
+        + CLOCK_START_RECOVERY_SECONDS;
+      if (nowSeconds > clockRecoveryEndsAt) {
+        if (Number(fee.state) === FEE.captured) {
+          holds.push({
+            quoteId: record.id,
+            reason: "captured_fee_without_started_clock_manual_resolution",
+          });
+          return;
+        }
+        changes.push({ quoteId: record.id, action: "expire_unstarted_clock_recovery" });
+        if (!dryRun) {
+          const write = await issuer.expireUnstarted(record.covenantId);
+          record = await checkpoint(record, "coverageExpiredUnstarted", write, false);
+          covenant = await issuer.getCovenant(record.covenantId);
+        }
+        if (Number(fee.state) === FEE.funded) {
+          changes.push({ quoteId: record.id, action: "refund_policy_fee" });
+          if (!dryRun) {
+            const write = await feeEscrow.refund(record.feeId);
+            record = await checkpoint(record, "feeRefunded", write, false);
+            fee = await feeEscrow.getFee(record.feeId);
+          }
+        }
+        if (!dryRun) {
+          covenant = await issuer.getCovenant(record.covenantId);
+          fee = await feeEscrow.getFee(record.feeId);
+        }
+        if (
+          Number(covenant.state) === COVENANT.released
+          && [FEE.none, FEE.refunded].includes(Number(fee.state))
+        ) {
+          await complete(record, {
+            ok: true,
+            reconciled: true,
+            quoteId: record.id,
+            covenantId: record.covenantId,
+            feeId: record.feeId,
+            feeState: Number(fee.state),
+            feeOutcome: Number(fee.state) === FEE.refunded ? "refunded" : "not_funded",
+            coverageState: Number(covenant.state),
+            providerRelayReceiptId: receipt.receiptId,
+            providerSettlementTransaction: receipt.settlement.transaction,
+            outcome: "coverage_clock_recovery_expired",
+          }, false);
+        }
+        return;
+      }
       changes.push({ quoteId: record.id, action: "start_clock" });
       if (!dryRun) {
         const write = await issuer.startClock(
