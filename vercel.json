@@ -18,10 +18,6 @@
       "use": "@vercel/node"
     },
     {
-      "src": "api/direct-a2mcp.js",
-      "use": "@vercel/node"
-    },
-    {
       "src": "api/covered-job-receipt.js",
       "use": "@vercel/node"
     },
@@ -46,11 +42,7 @@
       "use": "@vercel/node"
     },
     {
-      "src": "api/reconcile-direct-a2mcp.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "api/reconcile-universal.js",
+      "src": "api/v04-runtime.js",
       "use": "@vercel/node"
     },
     {
@@ -63,6 +55,18 @@
     }
   ],
   "routes": [
+    {
+      "src": "/api/direct-a2mcp",
+      "dest": "/api/v04-runtime.js?surface=direct-a2mcp"
+    },
+    {
+      "src": "/api/reconcile-direct-a2mcp",
+      "dest": "/api/v04-runtime.js?surface=reconcile-direct-a2mcp"
+    },
+    {
+      "src": "/api/reconcile-universal",
+      "dest": "/api/v04-runtime.js?surface=reconcile-universal"
+    },
     {
       "src": "/api/universal-manifest",
       "dest": "/api/manifest.js?surface=universal"
