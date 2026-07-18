@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { authorizationTypes } from "@x402/evm";
-import { encodePaymentSignatureHeader } from "@x402/core/http";
+import { decodePaymentSignatureHeader, encodePaymentSignatureHeader } from "@x402/core/http";
 import { getAddress, verifyTypedData } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import {
@@ -34,6 +34,35 @@ const providerAuthorizationDigest = sha256({
   payer: buyer.address.toLowerCase(),
   nonce: `0x${"ab".repeat(32)}`,
 });
+
+function reencodePaymentHeader(raw) {
+  const decoded = decodePaymentSignatureHeader(raw);
+  const { accepted, payload } = decoded;
+  const authorization = payload.authorization;
+  return encodePaymentSignatureHeader({
+    payload: {
+      authorization: {
+        nonce: authorization.nonce,
+        validBefore: authorization.validBefore,
+        validAfter: authorization.validAfter,
+        value: authorization.value,
+        to: authorization.to,
+        from: authorization.from,
+      },
+      signature: payload.signature,
+    },
+    accepted: {
+      extra: Object.fromEntries(Object.entries(accepted.extra).reverse()),
+      maxTimeoutSeconds: accepted.maxTimeoutSeconds,
+      payTo: accepted.payTo,
+      amount: accepted.amount,
+      asset: accepted.asset,
+      network: accepted.network,
+      scheme: accepted.scheme,
+    },
+    x402Version: decoded.x402Version,
+  });
+}
 
 function policy(overrides = {}) {
   return {
@@ -369,11 +398,13 @@ assert.equal(happy.calls.fund, 1);
 assert.equal(happy.calls.executeProvider, 1);
 assert.equal(happy.calls.capture, 1);
 assert.equal(happy.calls.release, 1);
+const reencodedFeePayment = reencodePaymentHeader(happyFlow.feePayment);
+assert.notEqual(reencodedFeePayment, happyFlow.feePayment);
 const replayed = await happy.coordinator.execute({
   token: happyFlow.quoted.quote.token,
   providerRequest,
   providerPaymentSignature,
-  policyFeePaymentSignature: happyFlow.feePayment,
+  policyFeePaymentSignature: reencodedFeePayment,
 });
 assert.equal(replayed.replay, true);
 assert.equal(replayed.providerResponse.status, 200);
@@ -522,4 +553,4 @@ assert.equal(lostResponse.calls.executeProvider, 1, "an uncertain settled provid
 assert.equal(lostResponse.calls.issue, 1);
 assert.equal(lostResponse.calls.fund, 1);
 
-console.log("PolicyPool direct A2MCP coordinator passed: immutable two-payment binding, pre-fund drift rejection, one-time provider settlement, durable deliverable replay, crash resume, and no duplicate issue/fund/capture.");
+console.log("PolicyPool direct A2MCP coordinator passed: immutable two-payment binding, canonical authorization replay, pre-fund drift rejection, one-time provider settlement, durable deliverable replay, crash resume, and no duplicate issue/fund/capture.");

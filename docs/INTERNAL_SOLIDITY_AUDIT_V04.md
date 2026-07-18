@@ -473,6 +473,22 @@ Source remediation:
 
 Regression: `scripts/verify-direct-settlement-recovery.mjs` places the exact settlement in a block timestamped one second before the grant time and proves the overlap recovers it, while preserving no-match and oversized-window rejection.
 
+### M-10: Fee authorization recovery depended on header encoding
+
+Severity: Medium / P2 recovery-availability risk
+
+Status: Fixed in source, not deployed
+
+The provider authorization used canonical identity after H-21, but the separate PolicyPool fee authorization still contributed a raw x402-header hash to the direct execution ID. Re-encoding the same signed fee authorization could therefore make an interrupted or completed checkout look like a different execution and block its retained-result recovery.
+
+Source remediation:
+
+- provider and fee payments now use the same canonical EIP-3009 identity function;
+- execution identity is stable across equivalent encodings of either signed authorization;
+- all accepted requirements and signed fields remain fully validated before an existing execution can be recovered.
+
+Regression: `scripts/verify-direct-a2mcp.mjs` completes a checkout, reorders the same signed fee payload into different header bytes, and retrieves the retained result without issuing, funding, calling, capturing, or releasing again.
+
 ### M-01: Vault owner could replace the manager
 
 Severity: Medium

@@ -187,7 +187,7 @@ function acceptedRequirementsHash(accepted) {
   }
 }
 
-function canonicalProviderAuthorizationIdentity(accepted, authorization) {
+export function canonicalEip3009AuthorizationIdentity(accepted, authorization) {
   const digest = sha256({
     protocol: "eip3009",
     chainId: XLAYER.id,
@@ -315,7 +315,7 @@ async function providerPaymentAuthorization(
   } catch {
     throw new ProviderRelayError("provider_payment_signature_invalid", 400);
   }
-  const identity = canonicalProviderAuthorizationIdentity(accepted, authorization);
+  const identity = canonicalEip3009AuthorizationIdentity(accepted, authorization);
   return {
     accepted,
     authorization: {
@@ -946,7 +946,7 @@ export const __test = {
   createPinnedLookup,
   privateIp,
   acceptedRequirementsHash,
-  canonicalProviderAuthorizationIdentity,
+  canonicalEip3009AuthorizationIdentity,
   providerPaymentAuthorization,
   validateProviderChallenge,
   verifyProviderPaymentSettlement,

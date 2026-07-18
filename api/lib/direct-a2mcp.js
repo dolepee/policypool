@@ -9,7 +9,10 @@ import { COVERAGE, PAYMENT, XLAYER } from "./config.js";
 import { createChainService } from "./chain.js";
 import { DirectA2mcpStateError } from "./direct-a2mcp-store.js";
 import { PolicyFeeEscrowError } from "./policy-fee-escrow.js";
-import { ProviderRelayError } from "./provider-relay.js";
+import {
+  canonicalEip3009AuthorizationIdentity,
+  ProviderRelayError,
+} from "./provider-relay.js";
 import { UniversalIssuerError } from "./universal-issuer.js";
 import {
   formatUsdtAtomic,
@@ -187,7 +190,8 @@ async function verifyFeePayment({ raw, record, token, chain, nowMs, allowExpired
   } catch {
     throw new DirectA2mcpError("policy_fee_signature_invalid", 400);
   }
-  return { authorization, signature, paymentHash: `sha256:${sha256(raw)}` };
+  const identity = canonicalEip3009AuthorizationIdentity(accepted, authorization);
+  return { authorization, signature, paymentHash: identity.id };
 }
 
 function validateProviderRequest(record, providerRequest) {
