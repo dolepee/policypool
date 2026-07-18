@@ -511,6 +511,102 @@ async function verifyDirectAuthorizationBinding({
   return authorization;
 }
 
+async function verifyPolicyFeeAuthorizationBinding({
+  context,
+  covenant,
+  policy,
+  fee,
+  providerAuthorization,
+  configuration,
+  publicClient,
+  chain,
+  now,
+}) {
+  const evidence = context.policyFeeAuthorizationEvidence;
+  let validAfter;
+  let validBefore;
+  let expectedNonce;
+  let expectedId;
+  try {
+    validAfter = BigInt(evidence?.validAfter);
+    validBefore = BigInt(evidence?.validBefore);
+    expectedNonce = await read(
+      publicClient,
+      configuration.feeEscrow,
+      ESCROW_ABI,
+      "authorizationNonce",
+      [
+        covenant.policyId,
+        covenant.jobId,
+        covenant.buyer,
+        providerAuthorization.hash,
+        validAfter,
+        validBefore,
+        BigInt(providerAuthorization.authorization.validBefore),
+      ],
+    );
+    expectedId = await read(
+      publicClient,
+      configuration.feeEscrow,
+      ESCROW_ABI,
+      "authorizationId",
+      [covenant.buyer, validAfter, validBefore, expectedNonce],
+    );
+  } catch (error) {
+    if (error instanceof EvidenceAttesterError && error.status === 503) throw error;
+    throw new EvidenceAttesterError("fee_authorization_evidence_invalid");
+  }
+  const feeAmount = await read(publicClient, configuration.feeEscrow, ESCROW_ABI, "feeAmountAtomic");
+  const expectedFeeAmount = BigInt(covenant.coverageCapAtomic) * BigInt(policy.terms.premiumBps) / 10_000n;
+  let verified;
+  try {
+    verified = await verifyFeePayment({
+      raw: evidence?.paymentSignature,
+      record: {
+        buyer: covenant.buyer,
+        feeEscrow: configuration.feeEscrow,
+        feeAmountAtomic: BigInt(feeAmount).toString(),
+        feeValidAfter: Number(validAfter),
+        feeValidBefore: Number(validBefore),
+        feeNonce: expectedNonce,
+        feeMaxTimeoutSeconds: Number(evidence?.maxTimeoutSeconds),
+      },
+      token: evidence?.quoteToken,
+      chain,
+      nowMs: now(),
+      allowExpired: true,
+    });
+  } catch {
+    throw new EvidenceAttesterError("fee_authorization_evidence_invalid");
+  }
+  if (
+    BigInt(feeAmount) !== expectedFeeAmount
+    || !sameBytes32(expectedNonce, evidence?.nonce)
+    || !sameBytes32(expectedId, covenant.feeAuthorizationHash)
+    || !sameBytes32(verified.authorization?.nonce, expectedNonce)
+    || Number(verified.authorization?.validBefore) !== Number(covenant.feeAuthorizationValidBefore)
+    || (Number(fee.state) === FEE.refunded
+      && (
+        !sameBytes32(fee.covenantId, covenant.id)
+        || !sameAddress(fee.buyer, covenant.buyer)
+        || !sameBytes32(fee.providerAuthorizationHash, providerAuthorization.hash)
+        || String(fee.amountAtomic) !== expectedFeeAmount.toString()
+      ))
+  ) throw new EvidenceAttesterError("fee_authorization_covenant_mismatch");
+  const consumed = await read(
+    publicClient,
+    configuration.paymentAsset,
+    PAYMENT_ASSET_ABI,
+    "authorizationState",
+    [covenant.buyer, expectedNonce],
+  );
+  const expectedConsumed = Number(fee.state) === FEE.refunded;
+  if (consumed !== expectedConsumed) {
+    throw new EvidenceAttesterError("fee_authorization_state_mismatch", 409);
+  }
+  return { id: expectedId, nonce: expectedNonce, validAfter, validBefore };
+}
+
 async function verifyRelayBinding({
   receipt,
   covenant,
@@ -583,6 +679,17 @@ async function verifyLifecycle({ action, request, configuration, publicClient, c
       now,
       expectedConsumed: false,
     });
+    const policyFeeAuthorization = await verifyPolicyFeeAuthorizationBinding({
+      context,
+      covenant,
+      policy,
+      fee,
+      providerAuthorization,
+      configuration,
+      publicClient,
+      chain,
+      now,
+    });
     if (
       !sameBytes32(providerAuthorization.authorization?.nonce, context.nonSettlement?.authorizationNonce)
       || !sameBytes32(context.nonSettlement?.providerAuthorizationHash, providerAuthorization.hash)
@@ -591,6 +698,10 @@ async function verifyLifecycle({ action, request, configuration, publicClient, c
         !== Number(providerAuthorization.authorization?.validAfter)
       || Number(context.nonSettlement?.authorizationValidBefore)
         !== Number(providerAuthorization.authorization?.validBefore)
+      || !sameBytes32(context.nonSettlement?.policyFeeAuthorizationHash, policyFeeAuthorization.id)
+      || !sameBytes32(context.nonSettlement?.policyFeeAuthorizationNonce, policyFeeAuthorization.nonce)
+      || Number(context.nonSettlement?.policyFeeAuthorizationValidBefore)
+        !== Number(policyFeeAuthorization.validBefore)
       || Number(evidence.observedAt) <= Number(providerAuthorization.authorization?.validBefore)
     ) throw new EvidenceAttesterError("provider_authorization_covenant_mismatch");
     const search = context.providerSettlementSearch;

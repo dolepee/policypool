@@ -25,7 +25,7 @@ The attester does not sign a digest supplied by the relayer without reconstructi
 
 For direct A2MCP issuance, reconstruction includes both buyer-signed EIP-3009 authorizations, their unused on-chain nonce states, the raw provider request, provider challenge hash, synthetic job ID, acceptance evidence hash, fee nonce, fee ID, policy fingerprint, provider bond, cap, enrollment window, and active on-chain policy.
 
-For relay-driven actions, the attester verifies the signed relay receipt, binds its canonical payment-authorization identity to the provider-authorization hash stored in PolicyFeeEscrow, and verifies the exact provider settlement transaction on X Layer. An unpaid cancellation is rejected while the policy fee is `Funded` or `Captured`; after refund it reconstructs the original provider authorization and covenant binding, requires the USD₮0 authorization nonce to remain unused on-chain, and performs an independent authorization-nonce settlement search before signing. A timeout or relayer error is never accepted as proof of non-settlement.
+For relay-driven actions, the attester verifies the signed relay receipt, binds its canonical payment-authorization identity to the provider-authorization hash stored in PolicyFeeEscrow, and verifies the exact provider settlement transaction on X Layer. An unpaid cancellation is rejected while the policy fee is `Funded` or `Captured`; after refund or a never-funded attempt it reconstructs both original buyer authorizations and covenant bindings, verifies their USD₮0 nonce states against the fee record, and performs an independent provider-authorization settlement search before signing. A timeout or relayer error is never accepted as proof of non-settlement.
 
 ## Deployment separation
 

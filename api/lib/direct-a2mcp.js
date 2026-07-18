@@ -124,6 +124,17 @@ export function directProviderAuthorizationEvidence(record, paymentSignature) {
   };
 }
 
+export function directPolicyFeeAuthorizationEvidence(record, paymentSignature, quoteToken) {
+  return {
+    paymentSignature,
+    quoteToken,
+    nonce: record.feeNonce,
+    validAfter: record.feeValidAfter,
+    validBefore: record.feeValidBefore,
+    maxTimeoutSeconds: record.feeMaxTimeoutSeconds,
+  };
+}
+
 function sameAddress(left, right) {
   try {
     return getAddress(left) === getAddress(right);
@@ -500,6 +511,8 @@ export function createDirectA2mcpCoordinator({
       record = await state.retainRecovery(token, executionId, {
         providerRequest,
         providerPaymentSignature,
+        policyFeePaymentSignature,
+        quoteToken: token,
       });
       const acceptedAtMs = record.execution.startedAtMs;
       const acceptedAt = new Date(acceptedAtMs).toISOString();

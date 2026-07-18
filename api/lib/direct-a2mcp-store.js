@@ -157,9 +157,19 @@ function normalizedRecoveryContext(input) {
   if (!providerPaymentSignature) {
     throw new DirectA2mcpStateError("direct_recovery_payment_signature_invalid", 503);
   }
+  const policyFeePaymentSignature = clean(input.policyFeePaymentSignature, 16_000);
+  if (!policyFeePaymentSignature) {
+    throw new DirectA2mcpStateError("direct_recovery_fee_signature_invalid", 503);
+  }
+  const quoteToken = clean(input.quoteToken, 512);
+  if (!TOKEN_PATTERN.test(quoteToken)) {
+    throw new DirectA2mcpStateError("direct_recovery_quote_token_invalid", 503);
+  }
   const context = {
     providerRequest: clone(input.providerRequest),
     providerPaymentSignature,
+    policyFeePaymentSignature,
+    quoteToken,
   };
   if (Buffer.byteLength(stableStringify(context)) > MAX_RECOVERY_CONTEXT_BYTES) {
     throw new DirectA2mcpStateError("direct_recovery_context_too_large", 503);

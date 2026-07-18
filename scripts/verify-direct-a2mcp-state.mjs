@@ -49,11 +49,14 @@ assert.deepEqual((await state.listExecuting()).map((record) => record.id), [issu
 const recoveryContext = {
   providerRequest: { target_url: "https://policypool.vercel.app/api/covered-job-receipt" },
   providerPaymentSignature: "provider-payment-signature-sensitive-test-value",
+  policyFeePaymentSignature: "policy-fee-payment-signature-sensitive-test-value",
+  quoteToken: issued.token,
 };
 await state.retainRecovery(issued.token, executionId, recoveryContext);
 assert.deepEqual(await state.recoveryContext(issued.id, executionId), recoveryContext);
 const encryptedExecution = await store.get(issued.id);
 assert.equal(JSON.stringify(encryptedExecution).includes(recoveryContext.providerPaymentSignature), false);
+assert.equal(JSON.stringify(encryptedExecution).includes(recoveryContext.policyFeePaymentSignature), false);
 assert.equal(JSON.stringify(encryptedExecution).includes(recoveryContext.providerRequest.target_url), false);
 await assert.rejects(
   () => state.retainRecovery(issued.token, executionId, {

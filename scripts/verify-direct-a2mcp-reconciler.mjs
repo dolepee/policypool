@@ -33,6 +33,10 @@ function directRecord() {
     providerAuthorizationValidAfter: 0,
     providerAuthorizationValidBefore: 1784290200,
     providerAuthorizationHash: `0x${"88".repeat(32)}`,
+    feeNonce: feeId,
+    feeValidAfter: 0,
+    feeValidBefore: 1784290200,
+    feeMaxTimeoutSeconds: 600,
     covenantId,
     jobId,
     feeId,
@@ -110,6 +114,8 @@ function harness({
       return {
         providerRequest: { target_url: "https://policypool.vercel.app/api/covered-job-receipt" },
         providerPaymentSignature: "provider-payment-signature",
+        policyFeePaymentSignature: "policy-fee-payment-signature",
+        quoteToken: "ppd_00000000000000000000000000000001.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       };
     },
     async reconcileCheckpoint(_id, _executionId, stage, value) {
@@ -238,6 +244,14 @@ assert.deepEqual(unsettled.getCancelContext().providerAuthorizationEvidence, {
   authorizationId,
   validAfter: 0,
   validBefore: directRecord().providerAuthorizationValidBefore,
+});
+assert.deepEqual(unsettled.getCancelContext().policyFeeAuthorizationEvidence, {
+  paymentSignature: "policy-fee-payment-signature",
+  quoteToken: "ppd_00000000000000000000000000000001.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  nonce: feeId,
+  validAfter: 0,
+  validBefore: directRecord().feeValidBefore,
+  maxTimeoutSeconds: 600,
 });
 assert.equal(
   unsettled.getCancelContext().nonSettlement.settlementSearchNotBefore,

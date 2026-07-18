@@ -527,6 +527,9 @@ const nonSettlement = {
   authorizationNonce: providerNonce,
   authorizationValidAfter: 0,
   authorizationValidBefore: providerValidBefore,
+  policyFeeAuthorizationHash: feeId,
+  policyFeeAuthorizationNonce: feeNonce,
+  policyFeeAuthorizationValidBefore: feeValidBefore,
   settlementSearchNotBefore: providerValidBefore - 500,
   settlementSearchResult: "not_found",
   observedAt: cancellationNowSeconds,
@@ -557,6 +560,14 @@ const cancelRequest = {
       validAfter: 0,
       validBefore: providerValidBefore,
     },
+    policyFeeAuthorizationEvidence: {
+      paymentSignature: policyFeePaymentSignature,
+      quoteToken,
+      nonce: feeNonce,
+      validAfter: 0,
+      validBefore: feeValidBefore,
+      maxTimeoutSeconds: feeMaxTimeoutSeconds,
+    },
     providerSettlementSearch: {
       payer: buyer.address,
       payTo: provider,
@@ -576,8 +587,18 @@ assert.equal(settlementSearches, 0, "a funded fee must fail before any cancellat
 
 currentFee.state = 3;
 cancelRequest.context.policyFeeState = 3;
+consumedAuthorizationNonces.add(feeNonce.toLowerCase());
 assert.equal((await primary.attest(cancelRequest)).signatures.length, 3);
 assert.equal(settlementSearches, 1);
+currentFee.state = 0;
+cancelRequest.context.policyFeeState = 0;
+await assert.rejects(
+  () => primary.attest(cancelRequest),
+  (error) => error instanceof EvidenceAttesterError
+    && error.code === "fee_authorization_state_mismatch",
+);
+currentFee.state = 3;
+cancelRequest.context.policyFeeState = 3;
 consumedAuthorizationNonces.add(providerNonce.toLowerCase());
 await assert.rejects(
   () => primary.attest(cancelRequest),
@@ -635,4 +656,4 @@ await handler({
 assert.equal(authorizedResponse.statusCode, 200);
 assert.equal(JSON.parse(authorizedResponse.body).ok, true);
 
-console.log("PolicyPool evidence attester passed: independent direct issuance derivation, ordered quorum signatures, relay/settlement verification, funded-cancellation refusal, non-settlement search, and authenticated handler behavior.");
+console.log("PolicyPool evidence attester passed: independent two-authorization derivation, ordered quorum signatures, exact relay/settlement binding, refund-aware cancellation, on-chain nonce state, and authenticated handler behavior.");

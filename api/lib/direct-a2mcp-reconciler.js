@@ -3,7 +3,10 @@ import {
   directPolicyFeeSettlementAction,
   finalizeDirectPolicyFee,
 } from "./direct-policy-fee.js";
-import { directProviderAuthorizationEvidence } from "./direct-a2mcp.js";
+import {
+  directPolicyFeeAuthorizationEvidence,
+  directProviderAuthorizationEvidence,
+} from "./direct-a2mcp.js";
 import { ProviderRelayError, verifyProviderRelayReceipt } from "./provider-relay.js";
 import { isBytes32, stableStringify } from "./utils.js";
 
@@ -364,6 +367,9 @@ export function createDirectA2mcpReconciler({
       authorizationNonce: record.providerAuthorizationNonce,
       authorizationValidAfter: record.providerAuthorizationValidAfter,
       authorizationValidBefore: record.providerAuthorizationValidBefore,
+      policyFeeAuthorizationHash: record.feeId,
+      policyFeeAuthorizationNonce: record.feeNonce,
+      policyFeeAuthorizationValidBefore: record.feeValidBefore,
       settlementSearchNotBefore,
       settlementSearchResult: "not_found",
       observedAt: nowSeconds,
@@ -399,6 +405,11 @@ export function createDirectA2mcpReconciler({
             providerAuthorizationEvidence: directProviderAuthorizationEvidence(
               record,
               recovery.providerPaymentSignature,
+            ),
+            policyFeeAuthorizationEvidence: directPolicyFeeAuthorizationEvidence(
+              record,
+              recovery.policyFeePaymentSignature,
+              recovery.quoteToken,
             ),
             providerSettlementSearch: {
               payer: record.buyer,
