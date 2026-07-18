@@ -24,6 +24,7 @@ const configuration = {
   bondVault: "0x2000000000000000000000000000000000000002",
   a2aAdapter: "0x3000000000000000000000000000000000000003",
   relayAdapter: "0x4000000000000000000000000000000000000004",
+  feeEscrow: "0x5000000000000000000000000000000000000005",
   directFeeAtomic: 100_000,
   maximumSlaSeconds: 604800,
 };
@@ -48,6 +49,7 @@ const reads = {
   nonces: 3n,
   minimumBondAtomic: 500_000n,
   availableBond: 2_000_000n,
+  feeAmountAtomic: 100_000n,
 };
 const onchainPolicyId = `0x${"11".repeat(32)}`;
 const serviceKey = `0x${"22".repeat(32)}`;
@@ -259,8 +261,19 @@ const derivedPremium = await service.prepare({ ...input, premiumBps: undefined }
 assert.equal(derivedPremium.terms.premiumBps, 2000);
 await assert.rejects(
   () => service.prepare({ ...input, maxCapUSDT: "0.6", premiumBps: undefined }),
+  (error) => error instanceof ProviderEnrollmentError
+    && error.code === "direct_policy_cap_exceeds_service_price",
+);
+await assert.rejects(
+  () => service.prepare({ ...input, maxCapUSDT: "0.3", premiumBps: undefined }),
   (error) => error instanceof ProviderEnrollmentError && error.code === "direct_fee_not_expressible_for_cap",
 );
+reads.feeAmountAtomic = 99_999n;
+await assert.rejects(
+  () => service.prepare(input),
+  (error) => error instanceof ProviderEnrollmentError && error.code === "direct_fee_escrow_mismatch",
+);
+reads.feeAmountAtomic = 100_000n;
 reads.availableBond = 100_000n;
 await assert.rejects(
   () => service.prepare(input),
@@ -317,4 +330,4 @@ const noDoubleRecovery = computeNetLossPayout({
 assert.equal(noDoubleRecovery.payoutAtomic, 0n);
 assert.equal(noDoubleRecovery.fullyRecovered, true);
 
-console.log("PolicyPool provider enrollment passed: ownership, bond, signed terms, deduplicated demand, exposure, and net-loss gates.");
+console.log("PolicyPool provider enrollment passed: ownership, live direct price/fee, bond, signed terms, deduplicated demand, exposure, and net-loss gates.");

@@ -251,6 +251,9 @@ assert.match(reconciliationWorkflow, /https:\/\/policypool\.vercel\.app\/api\/di
 assert.match(reconciliationWorkflow, /https:\/\/policypool\.vercel\.app\/api\/reconcile-direct-a2mcp/);
 assert.match(reconciliationWorkflow, /json\.load\(sys\.stdin\)\.get\("enabled"\) is True/);
 assert.match(universalPolicy, /servicePriceAtomic:\s*servicePriceAtomic\.toString\(\)/);
+assert.match(enrollment, /function feeAmountAtomic\(\) view returns \(uint128\)/);
+assert.match(enrollment, /direct_policy_cap_exceeds_service_price/);
+assert.match(enrollment, /direct_fee_escrow_mismatch/);
 assert.match(enrollment, /direct_fee_not_expressible_for_cap/);
 assert.match(enrollment, /direct_fee_premium_mismatch/);
 assert.match(enrollment, /functionName:\s*"getPolicy"/);

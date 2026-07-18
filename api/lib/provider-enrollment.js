@@ -53,6 +53,9 @@ const POLICY_REGISTERED_EVENT = parseAbiItem(
 const BOND_ABI = parseAbi([
   "function availableBond(address provider) view returns (uint256)",
 ]);
+const FEE_ESCROW_ABI = parseAbi([
+  "function feeAmountAtomic() view returns (uint128)",
+]);
 
 export class ProviderEnrollmentError extends Error {
   constructor(code, status = 422) {
@@ -222,7 +225,33 @@ export function createProviderEnrollmentService({
     if (maxCapAtomic <= 0n) throw new ProviderEnrollmentError("max_cap_invalid");
     let premiumBps = integer(input?.premiumBps ?? 0, "premium_bps", 0, 10_000);
     if (service.serviceType === "A2MCP") {
-      const directFeeAtomic = BigInt(configuration.directFeeAtomic || 100_000);
+      const servicePriceAtomic = parseUsdtAtomic(service.price, PAYMENT.decimals);
+      if (servicePriceAtomic <= 0n) {
+        throw new ProviderEnrollmentError("direct_service_price_invalid");
+      }
+      if (maxCapAtomic > servicePriceAtomic) {
+        throw new ProviderEnrollmentError("direct_policy_cap_exceeds_service_price");
+      }
+      if (!configuration.feeEscrow) {
+        throw new ProviderEnrollmentError("direct_fee_escrow_unavailable", 503);
+      }
+      if (!Number.isSafeInteger(configuration.directFeeAtomic) || configuration.directFeeAtomic <= 0) {
+        throw new ProviderEnrollmentError("direct_fee_configuration_invalid", 503);
+      }
+      let escrowFeeAtomic;
+      try {
+        escrowFeeAtomic = BigInt(await client.readContract({
+          address: configuration.feeEscrow,
+          abi: FEE_ESCROW_ABI,
+          functionName: "feeAmountAtomic",
+        }));
+      } catch {
+        throw new ProviderEnrollmentError("direct_fee_escrow_unavailable", 503);
+      }
+      const directFeeAtomic = BigInt(configuration.directFeeAtomic);
+      if (escrowFeeAtomic !== directFeeAtomic) {
+        throw new ProviderEnrollmentError("direct_fee_escrow_mismatch", 503);
+      }
       const premiumNumerator = directFeeAtomic * 10_000n;
       if (premiumNumerator % maxCapAtomic !== 0n) {
         throw new ProviderEnrollmentError("direct_fee_not_expressible_for_cap");

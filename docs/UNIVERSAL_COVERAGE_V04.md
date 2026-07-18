@@ -298,7 +298,7 @@ Rollback stops new issuance by setting `POLICYPOOL_UNIVERSAL_ENABLED=false`. Exi
 - A2MCP coverage must use `/api/direct-a2mcp` or the covenant-bound PolicyPool relay. OKX Task Marketplace is A2A-only and cannot execute an A2MCP service.
 - Relay execution is at-most-once. An uncertain provider response requires investigation rather than an automatic paid retry.
 - Direct checkout can recover a proven provider settlement without another call, but if the upstream response was not durably captured it cannot reconstruct the deliverable and therefore holds coverage for manual resolution.
-- The direct fee escrow is fixed at `0.1 USD₮0`; a direct policy cap is eligible only when its derived basis-point rate represents that amount exactly.
+- The direct fee escrow is fixed at `0.1 USD₮0`; enrollment verifies that immutable on-chain amount, rejects a cap above the live service price, and accepts a direct policy cap only when its derived basis-point rate represents the fee exactly.
 - Coverage-fee failure never masquerades as provider delivery. The exact fee authorization is bound at issuance; uncertain issuance remains durable until expiry and chain recheck, after which quorum-attested non-settlement can cancel an unpaid covenant and unlock a clean retry.
 - Policy expiry is the last issuance time, not the deadline by which an existing covenant must finish.
 - Discretionary provider premiums, shared-reserve co-coverage, subjective quality claims, ratings, additional chains, and discretionary automated payouts remain out of scope.
