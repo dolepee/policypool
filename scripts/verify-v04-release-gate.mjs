@@ -241,6 +241,8 @@ assert.match(chain, /provider_payment_authorization_transfer_mismatch/);
 assert.match(chain, /receipt\.logs\[authorizationIndex \+ 1\]/);
 assert.match(evidenceAttester, /sameSha256Id\(receipt\.request\?\.hash, requestHash\)/);
 assert.match(evidenceAttester, /requestHash:\s*String\(evidence\.requestHash\)\.toLowerCase\(\)/);
+assert.match(evidenceAttester, /cap > buyerPaid/);
+assert.doesNotMatch(evidenceAttester, /buyerPaid !== cap/);
 assert.match(chain, /verifyProviderPaymentAuthorization/);
 assert.match(chain, /findProviderSettlement/);
 assert.match(chain, /MAX_PROVIDER_SETTLEMENT_SEARCH_SECONDS = 20 \* 60/);

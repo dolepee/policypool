@@ -253,6 +253,7 @@ let currentFee = {
   refundAvailableAt: BigInt(feeValidBefore + 120),
   state: 1,
 };
+let currentFeeAmountAtomic = 100000n;
 let settlementSearchResult = null;
 let settlementSearches = 0;
 let settlementVerifications = 0;
@@ -279,7 +280,7 @@ const publicClient = {
     }
     if (functionName === "authorizationNonce") return feeNonce;
     if (functionName === "authorizationId") return feeId;
-    if (functionName === "feeAmountAtomic") return 100000n;
+    if (functionName === "feeAmountAtomic") return currentFeeAmountAtomic;
     if (functionName === "getCovenant") return structuredClone(currentCovenant);
     if (functionName === "getFee") return structuredClone(currentFee);
     if (functionName.endsWith("EvidenceDigest")) return currentDigest;
@@ -338,6 +339,35 @@ assert.deepEqual(
   [...recoveredIssueSigners].map((item) => item.toLowerCase()).sort(),
   "signatures must be ordered by recovered address",
 );
+
+const originalPolicyCap = policy.terms.maxCapAtomic;
+const partialCoverageIssue = structuredClone(issueRequest);
+partialCoverageIssue.evidence.coverageCapAtomic = "300000";
+const partialFeeAccepted = { ...feeAccepted, amount: "60000" };
+const partialFeeAuthorization = { ...feeAuthorization, value: "60000" };
+partialCoverageIssue.context.directA2mcp.policyFeePaymentSignature = await paymentHeader(
+  partialFeeAccepted,
+  partialFeeAuthorization,
+);
+policy.terms.maxCapAtomic = 300000n;
+currentFeeAmountAtomic = 60000n;
+assert.equal(
+  (await primary.attest(partialCoverageIssue)).signatures.length,
+  3,
+  "a policy cap below the signed provider service price must remain issuable",
+);
+
+const overInsuredIssue = structuredClone(issueRequest);
+overInsuredIssue.evidence.coverageCapAtomic = "600000";
+policy.terms.maxCapAtomic = 600000n;
+await assert.rejects(
+  () => primary.attest(overInsuredIssue),
+  (error) => error instanceof EvidenceAttesterError
+    && error.code === "issue_evidence_policy_mismatch",
+  "coverage must never exceed the buyer's signed provider payment",
+);
+policy.terms.maxCapAtomic = originalPolicyCap;
+currentFeeAmountAtomic = 100000n;
 
 consumedAuthorizationNonces.add(providerNonce.toLowerCase());
 await assert.rejects(

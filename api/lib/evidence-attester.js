@@ -327,7 +327,7 @@ async function verifyIssue({ request, configuration, publicClient, chain, now })
     || Number(terms.clockMode) !== 1
     || !sameAddress(terms.adapter, configuration.relayVerifier)
     || cap !== BigInt(terms.maxCapAtomic)
-    || buyerPaid !== cap
+    || cap > buyerPaid
     || enrollmentExpiresAt !== verifiedAcceptanceAt + Number(terms.enrollmentWindowSeconds)
     || verifiedAcceptanceAt > nowSeconds
     || nowSeconds > enrollmentExpiresAt
