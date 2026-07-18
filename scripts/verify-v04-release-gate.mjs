@@ -233,6 +233,7 @@ assert.match(directCoordinator, /directProviderAuthorizationEvidence/);
 assert.match(directCoordinator, /providerRequestHash:\s*bound\.requestHash/);
 assert.match(providerRelay, /grant\.providerRequestHash && grant\.providerRequestHash !== requestHash/);
 assert.match(directReconciler, /if \(!relayGrant\?\.token\) return null/);
+assert.match(directReconciler, /receipt\?\.request\?\.hash[\s\S]*record\.requestHash/);
 assert.match(directReconciler, /coverage_clock_recovery_expired/);
 assert.match(reconciler, /relay_clock_recovery_pending/);
 assert.match(chain, /event AuthorizationUsed\(address indexed authorizer, bytes32 indexed nonce\)/);

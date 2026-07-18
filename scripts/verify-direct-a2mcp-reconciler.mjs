@@ -53,7 +53,7 @@ function relayReceipt({ delivered = true, recovered = false } = {}) {
     receiptDigest,
     covenantId,
     provider: { targetJobId: jobId },
-    request: { paymentVerified: true, paymentAuthorizationId: authorizationId },
+    request: { hash: requestHash, paymentVerified: true, paymentAuthorizationId: authorizationId },
     response: recovered
       ? { status: null, hash: null, recovery: "provider_settlement_found_without_durable_upstream_response" }
       : { status: delivered ? 200 : 500, hash: `sha256:${"aa".repeat(32)}` },
@@ -399,5 +399,20 @@ const invalidReceipt = harness({ receipt: { receiptId: "malformed" } });
 const invalidReceiptResult = await invalidReceipt.reconcile();
 assert.equal(invalidReceiptResult.ok, false);
 assert.equal(invalidReceipt.getRotations(), 1, "failed executions must rotate instead of starving the queue");
+
+const substitutedRequestReceipt = relayReceipt();
+substitutedRequestReceipt.request.hash = `sha256:${"ff".repeat(32)}`;
+const substitutedRequest = harness({ receipt: substitutedRequestReceipt });
+const substitutedRequestResult = await substitutedRequest.reconcile();
+assert.equal(substitutedRequestResult.ok, false);
+assert.equal(
+  substitutedRequestResult.failures[0].error,
+  "direct_relay_receipt_binding_mismatch",
+);
+assert.deepEqual(
+  substitutedRequest.calls,
+  { cancel: 0, capture: 0, mark: 0, refund: 0, release: 0, settle: 0, start: 0 },
+  "an alternate-request receipt must fail before any lifecycle or fee action",
+);
 
 console.log("PolicyPool direct A2MCP reconciler passed: unattended lifecycle handling plus fair rotation for holds and failures.");

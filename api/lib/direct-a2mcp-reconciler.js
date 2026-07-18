@@ -52,6 +52,8 @@ function validateRelayBinding(record, receipt) {
     || !isBytes32(receipt?.settlement?.transaction)
     || String(receipt?.covenantId || "").toLowerCase() !== record.covenantId
     || String(receipt?.provider?.targetJobId || "").toLowerCase() !== record.jobId
+    || String(receipt?.request?.hash || "").toLowerCase()
+      !== String(record.requestHash || "").toLowerCase()
     || String(receipt?.request?.paymentAuthorizationId || "") !== record.providerAuthorizationId
     || String(receipt?.settlement?.authorizationNonce || "").toLowerCase()
       !== record.providerAuthorizationNonce
