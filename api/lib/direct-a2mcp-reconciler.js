@@ -3,6 +3,7 @@ import {
   directPolicyFeeSettlementAction,
   finalizeDirectPolicyFee,
 } from "./direct-policy-fee.js";
+import { directProviderAuthorizationEvidence } from "./direct-a2mcp.js";
 import { ProviderRelayError, verifyProviderRelayReceipt } from "./provider-relay.js";
 import { isBytes32, stableStringify } from "./utils.js";
 
@@ -134,6 +135,15 @@ export function createDirectA2mcpReconciler({
       });
       return;
     }
+    const retained = dryRun ? null : await state.recoveryContext(record.id, record.execution.id);
+    const lifecycleAttestationContext = dryRun ? null : {
+      relayReceipt: receipt,
+      directQuote: record.id,
+      providerAuthorizationEvidence: directProviderAuthorizationEvidence(
+        record,
+        retained.providerPaymentSignature,
+      ),
+    };
     if (Number(covenant.state) === COVENANT.pendingStart) {
       const nowSeconds = Math.floor(now() / 1_000);
       const clockRecoveryEndsAt = Number(covenant.feeAuthorizationValidBefore)
@@ -190,7 +200,7 @@ export function createDirectA2mcpReconciler({
           record.covenantId,
           receipt.clock.startedAt,
           receipt.receiptDigest,
-          { relayReceipt: receipt, directQuote: record.id },
+          lifecycleAttestationContext,
         );
         record = await checkpoint(record, "clockStarted", write, false);
         covenant = await issuer.getCovenant(record.covenantId);
@@ -214,7 +224,7 @@ export function createDirectA2mcpReconciler({
             providerSettlementTransaction: receipt.settlement.transaction,
             observedAt: Math.floor(now() / 1_000),
           },
-          context: { relayReceipt: receipt, directQuote: record.id },
+          context: lifecycleAttestationContext,
           now,
         });
         fee = feeResolution.fee;
@@ -233,7 +243,7 @@ export function createDirectA2mcpReconciler({
             record.covenantId,
             receipt.clock.completedAt,
             receipt.receiptDigest,
-            { relayReceipt: receipt, directQuote: record.id },
+            lifecycleAttestationContext,
           );
           record = await checkpoint(record, "coverageReleased", write, false);
           covenant = await issuer.getCovenant(record.covenantId);
@@ -264,7 +274,7 @@ export function createDirectA2mcpReconciler({
           const write = await issuer.markPayoutDue(
             record.covenantId,
             evidenceHash(breach),
-            { breach, relayReceipt: receipt },
+            { ...lifecycleAttestationContext, breach },
           );
           record = await checkpoint(record, "payoutDue", write, false);
           covenant = await issuer.getCovenant(record.covenantId);
@@ -293,7 +303,7 @@ export function createDirectA2mcpReconciler({
             "0",
             true,
             evidenceHash(recovery),
-            { recovery, relayReceipt: receipt },
+            { ...lifecycleAttestationContext, recovery },
           );
           record = await checkpoint(record, "coverageSettled", write, false);
           covenant = await issuer.getCovenant(record.covenantId);
@@ -339,6 +349,8 @@ export function createDirectA2mcpReconciler({
       holds.push({ quoteId: record.id, reason: "fee_refund_delay_active", refundReadyAt });
       return;
     }
+    const settlementSearchNotBefore = Math.floor(Number(record.execution?.startedAtMs || 0) / 1_000)
+      || Math.max(1, Number(record.providerAuthorizationValidBefore) - 15 * 60);
     const nonSettlement = {
       protocol: "PolicyPool Direct A2MCP",
       version: "0.4.0",
@@ -347,30 +359,60 @@ export function createDirectA2mcpReconciler({
       buyer: record.buyer,
       provider: record.providerAccepted.payTo,
       amountAtomic: record.servicePriceAtomic,
+      providerAuthorizationHash: record.providerAuthorizationHash,
+      providerAuthorizationId: record.providerAuthorizationId,
       authorizationNonce: record.providerAuthorizationNonce,
+      authorizationValidAfter: record.providerAuthorizationValidAfter,
       authorizationValidBefore: record.providerAuthorizationValidBefore,
+      settlementSearchNotBefore,
       settlementSearchResult: "not_found",
       observedAt: nowSeconds,
     };
-    if ([COVENANT.pendingStart, COVENANT.active, COVENANT.payoutDue].includes(Number(covenant.state))) {
-      changes.push({ quoteId: record.id, action: "cancel_unpaid_coverage" });
-      if (!dryRun) {
-        const write = await issuer.cancelUnpaid(
-          record.covenantId,
-          record.feeId,
-          evidenceHash(nonSettlement),
-          { nonSettlement, directQuote: record.id },
-        );
-        record = await checkpoint(record, "coverageCancelledUnpaid", write, false);
-        covenant = await issuer.getCovenant(record.covenantId);
-      }
-    }
     if (Number(fee.state) === FEE.funded) {
       changes.push({ quoteId: record.id, action: "refund_policy_fee" });
       if (!dryRun) {
         const write = await feeEscrow.refund(record.feeId);
         record = await checkpoint(record, "feeRefunded", write, false);
         fee = await feeEscrow.getFee(record.feeId);
+      }
+    }
+    if (![FEE.none, FEE.refunded].includes(Number(fee.state))) {
+      holds.push({
+        quoteId: record.id,
+        reason: "policy_fee_not_refundable_provider_unsettled_manual_resolution",
+        feeState: Number(fee.state),
+      });
+      return;
+    }
+    if ([COVENANT.pendingStart, COVENANT.active, COVENANT.payoutDue].includes(Number(covenant.state))) {
+      changes.push({ quoteId: record.id, action: "cancel_unpaid_coverage" });
+      if (!dryRun) {
+        const recovery = await state.recoveryContext(record.id, record.execution.id);
+        const write = await issuer.cancelUnpaid(
+          record.covenantId,
+          record.feeId,
+          evidenceHash(nonSettlement),
+          {
+            nonSettlement,
+            directQuote: record.id,
+            policyFeeState: Number(fee.state),
+            providerAuthorizationEvidence: directProviderAuthorizationEvidence(
+              record,
+              recovery.providerPaymentSignature,
+            ),
+            providerSettlementSearch: {
+              payer: record.buyer,
+              payTo: record.providerAccepted.payTo,
+              asset: record.providerAccepted.asset,
+              amountAtomic: record.servicePriceAtomic,
+              authorizationNonce: record.providerAuthorizationNonce,
+              notBeforeTimestamp: settlementSearchNotBefore,
+              notAfterTimestamp: Number(record.providerAuthorizationValidBefore),
+            },
+          },
+        );
+        record = await checkpoint(record, "coverageCancelledUnpaid", write, false);
+        covenant = await issuer.getCovenant(record.covenantId);
       }
     }
     if (!dryRun) {

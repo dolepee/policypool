@@ -12,6 +12,8 @@ const authorizationNonce = `0x${"44".repeat(32)}`;
 const authorizationId = `sha256:${"55".repeat(32)}`;
 const receiptDigest = `0x${"66".repeat(32)}`;
 const settlementTransaction = `0x${"77".repeat(32)}`;
+const requestHash = `sha256:${"aa".repeat(32)}`;
+const requirementsHash = `sha256:${"bb".repeat(32)}`;
 
 function directRecord() {
   return {
@@ -24,8 +26,11 @@ function directRecord() {
     endpoint: "https://warden.example/audit",
     servicePriceAtomic: "500000",
     providerAccepted: { payTo: provider, asset: PAYMENT.asset },
+    requestHash,
+    providerRequirementsHash: requirementsHash,
     providerAuthorizationId: authorizationId,
     providerAuthorizationNonce: authorizationNonce,
+    providerAuthorizationValidAfter: 0,
     providerAuthorizationValidBefore: 1784290200,
     providerAuthorizationHash: `0x${"88".repeat(32)}`,
     covenantId,
@@ -71,6 +76,7 @@ function harness({
   feeState = 1,
   nowSeconds = 1784289700,
   relayGrant = true,
+  refundFails = false,
 } = {}) {
   let record = directRecord();
   if (!relayGrant) delete record.execution.stages.relayGrant;
@@ -93,6 +99,8 @@ function harness({
   let recoveries = 0;
   let expiries = 0;
   let rotations = 0;
+  let cancelContext = null;
+  const sequence = [];
   const calls = { cancel: 0, capture: 0, mark: 0, refund: 0, release: 0, settle: 0, start: 0 };
   const state = {
     async listExecuting() { return record.state === "executing" ? [structuredClone(record)] : []; },
@@ -138,12 +146,25 @@ function harness({
       return { transactionHash: `0x${"03".repeat(32)}` };
     },
     async settleNetLoss() { calls.settle += 1; covenant.state = 5; return { transactionHash: `0x${"04".repeat(32)}` }; },
-    async cancelUnpaid() { calls.cancel += 1; covenant.state = 7; return { transactionHash: `0x${"05".repeat(32)}` }; },
+    async cancelUnpaid(_covenantId, _feeId, _evidenceHash, context) {
+      assert.notEqual(fee.state, 1, "funded policy fees must be refunded before cancellation");
+      cancelContext = structuredClone(context);
+      calls.cancel += 1;
+      sequence.push("cancel");
+      covenant.state = 7;
+      return { transactionHash: `0x${"05".repeat(32)}` };
+    },
   };
   const feeEscrow = {
     async getFee() { return structuredClone(fee); },
     async capture() { calls.capture += 1; fee.state = 2; return { transactionHash: `0x${"06".repeat(32)}` }; },
-    async refund() { calls.refund += 1; fee.state = 3; return { transactionHash: `0x${"07".repeat(32)}` }; },
+    async refund() {
+      calls.refund += 1;
+      sequence.push("refund");
+      if (refundFails) throw new Error("refund_failed");
+      fee.state = 3;
+      return { transactionHash: `0x${"07".repeat(32)}` };
+    },
   };
   const reconciler = createDirectA2mcpReconciler({
     state,
@@ -170,10 +191,12 @@ function harness({
   return {
     calls,
     getRecord: () => structuredClone(record),
+    getCancelContext: () => structuredClone(cancelContext),
     getExpiries: () => expiries,
     getRecoveryContextReads: () => recoveryContextReads,
     getRecoveries: () => recoveries,
     getRotations: () => rotations,
+    getSequence: () => [...sequence],
     reconcile: (input) => reconciler.reconcile(input),
     setReceipt(value) { currentReceipt = value; },
     setRecoveredProviderResult(value) { recoveredProviderResult = value; },
@@ -197,6 +220,29 @@ const unsettled = harness({
 const unsettledResult = await unsettled.reconcile();
 assert.equal(unsettledResult.ok, true);
 assert.deepEqual(unsettled.calls, { cancel: 1, capture: 0, mark: 0, refund: 1, release: 0, settle: 0, start: 0 });
+assert.deepEqual(unsettled.getSequence(), ["refund", "cancel"]);
+assert.deepEqual(unsettled.getCancelContext().providerSettlementSearch, {
+  payer: buyer,
+  payTo: provider,
+  asset: PAYMENT.asset,
+  amountAtomic: "500000",
+  authorizationNonce,
+  notBeforeTimestamp: directRecord().providerAuthorizationValidBefore - 15 * 60,
+  notAfterTimestamp: directRecord().providerAuthorizationValidBefore,
+});
+assert.deepEqual(unsettled.getCancelContext().providerAuthorizationEvidence, {
+  paymentSignature: "provider-payment-signature",
+  requirementsHash,
+  requestHash,
+  authorizationHash: directRecord().providerAuthorizationHash,
+  authorizationId,
+  validAfter: 0,
+  validBefore: directRecord().providerAuthorizationValidBefore,
+});
+assert.equal(
+  unsettled.getCancelContext().nonSettlement.settlementSearchNotBefore,
+  directRecord().providerAuthorizationValidBefore - 15 * 60,
+);
 assert.equal(unsettled.getRecord().state, "complete");
 assert.equal(unsettled.getRecord().result.outcome, "cancelled_without_charge");
 assert.equal(unsettled.getRotations(), 1);
@@ -212,10 +258,35 @@ assert.deepEqual(
   missingGrant.calls,
   { cancel: 1, capture: 0, mark: 0, refund: 1, release: 0, settle: 0, start: 0 },
 );
+assert.deepEqual(missingGrant.getSequence(), ["refund", "cancel"]);
 assert.equal(missingGrant.getRecoveries(), 0);
-assert.equal(missingGrant.getRecoveryContextReads(), 0);
+assert.equal(missingGrant.getRecoveryContextReads(), 1);
 assert.equal(missingGrant.getRecord().state, "complete");
 assert.equal(missingGrant.getRecord().result.outcome, "cancelled_without_charge");
+
+const refundFailure = harness({
+  receipt: null,
+  nowSeconds: directRecord().providerAuthorizationValidBefore + 121,
+  refundFails: true,
+});
+const refundFailureResult = await refundFailure.reconcile();
+assert.equal(refundFailureResult.ok, false);
+assert.equal(refundFailure.calls.refund, 1);
+assert.equal(refundFailure.calls.cancel, 0);
+assert.deepEqual(refundFailure.getSequence(), ["refund"]);
+
+const capturedWithoutProvider = harness({
+  receipt: null,
+  feeState: 2,
+  nowSeconds: directRecord().providerAuthorizationValidBefore + 121,
+});
+const capturedWithoutProviderResult = await capturedWithoutProvider.reconcile();
+assert.equal(capturedWithoutProviderResult.ok, true);
+assert.equal(capturedWithoutProviderResult.holds[0].reason, "policy_fee_not_refundable_provider_unsettled_manual_resolution");
+assert.deepEqual(
+  capturedWithoutProvider.calls,
+  { cancel: 0, capture: 0, mark: 0, refund: 0, release: 0, settle: 0, start: 0 },
+);
 
 const expiredClockRecovery = harness({
   nowSeconds: directRecord().providerAuthorizationValidBefore + 10 * 60 + 1,

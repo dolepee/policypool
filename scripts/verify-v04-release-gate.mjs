@@ -55,6 +55,11 @@ const [
   read("vercel.json").then(JSON.parse),
   read(".github/workflows/reconcile-agent-coverage.yml"),
 ]);
+const [evidenceAttester, evidenceAttestHandler, evidenceAttesterRunbook] = await Promise.all([
+  read("api/lib/evidence-attester.js"),
+  read("attesters/evidence-attest.js"),
+  read("docs/EVIDENCE_ATTESTER_RUNBOOK.md"),
+]);
 const [
   feeEscrowContract,
   feeEscrowClient,
@@ -156,6 +161,22 @@ assert.match(reconciler, /coverage_issuance_outcome_pending/);
 assert.match(coveredReceipt, /paymentAuthorization:\s*feeAuthorization/);
 assert.match(coveredReceipt, /provider_bond_cancellation_pending_authorization_expiry/);
 assert.match(evidenceClient, /evidence_attestation_domain_invalid/);
+assert.match(evidenceAttester, /providerPaymentAuthorization/);
+assert.match(evidenceAttester, /verifyProviderSettlement/);
+assert.match(evidenceAttester, /findProviderSettlement/);
+assert.match(evidenceAttester, /authorizationState/);
+assert.match(evidenceAttester, /verifyDirectAuthorizationBinding/);
+assert.match(evidenceAttester, /authorizationIdForHash/);
+assert.match(evidenceAttester, /expectedConsumed:\s*false/);
+assert.match(evidenceAttester, /expectedConsumed:\s*true/);
+assert.match(evidenceAttester, /requireActive:\s*false/);
+assert.match(evidenceAttester, /\[FEE\.none, FEE\.refunded\]/);
+assert.match(evidenceAttester, /attestation_digest_mismatch/);
+assert.match(evidenceAttester, /attester_signer_set_mismatch/);
+assert.match(evidenceAttestHandler, /timingSafeEqual/);
+assert.match(evidenceAttestHandler, /MAX_REQUEST_BYTES/);
+assert.match(evidenceAttesterRunbook, /house-operated beta topology/);
+assert.match(evidenceAttesterRunbook, /Third-party-funded provider bonds remain disabled/);
 assert.match(relay, /EIP712Domain\(string name,string version,uint256 chainId,address verifyingContract\)/);
 assert.match(providerRelay, /lookup:\s*createPinnedLookup\(record\)/);
 assert.match(providerRelay, /servername:\s*endpoint\.hostname/);
@@ -207,6 +228,7 @@ assert.doesNotMatch(providerRelay, /id:\s*`sha256:\$\{sha256\(raw\)\}`/);
 assert.match(directCoordinator, /canonicalEip3009AuthorizationIdentity/);
 assert.doesNotMatch(directCoordinator, /paymentHash:\s*`sha256:\$\{sha256\(raw\)\}`/);
 assert.match(directCoordinator, /provider_delivery_breach_reconciliation_pending/);
+assert.match(directCoordinator, /directProviderAuthorizationEvidence/);
 assert.match(directReconciler, /if \(!relayGrant\?\.token\) return null/);
 assert.match(directReconciler, /coverage_clock_recovery_expired/);
 assert.match(reconciler, /relay_clock_recovery_pending/);
@@ -243,7 +265,7 @@ assert.match(directCoordinator, /allowExpired:\s*recoveringExistingExecution/);
 assert.match(directCoordinator, /settled_response_unavailable_coverage_remains_active/);
 assert.match(directCoordinator, /policy_fee_refunded_provider_unsettled/);
 assert.match(directCoordinator, /refunded_after_provider_settlement/);
-assert.match(directState, /DEFAULT_EXECUTION_RETENTION_SECONDS = 10 \* 24 \* 60 \* 60/);
+assert.match(directState, /DEFAULT_EXECUTION_RETENTION_SECONDS = 45 \* 24 \* 60 \* 60/);
 assert.match(directState, /createCipheriv\("aes-256-gcm"/);
 assert.match(directState, /createDecipheriv\("aes-256-gcm"/);
 assert.match(directState, /async function retainRecovery/);
@@ -256,6 +278,7 @@ assert.match(directState, /listExecuting/);
 assert.match(directState, /markExecutingScanned/);
 assert.match(directReconciler, /state\.listExecuting\(limit\)/);
 assert.match(directReconciler, /state\.recoveryContext\(record\.id, record\.execution\.id\)/);
+assert.match(directReconciler, /directProviderAuthorizationEvidence/);
 assert.match(directReconciler, /relay\.recover/);
 assert.match(directReconciler, /state\.markReconciled\(record\.id\)/);
 assert.doesNotMatch(directReconciler, /state\.list\(limit\)/);

@@ -103,6 +103,7 @@ function createHarness({
   let failClock = failClockOnce;
   let driftChallenge = false;
   let providerAuthorizationValidBefore = null;
+  let lastIssueContext = null;
   const currentPolicy = () => policy(policyOverrides);
   const calls = {
     capture: 0,
@@ -217,8 +218,9 @@ function createHarness({
   const issuer = {
     previewCovenantId() { return covenantId; },
     async getCovenant() { return structuredClone(covenant); },
-    async issue({ policy: suppliedPolicy, targetOrder, paymentAuthorization }) {
+    async issue({ policy: suppliedPolicy, targetOrder, paymentAuthorization, attestationContext }) {
       calls.issue += 1;
+      lastIssueContext = structuredClone(attestationContext);
       assert.equal(suppliedPolicy.onchainPolicyId, policyId);
       assert.match(targetOrder.acceptanceEvidenceHash, /^0x[a-f0-9]{64}$/);
       covenant = {
@@ -355,6 +357,7 @@ function createHarness({
     calls,
     coordinator,
     drift() { driftChallenge = true; },
+    issueContext() { return structuredClone(lastIssueContext); },
     now() { return nowMs; },
     resolve(token) { return state.resolve(token); },
     tick(milliseconds) { nowMs += milliseconds; },
@@ -453,6 +456,35 @@ const completed = await happy.coordinator.execute({
 assert.equal(completed.ok, true);
 assert.equal(completed.feeState, 2);
 assert.equal(completed.coverageState, 3);
+assert.deepEqual(happy.issueContext(), {
+  directA2mcp: {
+    transport: "direct-a2mcp",
+    quoteId: happyFlow.bound.quote.id,
+    quoteToken: happyFlow.quoted.quote.token,
+    agentId: "3808",
+    serviceId: "33461",
+    endpoint: policy().serviceEndpoint,
+    requestHash,
+    providerRequirementsHash: requirementsHash,
+    providerRequest,
+    providerPaymentSignature,
+    policyFeePaymentSignature: happyFlow.feePayment,
+    providerAuthorization: {
+      hash: happyFlow.bound.quote.providerAuthorizationHash,
+      id: happyFlow.bound.quote.providerAuthorizationId,
+      nonce: happyFlow.bound.quote.providerAuthorizationNonce,
+      validAfter: happyFlow.bound.quote.providerAuthorizationValidAfter,
+      validBefore: happyFlow.bound.quote.providerAuthorizationValidBefore,
+    },
+    feeAuthorization: {
+      id: happyFlow.bound.quote.feeId,
+      nonce: happyFlow.bound.quote.feeNonce,
+      validAfter: happyFlow.bound.quote.feeValidAfter,
+      validBefore: happyFlow.bound.quote.feeValidBefore,
+      maxTimeoutSeconds: happyFlow.bound.quote.feeMaxTimeoutSeconds,
+    },
+  },
+});
 assert.equal(completed.providerDeliveryStatus, "response_available");
 assert.equal(happy.calls.issue, 1);
 assert.equal(happy.calls.fund, 1);

@@ -40,6 +40,11 @@ await assert.rejects(
 
 const executionId = `sha256:${"66".repeat(32)}`;
 assert.equal((await state.claim(issued.token, executionId)).status, "claimed");
+assert.equal(
+  store.quotes.get(issued.id).expiresAtMs,
+  now + 45 * 24 * 60 * 60 * 1_000,
+  "executing evidence must outlive the maximum SLA and emergency-recovery horizon",
+);
 assert.deepEqual((await state.listExecuting()).map((record) => record.id), [issued.id]);
 const recoveryContext = {
   providerRequest: { target_url: "https://policypool.vercel.app/api/covered-job-receipt" },

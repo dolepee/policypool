@@ -232,7 +232,14 @@ export function createUniversalIssuer({
     }
   }
 
-  async function issue({ policy, targetOrder, coverageCapAtomic, enrollmentClosesAt, paymentAuthorization }) {
+  async function issue({
+    policy,
+    targetOrder,
+    coverageCapAtomic,
+    enrollmentClosesAt,
+    paymentAuthorization,
+    attestationContext = {},
+  }) {
     if (!isBytes32(paymentAuthorization?.hash)) {
       throw new UniversalIssuerError("fee_authorization_hash_invalid", 422);
     }
@@ -260,7 +267,12 @@ export function createUniversalIssuer({
         digestFunctionName: "issueEvidenceDigest",
         action: "issue",
         evidence,
-        context: { policy, targetOrder, paymentAuthorization },
+        context: {
+          ...(attestationContext && typeof attestationContext === "object" ? attestationContext : {}),
+          policy,
+          targetOrder,
+          paymentAuthorization,
+        },
       })),
     };
   }
