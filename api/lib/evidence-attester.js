@@ -113,6 +113,15 @@ function sameBytes32(left, right) {
   return isBytes32(left) && String(left).toLowerCase() === String(right).toLowerCase();
 }
 
+function sameSha256Id(left, right) {
+  const pattern = /^sha256:[a-f0-9]{64}$/;
+  const normalizedLeft = String(left || "").toLowerCase();
+  const normalizedRight = String(right || "").toLowerCase();
+  return pattern.test(normalizedLeft)
+    && pattern.test(normalizedRight)
+    && normalizedLeft === normalizedRight;
+}
+
 function authorizationIdForHash(value) {
   return isBytes32(value) ? `sha256:${String(value).slice(2).toLowerCase()}` : null;
 }
@@ -508,7 +517,10 @@ async function verifyDirectAuthorizationBinding({
       409,
     );
   }
-  return authorization;
+  return {
+    authorization,
+    requestHash: String(evidence.requestHash).toLowerCase(),
+  };
 }
 
 async function verifyPolicyFeeAuthorizationBinding({
@@ -612,10 +624,11 @@ async function verifyRelayBinding({
   covenant,
   policy,
   fee,
-  providerAuthorization,
+  providerBinding,
   configuration,
   chain,
 }) {
+  const { authorization: providerAuthorization, requestHash } = providerBinding;
   if (!await verifyProviderRelayReceipt(receipt, configuration.relaySigner, configuration.relayVerifier)) {
     throw new EvidenceAttesterError("relay_receipt_signature_invalid");
   }
@@ -625,6 +638,7 @@ async function verifyRelayBinding({
     || policyIdValue(receipt.provider?.policyHash) !== String(covenant.policyId).toLowerCase()
     || String(receipt.provider?.agentId) !== String(policy.terms.agentId)
     || String(receipt.provider?.serviceId) !== String(policy.terms.serviceId)
+    || !sameSha256Id(receipt.request?.hash, requestHash)
     || receipt.request?.paymentAuthorizationPresent !== true
     || receipt.request?.paymentAuthorizationId !== authorizationIdForHash(fee.providerAuthorizationHash)
     || receipt.request?.paymentAuthorizationId !== providerAuthorization.id
@@ -670,7 +684,7 @@ async function verifyLifecycle({ action, request, configuration, publicClient, c
       || context.nonSettlement?.settlementSearchResult !== "not_found"
       || Number(context.policyFeeState) !== Number(fee.state)
     ) throw new EvidenceAttesterError("cancel_unpaid_evidence_invalid");
-    const providerAuthorization = await verifyDirectAuthorizationBinding({
+    const providerBinding = await verifyDirectAuthorizationBinding({
       context,
       covenant,
       configuration,
@@ -679,6 +693,7 @@ async function verifyLifecycle({ action, request, configuration, publicClient, c
       now,
       expectedConsumed: false,
     });
+    const { authorization: providerAuthorization } = providerBinding;
     const policyFeeAuthorization = await verifyPolicyFeeAuthorizationBinding({
       context,
       covenant,
@@ -750,7 +765,7 @@ async function verifyLifecycle({ action, request, configuration, publicClient, c
     || !sameAddress(fee.buyer, covenant.buyer)
     || !isBytes32(fee.providerAuthorizationHash)
   ) throw new EvidenceAttesterError("lifecycle_fee_binding_invalid");
-  const providerAuthorization = await verifyDirectAuthorizationBinding({
+  const providerBinding = await verifyDirectAuthorizationBinding({
     context,
     covenant,
     configuration,
@@ -759,6 +774,7 @@ async function verifyLifecycle({ action, request, configuration, publicClient, c
     now,
     expectedConsumed: true,
   });
+  const { authorization: providerAuthorization } = providerBinding;
   if (!sameBytes32(fee.providerAuthorizationHash, providerAuthorization.hash)) {
     throw new EvidenceAttesterError("lifecycle_provider_authorization_mismatch");
   }
@@ -768,7 +784,7 @@ async function verifyLifecycle({ action, request, configuration, publicClient, c
     covenant,
     policy,
     fee,
-    providerAuthorization,
+    providerBinding,
     configuration,
     chain,
   });

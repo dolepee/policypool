@@ -386,6 +386,24 @@ const signatureDomain = {
   chainId: XLAYER.id,
   verifyingContract: relayVerifier,
 };
+
+async function signRelayReceipt(unsignedReceiptValue, receiptId) {
+  const digest = keccak256(stringToHex(stableStringify(unsignedReceiptValue)));
+  const signature = await relaySigner.signTypedData({
+    domain: signatureDomain,
+    types: { RelayReceipt: [{ name: "receiptDigest", type: "bytes32" }] },
+    primaryType: "RelayReceipt",
+    message: { receiptDigest: digest },
+  });
+  return {
+    ...unsignedReceiptValue,
+    receiptId,
+    receiptDigest: digest,
+    signer: relaySigner.address,
+    signature,
+  };
+}
+
 const unsignedReceipt = {
   version: "0.4.0",
   signatureDomain,
@@ -430,20 +448,8 @@ const unsignedReceipt = {
     completedWithinSla: true,
   },
 };
-const receiptDigest = keccak256(stringToHex(stableStringify(unsignedReceipt)));
-const receiptSignature = await relaySigner.signTypedData({
-  domain: signatureDomain,
-  types: { RelayReceipt: [{ name: "receiptDigest", type: "bytes32" }] },
-  primaryType: "RelayReceipt",
-  message: { receiptDigest },
-});
-const relayReceipt = {
-  ...unsignedReceipt,
-  receiptId: "ppr-hostile-test",
-  receiptDigest,
-  signer: relaySigner.address,
-  signature: receiptSignature,
-};
+const relayReceipt = await signRelayReceipt(unsignedReceipt, "ppr-hostile-test");
+const { receiptDigest } = relayReceipt;
 const lifecycleAuthorizationContext = {
   directQuote: quoteId,
   providerAuthorizationEvidence: {
@@ -475,6 +481,39 @@ const releaseRequest = {
 const recoveryRelease = await recovery.attest(releaseRequest);
 assert.equal(recoveryRelease.signatures.length, 3);
 assert.equal(settlementVerifications, 1);
+
+const substitutedRequestReceipt = await signRelayReceipt({
+  ...unsignedReceipt,
+  request: {
+    ...unsignedReceipt.request,
+    hash: `sha256:${"01".repeat(32)}`,
+  },
+}, "ppr-substituted-request");
+const substitutedRequestRelease = structuredClone(releaseRequest);
+substitutedRequestRelease.context.relayReceipt = substitutedRequestReceipt;
+substitutedRequestRelease.evidence.evidenceHash = substitutedRequestReceipt.receiptDigest;
+await assert.rejects(
+  () => recovery.attest(substitutedRequestRelease),
+  (error) => error instanceof EvidenceAttesterError
+    && error.code === "relay_receipt_covenant_mismatch",
+  "a valid relay receipt for another provider request must not authorize release",
+);
+
+const missingRequestHashUnsignedReceipt = structuredClone(unsignedReceipt);
+delete missingRequestHashUnsignedReceipt.request.hash;
+const missingRequestHashReceipt = await signRelayReceipt(
+  missingRequestHashUnsignedReceipt,
+  "ppr-missing-request-hash",
+);
+const missingRequestHashRelease = structuredClone(releaseRequest);
+missingRequestHashRelease.context.relayReceipt = missingRequestHashReceipt;
+missingRequestHashRelease.evidence.evidenceHash = missingRequestHashReceipt.receiptDigest;
+await assert.rejects(
+  () => recovery.attest(missingRequestHashRelease),
+  (error) => error instanceof EvidenceAttesterError
+    && error.code === "relay_receipt_covenant_mismatch",
+  "a relay receipt without the direct request binding must not authorize release",
+);
 
 const originalProviderAuthorizationHash = currentFee.providerAuthorizationHash;
 currentFee.providerAuthorizationHash = `0x${"98".repeat(32)}`;
@@ -508,6 +547,15 @@ const captureRequest = {
   context: { ...lifecycleAuthorizationContext, relayReceipt },
 };
 assert.equal((await primary.attest(captureRequest)).signatures.length, 3);
+const substitutedRequestCapture = structuredClone(captureRequest);
+substitutedRequestCapture.context.relayReceipt = substitutedRequestReceipt;
+substitutedRequestCapture.evidence.relayReceiptDigest = substitutedRequestReceipt.receiptDigest;
+await assert.rejects(
+  () => primary.attest(substitutedRequestCapture),
+  (error) => error instanceof EvidenceAttesterError
+    && error.code === "relay_receipt_covenant_mismatch",
+  "a valid relay receipt for another provider request must not authorize fee capture",
+);
 
 consumedAuthorizationNonces.delete(providerNonce.toLowerCase());
 currentCovenant.state = 1;
