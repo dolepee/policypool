@@ -389,12 +389,28 @@ assert.match(auditReport, /H-20: Completed direct results became inaccessible af
 assert.match(auditReport, /M-08: Direct checkout advertised partial caps that its fixed fee could not honor/);
 assert.match(auditReport, /M-07: Direct reconciliation depended on manual scheduler setup/);
 assert.ok(
-  vercel.builds.some((build) => build.src === "api/direct-a2mcp.js" && build.use === "@vercel/node"),
-  "direct A2MCP checkout must be included in the Vercel build",
+  vercel.builds.some((build) => build.src === "api/v04-runtime.js" && build.use === "@vercel/node"),
+  "the consolidated v0.4 runtime must be included in the Vercel build",
 );
 assert.ok(
-  vercel.builds.some((build) => build.src === "api/reconcile-direct-a2mcp.js" && build.use === "@vercel/node"),
-  "direct A2MCP reconciliation must be included in the Vercel build",
+  vercel.builds.filter((build) => build.use === "@vercel/node").length <= 12,
+  "the deployment must stay within the Vercel Hobby serverless-function limit",
+);
+for (const surface of ["direct-a2mcp", "reconcile-direct-a2mcp", "reconcile-universal"]) {
+  assert.ok(
+    vercel.routes.some(
+      (route) => route.src === `/api/${surface}` && route.dest === `/api/v04-runtime.js?surface=${surface}`,
+    ),
+    `${surface} must route through the consolidated v0.4 runtime`,
+  );
+}
+assert.ok(
+  !vercel.builds.some((build) => [
+    "api/direct-a2mcp.js",
+    "api/reconcile-direct-a2mcp.js",
+    "api/reconcile-universal.js",
+  ].includes(build.src)),
+  "consolidated v0.4 handlers must not consume separate serverless-function slots",
 );
 assert.ok(
   vercel.routes.some((route) => route.src === "/providers/enroll" && route.dest === "/web/enroll.html"),
