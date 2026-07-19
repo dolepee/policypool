@@ -37,12 +37,24 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$POLICYPOOL_OPERATOR_TOKEN"
-          discovery="$(curl --fail-with-body --silent --show-error \
+          discovery_file="$(mktemp)"
+          trap 'rm -f "$discovery_file"' EXIT
+          http_status="$(curl --silent --show-error \
+            --output "$discovery_file" \
+            --write-out "%{http_code}" \
             --retry 3 \
             --retry-all-errors \
             --retry-delay 5 \
             https://policypool.vercel.app/api/direct-a2mcp)"
-          enabled="$(python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("enabled") is True else "false")' <<<"$discovery")"
+          if [[ "$http_status" == "404" ]]; then
+            echo "Direct A2MCP route is not deployed; reconciliation is disabled."
+            exit 0
+          fi
+          if [[ "$http_status" != "200" ]]; then
+            echo "Direct A2MCP discovery returned unexpected HTTP $http_status." >&2
+            exit 1
+          fi
+          enabled="$(python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("enabled") is True else "false")' <"$discovery_file")"
           if [[ "$enabled" != "true" ]]; then
             echo "Direct A2MCP reconciliation is disabled; no action required."
             exit 0
