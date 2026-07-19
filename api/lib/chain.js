@@ -25,6 +25,9 @@ const JOB_ABI = parseAbi([
 ]);
 const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
 const MAX_PROVIDER_SETTLEMENT_SEARCH_SECONDS = 20 * 60;
+// X Layer's public RPC rejects eth_getLogs ranges larger than 100 blocks.
+// Keep the scan portable across providers while preserving the exact bounded window.
+const MAX_LOG_SCAN_BLOCKS = 100n;
 
 export class EvidenceError extends Error {
   constructor(code, message) {
@@ -470,15 +473,20 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
     const throughBlock = boundedThrough === Number(latest.timestamp)
       ? latest.number
       : await firstBlockAtOrAfter(boundedThrough);
-    let matches;
+    const matches = [];
     try {
-      matches = await publicClient.getLogs({
-        address: expectedAsset,
-        event: AUTHORIZATION_USED_EVENT,
-        args: { authorizer: expectedPayer, nonce: authorizationNonce },
-        fromBlock,
-        toBlock: throughBlock,
-      });
+      for (let chunkStart = fromBlock; chunkStart <= throughBlock; chunkStart += MAX_LOG_SCAN_BLOCKS) {
+        const chunkEnd = chunkStart + MAX_LOG_SCAN_BLOCKS - 1n < throughBlock
+          ? chunkStart + MAX_LOG_SCAN_BLOCKS - 1n
+          : throughBlock;
+        matches.push(...await publicClient.getLogs({
+          address: expectedAsset,
+          event: AUTHORIZATION_USED_EVENT,
+          args: { authorizer: expectedPayer, nonce: authorizationNonce },
+          fromBlock: chunkStart,
+          toBlock: chunkEnd,
+        }));
+      }
     } catch (error) {
       throw new EvidenceError("provider_settlement_search_failed", error instanceof Error ? error.message : String(error));
     }
