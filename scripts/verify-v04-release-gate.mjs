@@ -402,8 +402,10 @@ for (const line of [
 ]) {
   assert.ok(environment.includes(line), `.env.example missing ${line}`);
 }
-assert.match(documentation, /REMEDIATED IN SOURCE: independent review and redeployment required/);
-assert.match(documentation, /hardened source now differs from that bytecode and is not deployed/i);
+assert.match(documentation, /REMEDIATED STACK DEPLOYED FLAG-OFF/);
+assert.match(documentation, /hardened eight-contract stack is deployed, wired, and bytecode-verified/i);
+assert.match(documentation, /cc1530f6096e7e2f0e407471cce9eb322d73d24b/);
+assert.match(documentation, /Public enrollment and third-party-funded bonds remain blocked/);
 assert.match(documentation, /Production remains v0\.3/);
 assert.match(documentation, /threshold evidence quorum/);
 assert.match(documentation, /eight-contract stack/);
