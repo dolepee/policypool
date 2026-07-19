@@ -325,6 +325,10 @@ assert.match(
 assert.match(reconciliationWorkflow, /https:\/\/policypool\.vercel\.app\/api\/direct-a2mcp/);
 assert.match(reconciliationWorkflow, /https:\/\/policypool\.vercel\.app\/api\/reconcile-direct-a2mcp/);
 assert.match(reconciliationWorkflow, /json\.load\(sys\.stdin\)\.get\("enabled"\) is True/);
+assert.match(reconciliationWorkflow, /--write-out\s+"%\{http_code\}"/);
+assert.match(reconciliationWorkflow, /if \[\[ "\$http_status" == "404" \]\]/);
+assert.match(reconciliationWorkflow, /if \[\[ "\$http_status" != "200" \]\]/);
+assert.match(reconciliationWorkflow, /Direct A2MCP route is not deployed; reconciliation is disabled\./);
 assert.match(universalPolicy, /servicePriceAtomic:\s*servicePriceAtomic\.toString\(\)/);
 assert.match(enrollment, /function feeAmountAtomic\(\) view returns \(uint128\)/);
 assert.match(enrollment, /direct_policy_cap_exceeds_service_price/);
