@@ -20,6 +20,7 @@ const authorizationUsedEvent = parseAbiItem(
 let returnSettlement = true;
 let receiptMode = "valid";
 let observedRange;
+let observedRanges = [];
 let settlementBlockNumber = 105n;
 const client = {
   async getBlockNumber() { return 200n; },
@@ -31,6 +32,7 @@ const client = {
   },
   async getLogs(input) {
     observedRange = { fromBlock: input.fromBlock, toBlock: input.toBlock };
+    observedRanges.push(observedRange);
     return returnSettlement
       && settlementBlockNumber >= input.fromBlock
       && settlementBlockNumber <= input.toBlock
@@ -113,6 +115,7 @@ assert.equal(boundarySettlement.blockNumber, "99");
 assert.equal(boundarySettlement.settledAt, "1970-01-01T00:16:39.000Z");
 
 returnSettlement = false;
+observedRanges = [];
 assert.equal(await chain.findProviderSettlement({
   payer,
   payTo: provider,
@@ -122,6 +125,22 @@ assert.equal(await chain.findProviderSettlement({
   notBeforeTimestamp: 1_000,
   notAfterTimestamp: 1_100,
 }), null);
+assert.deepEqual(observedRanges, [{ fromBlock: 99n, toBlock: 110n }]);
+
+observedRanges = [];
+assert.equal(await chain.findProviderSettlement({
+  payer,
+  payTo: provider,
+  asset: PAYMENT.asset,
+  amountAtomic: "500000",
+  authorizationNonce: nonce,
+  notBeforeTimestamp: 1_000,
+  notAfterTimestamp: 2_000,
+}), null);
+assert.deepEqual(observedRanges, [
+  { fromBlock: 99n, toBlock: 198n },
+  { fromBlock: 199n, toBlock: 200n },
+]);
 await assert.rejects(
   () => chain.findProviderSettlement({
     payer,
