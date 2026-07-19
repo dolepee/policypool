@@ -1,8 +1,8 @@
 # PolicyPool Universal Coverage v0.4
 
-Status: REMEDIATED IN SOURCE: independent review and redeployment required.
+Status: REMEDIATED STACK DEPLOYED FLAG-OFF: controlled house validation in progress.
 
-The pre-audit v0.4 contracts were deployed flag-off for a controlled house pilot. The hardened source now differs from that bytecode and is not deployed. Production remains v0.3. Public enrollment and third-party bonds remain blocked.
+The hardened eight-contract stack is deployed, wired, and bytecode-verified on X Layer. Production remains v0.3, all public v0.4 feature flags remain off, and the active capital and signer topology are house-operated. Public enrollment and third-party-funded bonds remain blocked pending a qualified independent audit and operationally independent signers.
 
 ## Product Boundary
 
@@ -239,6 +239,22 @@ That stack has no `CoverageEvidenceVerifier` and retains the original single-ope
 
 Production remains v0.3, `/api/manifest` remains the active contract, universal flags remain off, no public enrollment is open, and no OKX listing field needs to change for source development.
 
+## Canonical Remediated Flag-Off Deployment
+
+The July 19 eight-contract deployment was built from contract source commit
+`cc1530f6096e7e2f0e407471cce9eb322d73d24b`, including the ownerless fee escrow
+and orphaned-fee refund path. All twelve deployment and wiring receipts
+succeeded, local creation inputs and immutable-masked runtimes matched the live
+bytecode, and the exact disjoint 3-of-5 topology passed the post-deploy audit.
+The authoritative addresses and current controlled proof transactions are listed
+in the [README](../README.md#flag-off-v04-deployment-and-house-proof).
+
+House validation has completed the direct happy path, normal unpaid refund and
+cancellation, and mixed funded-plus-orphaned fee recovery. The full and
+recovery-reduced payout covenants are currently `PayoutDue` and remain subject
+to their mandatory 24-hour settlement challenge. These are controlled proof
+runs, not revenue or third-party traction.
+
 ## Internal Audit Checkpoint
 
 The July 16 internal reviews and remediation are recorded in [INTERNAL_SOLIDITY_AUDIT_V04.md](INTERNAL_SOLIDITY_AUDIT_V04.md). The original High single-operator finding is remediated in source. The later hostile review's stale-settlement, release-ordering, and quorum-loss findings are also remediated in source with terminal recovery plus 10-minute settlement-evidence freshness, a 24-hour challenge period with signed completion time, and a 30-day delayed recovery quorum. GitHub Codex's runtime reviews then prompted remediation of unpaid header-only relay clocks, DNS rebinding between endpoint validation and connection, provider-payment payer substitution, unpaid relay receipt pointer replacement, non-atomic paid-receipt persistence, expiring consumed grant claims, incomplete enrollment-confirmation binding, the missing payout-due settlement path, post-deadline fee-failure bond lock, and both pre-grant and post-settlement clock-write crash windows. The final internal pass additionally anchors the challenge to the mined breach transition, rejects outbound short transfers, and makes the canonical X Layer deployment plus exact 3-of-5 role topology fail before broadcast. The direct A2MCP extension adds an ownerless refundable fee escrow, immutable two-authorization checkout, durable response persistence, canonical EIP-3009 identities for both payment legs, bounded nonce-indexed settlement recovery with a one-block clock-skew overlap, quorum recovery of directly settled orphaned fees, and unattended direct reconciliation with QStash primary plus a checked-in GitHub fallback. The candidate suite passes 122 Foundry tests; runtime gates cover full on-chain enrollment-term binding, grant-buyer-bound paid relay proof with atomic durable reconciliation indexing, terminal settlement, challenge holds, uncertain issuance reconciliation, expired-unused fee cancellation, direct no-settlement refund, exact orphaned-fee recovery before cancellation, crash-safe one-time provider execution, bounded delayed clock recovery, settled-response safety holds, and scheduler fallback presence.
@@ -263,17 +279,12 @@ npm install
 npm run agent:gate-v04
 ```
 
-Required before a fresh flag-off house-operated deployment:
+The canonical flag-off deployment has completed the source, topology,
+role-separation, no-broadcast simulation, bytecode, wiring, and initial house
+pilot gates. The remaining controlled-rollout gates are:
 
-- all runtime, v0.3 regression, v0.4, Foundry, dependency, secret, and diff gates pass;
-- Claude independently reviews the remediated commit and no unresolved Critical or High finding remains;
-- both internal adversarial reviews have no unresolved Critical or High finding;
-- the house signer manifest satisfies the exact, disjoint 3-of-5 topology and is suitable only for controlled drills;
-- the deployer, cold owner, monitor, relay signer, immutable fee treasury, and both evidence quorums are mutually separated as required by the deploy and wire scripts;
-- the evidence service independently verifies underlying context instead of signing relayer assertions;
-- the old deployment remains disabled and empty of third-party capital;
-- a new eight-contract stack is deployed flag-off and source/creation bytecode is verified;
-- fresh house pilots prove release, full payout, recovery-reduced payout, direct success, direct no-settlement cancellation/refund, and fee capture;
+- finish the staged full and recovery-reduced payouts after their mandatory challenge period;
+- complete the restarted 24-hour read-only attester soak on the production-interlocked preview runtime;
 - interactive 390px browser checks and a dry-run reconciler preserve v0.3 receipts;
 - any externally owned provider using a PolicyPool-sponsored bond is disclosed as sponsored and follows a successful house canary;
 - third-party-funded provider bonds remain blocked until a qualified independent human Solidity audit and operationally independent signer topology are complete.
@@ -293,7 +304,7 @@ Rollback stops new issuance by setting `POLICYPOOL_UNIVERSAL_ENABLED=false`. Exi
 
 ## Known Limitations
 
-- The hardened source is not deployed. The historical flag-off bytecode must never accept third-party bonds.
+- The hardened stack is deployed only for a flag-off house-operated pilot. Neither it nor the historical stack may accept third-party-funded bonds before the qualified audit and independent-signer gates close.
 - Both evidence quorums are trusted oracle sets. Threshold collusion can authorize false evidence; the delayed recovery quorum reduces primary-quorum liveness risk but cannot resolve an obligation if both evidence quorums lose threshold availability.
 - Immutable signer sets and the one-time vault manager favor fail-closed custody over privileged recovery. Rotation requires a new stack and planned migration after old obligations close.
 - This internal work is not a qualified independent audit.

@@ -790,6 +790,30 @@ process.env.POLICYPOOL_ATTESTER_TOKEN = "hostile-handler-token";
 const handler = createEvidenceAttestHandler({
   attester: { async attest(body) { return { ok: true, digest: body.digest, signatures: [] }; } },
 });
+const originalVercelEnvironment = process.env.VERCEL_ENV;
+const originalProductionPromotion = process.env.POLICYPOOL_ATTESTER_PRODUCTION_PROMOTION;
+process.env.VERCEL_ENV = "production";
+delete process.env.POLICYPOOL_ATTESTER_PRODUCTION_PROMOTION;
+const blockedProductionResponse = responseHarness();
+await handler({
+  method: "POST",
+  headers: { authorization: "Bearer hostile-handler-token" },
+  body: { digest: requestDigest },
+}, blockedProductionResponse);
+assert.equal(blockedProductionResponse.statusCode, 503);
+assert.equal(JSON.parse(blockedProductionResponse.body).error, "attester_production_promotion_required");
+process.env.POLICYPOOL_ATTESTER_PRODUCTION_PROMOTION = "true";
+const promotedProductionResponse = responseHarness();
+await handler({
+  method: "POST",
+  headers: { authorization: "Bearer hostile-handler-token" },
+  body: { digest: requestDigest },
+}, promotedProductionResponse);
+assert.equal(promotedProductionResponse.statusCode, 200);
+if (originalVercelEnvironment === undefined) delete process.env.VERCEL_ENV;
+else process.env.VERCEL_ENV = originalVercelEnvironment;
+if (originalProductionPromotion === undefined) delete process.env.POLICYPOOL_ATTESTER_PRODUCTION_PROMOTION;
+else process.env.POLICYPOOL_ATTESTER_PRODUCTION_PROMOTION = originalProductionPromotion;
 const unauthorizedResponse = responseHarness();
 await handler({ method: "POST", headers: {}, body: { digest: requestDigest } }, unauthorizedResponse);
 assert.equal(unauthorizedResponse.statusCode, 401);

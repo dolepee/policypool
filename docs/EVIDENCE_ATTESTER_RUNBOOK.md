@@ -50,6 +50,12 @@ POLICYPOOL_PAYMENT_ASSET=
 XLAYER_RPC_URL=
 ```
 
+Vercel production deployments fail closed unless
+`POLICYPOOL_ATTESTER_PRODUCTION_PROMOTION=true` is explicitly configured in the
+production environment. Keep that variable absent throughout preview validation.
+Creating a production deployment by mistake therefore does not create a serving
+attester, even if other production-scoped configuration exists.
+
 Use a distinct bearer token and signer set for each deployment. Never place a relayer, relay signer, owner, monitor, treasury, primary signer, or recovery signer in another role. Check all Vercel values for trailing newline contamination before testing.
 
 The buyer-facing runtime receives only:

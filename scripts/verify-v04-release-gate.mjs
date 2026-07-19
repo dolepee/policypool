@@ -185,8 +185,11 @@ assert.match(evidenceAttester, /attestation_digest_mismatch/);
 assert.match(evidenceAttester, /attester_signer_set_mismatch/);
 assert.match(evidenceAttestHandler, /timingSafeEqual/);
 assert.match(evidenceAttestHandler, /MAX_REQUEST_BYTES/);
+assert.match(evidenceAttestHandler, /POLICYPOOL_ATTESTER_PRODUCTION_PROMOTION/);
+assert.match(evidenceAttestHandler, /attester_production_promotion_required/);
 assert.match(evidenceAttesterRunbook, /house-operated beta topology/);
 assert.match(evidenceAttesterRunbook, /Third-party-funded provider bonds remain disabled/);
+assert.match(evidenceAttesterRunbook, /POLICYPOOL_ATTESTER_PRODUCTION_PROMOTION=true/);
 assert.match(relay, /EIP712Domain\(string name,string version,uint256 chainId,address verifyingContract\)/);
 assert.match(providerRelay, /lookup:\s*createPinnedLookup\(record\)/);
 assert.match(providerRelay, /servername:\s*endpoint\.hostname/);
@@ -399,8 +402,10 @@ for (const line of [
 ]) {
   assert.ok(environment.includes(line), `.env.example missing ${line}`);
 }
-assert.match(documentation, /REMEDIATED IN SOURCE: independent review and redeployment required/);
-assert.match(documentation, /hardened source now differs from that bytecode and is not deployed/i);
+assert.match(documentation, /REMEDIATED STACK DEPLOYED FLAG-OFF/);
+assert.match(documentation, /hardened eight-contract stack is deployed, wired, and bytecode-verified/i);
+assert.match(documentation, /cc1530f6096e7e2f0e407471cce9eb322d73d24b/);
+assert.match(documentation, /Public enrollment and third-party-funded bonds remain blocked/);
 assert.match(documentation, /Production remains v0\.3/);
 assert.match(documentation, /threshold evidence quorum/);
 assert.match(documentation, /eight-contract stack/);

@@ -22,7 +22,7 @@ PolicyPool does not rate subjective quality, accept caller-supplied policy overr
 
 > **Genesis submission scope:** Agent Coverage is the current OKX.AI product and submission. The v4 liquidity-covenant implementation is the historical X Layer foundation retained below, not the listed Genesis service.
 
-> **v0.4 development status:** the High single-operator evidence issue is remediated in source with immutable threshold evidence quorums and permissionless execution. Direct A2MCP checkout now uses separate provider and refundable PolicyPool-fee authorizations, at-most-once provider execution, and autonomous reconciliation without routing through Task Marketplace. This source is not deployed. The old flag-off deployment is superseded, production remains v0.3, and third-party-funded bonds remain blocked until qualified audit, operationally independent signers, redeployment, bytecode verification, and controlled pilots. See [Universal Coverage v0.4](docs/UNIVERSAL_COVERAGE_V04.md) and the [internal Solidity audit](docs/INTERNAL_SOLIDITY_AUDIT_V04.md).
+> **v0.4 deployment status:** the remediated eight-contract stack is deployed, wired, and bytecode-verified on X Layer behind disabled public feature flags. House-operated pilots have passed orphaned-fee recovery, unpaid cancellation, and the completed-job release path. Two payout proofs are currently in the mandatory 24-hour challenge period. Production remains v0.3, and third-party-funded bonds remain blocked until a qualified audit and operationally independent signers. See [Universal Coverage v0.4](docs/UNIVERSAL_COVERAGE_V04.md), the [evidence-attester runbook](docs/EVIDENCE_ATTESTER_RUNBOOK.md), and the [internal Solidity audit](docs/INTERNAL_SOLIDITY_AUDIT_V04.md).
 
 ## Agent Coverage Loop
 
@@ -58,6 +58,25 @@ The accepted-event service hash is preserved verbatim and checked for A2A/A2MCP 
 v0.4 replaces the manual allowlist as the growth path without creating unbacked provider-agnostic coverage. Any OKX.AI provider can enroll one exact service by proving agent ownership, depositing provider-owned first-loss USD₮0, and signing versioned objective terms. Every quote revalidates ownership, service fingerprint, policy state, expiry, and available bond. A changed listing fails closed until re-enrollment.
 
 The branch includes a bond vault, policy registry, two disjoint immutable threshold evidence verifiers, permissionless covenant manager, ownerless refundable fee escrow, A2A and direct A2MCP clocks, covenant-bound relay grants, deduplicated buyer demand signals, an enrollment UI, authenticated one-minute reconcilers, and an SDK. The A2MCP route is `/api/direct-a2mcp`; it is direct HTTP+x402 and explicitly incompatible with Task Marketplace. Shared-reserve co-coverage and discretionary provider premiums are disabled. Issuance and every subjective lifecycle transition require threshold-attested evidence bound to the exact chain, verifier, manager, action, and payload; the runtime relayer only pays gas.
+
+### Flag-off v0.4 deployment and house proof
+
+This is a controlled house-operated pilot, not revenue or external traction. Public v0.4 enrollment and direct A2MCP issuance remain disabled.
+
+| Contract | X Layer address |
+| --- | --- |
+| Provider bond vault | [`0x9BEC…11ff`](https://www.oklink.com/x-layer/address/0x9BECf4688011a2Ee6b07bfdBe7596e96DEB411ff) |
+| Policy registry | [`0x86A1…394F`](https://www.oklink.com/x-layer/address/0x86A15290c892217E27D4F2cE2C3F8f6c87a0394F) |
+| Primary evidence verifier | [`0xAB95…3EE0`](https://www.oklink.com/x-layer/address/0xAB95118A1D59558AeBBF948B9747c2456D523EE0) |
+| Recovery evidence verifier | [`0x69E5…54Fc`](https://www.oklink.com/x-layer/address/0x69E5e4D718fb112f5cacBd8f44722CD670C854Fc) |
+| Coverage manager | [`0xb6c9…6468`](https://www.oklink.com/x-layer/address/0xb6c94274f8d7F7f7eBb600B3C848605e0b786468) |
+| Policy fee escrow | [`0xEfeD…7b76`](https://www.oklink.com/x-layer/address/0xEfeD21a5D82E3b91C9501cb8d9D9d3bF864E7b76) |
+| OKX A2A adapter | [`0xA956…335c`](https://www.oklink.com/x-layer/address/0xA956A84c694DB91188eF262D0aA167ADdcA2335c) |
+| A2MCP relay adapter | [`0x42b7…1A1F`](https://www.oklink.com/x-layer/address/0x42b73d68465D1614eb72F8557417143604781A1F) |
+
+Two real covenants are now `PayoutDue`: a [`0.5 USD₮0` full-payout transition](https://www.oklink.com/x-layer/tx/0x00c39daeacb806dfc22a8e01a1d91e38a72f4eda39e6398fa02c53d9580e3944) and a [`0.3 USD₮0` net-loss transition](https://www.oklink.com/x-layer/tx/0xfbfae41a2c882685480645aadb64199145574c63524449fb76207bfc9a3d8082) after a verified [`0.2 USD₮0` direct recovery](https://www.oklink.com/x-layer/tx/0x85f200d583e99f9160f0f1040602bb6b78cdd515524efd690c6804b71874afa0). The primary attester independently reconstructed the settlement evidence and returned a valid 3-of-5 quorum; a read-only manager simulation then rejected early execution with `SettlementChallengeActive`. This proves the contract enforces its challenge window even when the evidence itself is valid. Final payout receipts will be added after the challenge ends on 20 July 2026 at 16:50:04 UTC.
+
+The live fee treasury balance is `0.5 USD₮0`: `0.2` predated this deployment and the three controlled v0.4 captures added exactly `0.3`. Fee escrow balance and accounting are both zero.
 
 ## Controlled Lifecycle Proof
 

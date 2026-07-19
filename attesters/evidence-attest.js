@@ -8,6 +8,12 @@ import { header, sendJson } from "../api/lib/utils.js";
 const MAX_REQUEST_BYTES = 512_000;
 let runtimeAttester;
 
+function productionPromotionAllowed(env = process.env) {
+  const vercelEnvironment = String(env.VERCEL_ENV || "").trim().toLowerCase();
+  if (vercelEnvironment !== "production") return true;
+  return String(env.POLICYPOOL_ATTESTER_PRODUCTION_PROMOTION || "").trim().toLowerCase() === "true";
+}
+
 function authorized(req) {
   const expected = String(process.env.POLICYPOOL_ATTESTER_TOKEN || "").trim();
   const supplied = header(req, "authorization").replace(/^Bearer\s+/i, "").trim();
@@ -38,6 +44,9 @@ function parsedBody(req) {
 
 export function createEvidenceAttestHandler({ attester } = {}) {
   return async function handler(req, res) {
+    if (!productionPromotionAllowed()) {
+      return sendJson(res, 503, { ok: false, error: "attester_production_promotion_required" });
+    }
     if (req.method !== "POST") return sendJson(res, 405, { ok: false, error: "method_not_allowed" });
     if (!authorized(req)) return sendJson(res, 401, { ok: false, error: "unauthorized" });
     if (requestBytes(req) > MAX_REQUEST_BYTES) {
