@@ -257,6 +257,7 @@ let currentFeeAmountAtomic = 100000n;
 let settlementSearchResult = null;
 let settlementSearches = 0;
 let settlementVerifications = 0;
+const settlementVerificationInputs = [];
 const consumedAuthorizationNonces = new Set();
 
 function signerSet(address) {
@@ -289,7 +290,11 @@ const publicClient = {
 };
 const chain = {
   async verifyProviderPaymentAuthorization() { return true; },
-  async verifyProviderSettlement() { settlementVerifications += 1; return true; },
+  async verifyProviderSettlement(input) {
+    settlementVerifications += 1;
+    settlementVerificationInputs.push(structuredClone(input));
+    return true;
+  },
   async findProviderSettlement() { settlementSearches += 1; return settlementSearchResult; },
 };
 const baseConfiguration = {
@@ -585,6 +590,69 @@ await assert.rejects(
   (error) => error instanceof EvidenceAttesterError
     && error.code === "relay_receipt_covenant_mismatch",
   "a valid relay receipt for another provider request must not authorize fee capture",
+);
+
+currentFee.state = 0;
+consumedAuthorizationNonces.add(feeNonce.toLowerCase());
+currentNowMs = (providerValidBefore + 121) * 1_000;
+currentDigest = `0x${"15".repeat(32)}`;
+const orphanedPaymentTransaction = `0x${"16".repeat(32)}`;
+const orphanedRefundRequest = {
+  protocol: "PolicyPool Coverage Evidence",
+  version: "1",
+  action: "refund_orphaned_fee",
+  digest: currentDigest,
+  domain: { chainId: XLAYER.id, manager: feeEscrow, verifier: primaryVerifier },
+  evidence: {
+    feeId,
+    covenantId: currentCovenant.id,
+    authorizationNonce: feeNonce,
+    paymentTransaction: orphanedPaymentTransaction,
+    observedAt: String(providerValidBefore + 121),
+  },
+  context: {
+    ...lifecycleAuthorizationContext,
+    policyFeeAuthorizationEvidence: {
+      paymentSignature: policyFeePaymentSignature,
+      quoteToken,
+      nonce: feeNonce,
+      validAfter: 0,
+      validBefore: feeValidBefore,
+      maxTimeoutSeconds: feeMaxTimeoutSeconds,
+    },
+  },
+};
+assert.equal((await primary.attest(orphanedRefundRequest)).signatures.length, 3);
+assert.deepEqual(settlementVerificationInputs.at(-1), {
+  txHash: orphanedPaymentTransaction,
+  payer: buyer.address,
+  payTo: feeEscrow,
+  asset: PAYMENT.asset,
+  amountAtomic: 100000n,
+  authorizationNonce: feeNonce,
+});
+await assert.rejects(
+  () => recovery.attest({
+    ...orphanedRefundRequest,
+    domain: { chainId: XLAYER.id, manager: feeEscrow, verifier: recoveryVerifier },
+  }),
+  (error) => error instanceof EvidenceAttesterError
+    && error.code === "attestation_action_not_allowed",
+);
+consumedAuthorizationNonces.delete(feeNonce.toLowerCase());
+await assert.rejects(
+  () => primary.attest(orphanedRefundRequest),
+  (error) => error instanceof EvidenceAttesterError
+    && error.code === "fee_authorization_state_mismatch",
+  "an unconsumed nonce cannot claim an orphaned fee transfer",
+);
+consumedAuthorizationNonces.add(feeNonce.toLowerCase());
+const staleOrphanedRefund = structuredClone(orphanedRefundRequest);
+staleOrphanedRefund.evidence.observedAt = String(providerValidBefore - 600);
+await assert.rejects(
+  () => primary.attest(staleOrphanedRefund),
+  (error) => error instanceof EvidenceAttesterError
+    && error.code === "orphaned_fee_refund_evidence_invalid",
 );
 
 consumedAuthorizationNonces.delete(providerNonce.toLowerCase());

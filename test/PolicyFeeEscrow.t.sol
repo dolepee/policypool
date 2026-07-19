@@ -3,6 +3,7 @@ pragma solidity ^0.8.26;
 
 import {AgentPolicyRegistry} from "../src/AgentPolicyRegistry.sol";
 import {CoverageManager} from "../src/CoverageManager.sol";
+import {CoverageEvidenceVerifier} from "../src/CoverageEvidenceVerifier.sol";
 import {PolicyFeeEscrow} from "../src/PolicyFeeEscrow.sol";
 import {ProviderBondVault} from "../src/ProviderBondVault.sol";
 import {MockAgentIdentityRegistry} from "../src/mocks/MockAgentIdentityRegistry.sol";
@@ -75,6 +76,14 @@ contract MockFeeAuthorizationToken {
         }
         usedNonce[nonce] = true;
         _move(from, to, value, authorizationTaxAtomic);
+    }
+
+    function authorizationState(address, bytes32 nonce) external view returns (bool) {
+        return usedNonce[nonce];
+    }
+
+    function consumeWithoutTransfer(bytes32 nonce) external {
+        usedNonce[nonce] = true;
     }
 
     function setTaxes(uint256 authorizationTaxAtomic_, uint256 transferTaxAtomic_) external {
@@ -347,6 +356,138 @@ contract PolicyFeeEscrowTest is CoverageEvidenceTestBase {
         assertEq(escrow.totalEscrowedAtomic(), 0);
     }
 
+    function testDirectlyConsumedAuthorizationIsQuorumRecoveredAndRefunded() public {
+        PolicyFeeEscrow.FundAuthorization memory authorization = _authorization(JOB_ID, 5 minutes);
+        _allow(authorization);
+        bytes32 feeId = _issueFor(authorization);
+        bytes32 covenantId = manager.covenantId(policyId, JOB_ID, buyer, feeId);
+
+        asset.transferWithAuthorization(
+            authorization.buyer,
+            address(escrow),
+            FEE,
+            authorization.validAfter,
+            authorization.validBefore,
+            authorization.nonce,
+            hex"01"
+        );
+        assertEq(uint256(escrow.getFee(feeId).state), uint256(PolicyFeeEscrow.FeeState.None));
+        assertEq(asset.balanceOf(address(escrow)), FEE);
+        assertEq(escrow.totalEscrowedAtomic(), 0);
+
+        uint256 refundAvailableAt = authorization.providerAuthorizationValidBefore + escrow.REFUND_GRACE_PERIOD();
+        vm.warp(refundAvailableAt);
+        PolicyFeeEscrow.OrphanedRefundEvidence memory evidence =
+            _orphanedRefundEvidence(feeId, covenantId, authorization.nonce);
+        bytes32 digest = escrow.orphanedRefundEvidenceDigest(evidence);
+        bytes[] memory signatures = _signatures(digest);
+        vm.prank(makeAddr("permissionless-orphan-refunder"));
+        escrow.refundOrphaned(authorization, evidence, signatures);
+
+        PolicyFeeEscrow.FeeRecord memory record = escrow.getFee(feeId);
+        assertEq(uint256(record.state), uint256(PolicyFeeEscrow.FeeState.Refunded));
+        assertEq(record.covenantId, covenantId);
+        assertEq(record.buyer, buyer);
+        assertEq(record.providerAuthorizationHash, PROVIDER_AUTHORIZATION_HASH);
+        assertEq(record.refundAvailableAt, refundAvailableAt);
+        assertEq(asset.balanceOf(buyer), 1_000_000);
+        assertEq(asset.balanceOf(address(escrow)), 0);
+        assertEq(escrow.totalEscrowedAtomic(), 0);
+        assertTrue(escrow.consumedEvidence(digest));
+
+        vm.expectRevert(PolicyFeeEscrow.FeeAlreadyExists.selector);
+        escrow.refundOrphaned(authorization, evidence, signatures);
+    }
+
+    function testOrphanRefundRejectsUnconsumedMissingSurplusAndSubstitution() public {
+        PolicyFeeEscrow.FundAuthorization memory authorization = _authorization(JOB_ID, 5 minutes);
+        bytes32 feeId = _issueFor(authorization);
+        bytes32 covenantId = manager.covenantId(policyId, JOB_ID, buyer, feeId);
+        uint256 refundAvailableAt = authorization.providerAuthorizationValidBefore + escrow.REFUND_GRACE_PERIOD();
+        vm.warp(refundAvailableAt);
+        PolicyFeeEscrow.OrphanedRefundEvidence memory evidence =
+            _orphanedRefundEvidence(feeId, covenantId, authorization.nonce);
+        bytes32 digest = escrow.orphanedRefundEvidenceDigest(evidence);
+        bytes[] memory signatures = _signatures(digest);
+
+        asset.mint(address(escrow), FEE);
+        vm.expectRevert(PolicyFeeEscrow.AuthorizationNotConsumed.selector);
+        escrow.refundOrphaned(authorization, evidence, signatures);
+
+        vm.prank(address(escrow));
+        asset.transfer(makeAddr("surplus-sink"), FEE);
+        asset.consumeWithoutTransfer(authorization.nonce);
+        PolicyFeeEscrow.OrphanedRefundEvidence memory substituted = evidence;
+        substituted.paymentTransaction = bytes32(0);
+        bytes32 substitutedDigest = escrow.orphanedRefundEvidenceDigest(substituted);
+        bytes[] memory substitutedSignatures = _signatures(substitutedDigest);
+        vm.expectRevert(PolicyFeeEscrow.InvalidCaptureEvidence.selector);
+        escrow.refundOrphaned(authorization, substituted, substitutedSignatures);
+
+        evidence = _orphanedRefundEvidence(feeId, covenantId, authorization.nonce);
+        vm.expectRevert(PolicyFeeEscrow.UnaccountedFeeUnavailable.selector);
+        escrow.refundOrphaned(authorization, evidence, signatures);
+    }
+
+    function testOrphanRefundCannotConsumeNormallyAccountedFee() public {
+        (, bytes32 fundedFeeId,) = _funded(keccak256("normally-funded"), 5 minutes);
+        PolicyFeeEscrow.FundAuthorization memory orphan = _authorization(JOB_ID, 5 minutes);
+        bytes32 orphanFeeId = _issueFor(orphan);
+        bytes32 orphanCovenantId = manager.covenantId(policyId, JOB_ID, buyer, orphanFeeId);
+        asset.consumeWithoutTransfer(orphan.nonce);
+        vm.warp(orphan.providerAuthorizationValidBefore + escrow.REFUND_GRACE_PERIOD());
+        PolicyFeeEscrow.OrphanedRefundEvidence memory evidence =
+            _orphanedRefundEvidence(orphanFeeId, orphanCovenantId, orphan.nonce);
+        bytes32 digest = escrow.orphanedRefundEvidenceDigest(evidence);
+        bytes[] memory signatures = _signatures(digest);
+
+        assertEq(asset.balanceOf(address(escrow)), FEE);
+        assertEq(escrow.totalEscrowedAtomic(), FEE);
+        vm.expectRevert(PolicyFeeEscrow.UnaccountedFeeUnavailable.selector);
+        escrow.refundOrphaned(orphan, evidence, signatures);
+        assertEq(uint256(escrow.getFee(fundedFeeId).state), uint256(PolicyFeeEscrow.FeeState.Funded));
+    }
+
+    function testOrphanRefundRequiresBoundaryFreshEvidenceAndQuorum() public {
+        PolicyFeeEscrow.FundAuthorization memory authorization = _authorization(JOB_ID, 5 minutes);
+        _allow(authorization);
+        bytes32 feeId = _issueFor(authorization);
+        bytes32 covenantId = manager.covenantId(policyId, JOB_ID, buyer, feeId);
+        asset.transferWithAuthorization(
+            authorization.buyer,
+            address(escrow),
+            FEE,
+            authorization.validAfter,
+            authorization.validBefore,
+            authorization.nonce,
+            hex"01"
+        );
+        PolicyFeeEscrow.OrphanedRefundEvidence memory evidence =
+            _orphanedRefundEvidence(feeId, covenantId, authorization.nonce);
+
+        bytes[] memory signatures = _signatures(escrow.orphanedRefundEvidenceDigest(evidence));
+        vm.expectRevert(PolicyFeeEscrow.RefundNotReady.selector);
+        escrow.refundOrphaned(authorization, evidence, signatures);
+
+        uint256 refundAvailableAt = authorization.providerAuthorizationValidBefore + escrow.REFUND_GRACE_PERIOD();
+        vm.warp(refundAvailableAt + escrow.CAPTURE_EVIDENCE_MAX_AGE() + 1);
+        evidence = _orphanedRefundEvidence(feeId, covenantId, authorization.nonce);
+        evidence.observedAt = uint64(refundAvailableAt);
+        signatures = _signatures(escrow.orphanedRefundEvidenceDigest(evidence));
+        vm.expectRevert(PolicyFeeEscrow.EvidenceStale.selector);
+        escrow.refundOrphaned(authorization, evidence, signatures);
+
+        evidence = _orphanedRefundEvidence(feeId, covenantId, authorization.nonce);
+        bytes[] memory noSignatures = new bytes[](0);
+        vm.expectRevert(CoverageEvidenceVerifier.InsufficientSignatures.selector);
+        escrow.refundOrphaned(authorization, evidence, noSignatures);
+
+        evidence.covenantId = keccak256("substituted-covenant");
+        signatures = _signatures(escrow.orphanedRefundEvidenceDigest(evidence));
+        vm.expectRevert(PolicyFeeEscrow.InvalidCovenant.selector);
+        escrow.refundOrphaned(authorization, evidence, signatures);
+    }
+
     function testConstructorRejectsManagerVerifierOrAssetMismatch() public {
         vm.expectRevert(PolicyFeeEscrow.ZeroAddress.selector);
         new PolicyFeeEscrow(address(0), treasury, address(evidenceVerifier), address(manager), FEE);
@@ -519,6 +660,20 @@ contract PolicyFeeEscrowTest is CoverageEvidenceTestBase {
             providerAuthorizationHash: authorization.providerAuthorizationHash,
             relayReceiptDigest: keccak256("signed-relay-receipt"),
             providerSettlementTransaction: keccak256("provider-settlement-transaction"),
+            observedAt: uint64(block.timestamp)
+        });
+    }
+
+    function _orphanedRefundEvidence(bytes32 feeId, bytes32 covenantId, bytes32 nonce)
+        private
+        view
+        returns (PolicyFeeEscrow.OrphanedRefundEvidence memory evidence)
+    {
+        evidence = PolicyFeeEscrow.OrphanedRefundEvidence({
+            feeId: feeId,
+            covenantId: covenantId,
+            authorizationNonce: nonce,
+            paymentTransaction: keccak256("direct-policy-fee-transfer"),
             observedAt: uint64(block.timestamp)
         });
     }

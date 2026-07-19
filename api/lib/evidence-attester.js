@@ -29,6 +29,7 @@ const RELEASE_TUPLE = "(bytes32 covenantId,uint64 completedAt,uint64 observedAt,
 const SETTLEMENT_TUPLE = "(bytes32 covenantId,uint128 escrowRefundAtomic,uint128 otherRecoveryAtomic,uint64 observedAt,bool recoveryFinalized,bytes32 recoveryEvidenceHash)";
 const CANCEL_UNPAID_TUPLE = "(bytes32 covenantId,uint64 observedAt,bytes32 feeAuthorizationHash,bytes32 nonSettlementEvidenceHash)";
 const CAPTURE_TUPLE = "(bytes32 feeId,bytes32 covenantId,bytes32 providerAuthorizationHash,bytes32 relayReceiptDigest,bytes32 providerSettlementTransaction,uint64 observedAt)";
+const ORPHANED_REFUND_TUPLE = "(bytes32 feeId,bytes32 covenantId,bytes32 authorizationNonce,bytes32 paymentTransaction,uint64 observedAt)";
 
 const MANAGER_ABI = parseAbi([
   "function evidenceVerifier() view returns (address)",
@@ -66,6 +67,7 @@ const ESCROW_ABI = parseAbi([
   "function authorizationNonce(bytes32 policyId,bytes32 jobId,address buyer,bytes32 providerAuthorizationHash,uint256 validAfter,uint256 validBefore,uint256 providerAuthorizationValidBefore) pure returns (bytes32)",
   "function authorizationId(address buyer,uint256 validAfter,uint256 validBefore,bytes32 nonce) view returns (bytes32)",
   `function captureEvidenceDigest(${CAPTURE_TUPLE} evidence) view returns (bytes32)`,
+  `function orphanedRefundEvidenceDigest(${ORPHANED_REFUND_TUPLE} evidence) view returns (bytes32)`,
 ]);
 
 const PRIMARY_DIGESTS = {
@@ -76,6 +78,7 @@ const PRIMARY_DIGESTS = {
   settlement: "settlementEvidenceDigest",
   cancel_unpaid: "cancelUnpaidEvidenceDigest",
   capture_fee: "captureEvidenceDigest",
+  refund_orphaned_fee: "orphanedRefundEvidenceDigest",
 };
 const RECOVERY_DIGESTS = {
   release: "emergencyReleaseEvidenceDigest",
@@ -85,6 +88,8 @@ const RECOVERY_DIGESTS = {
 };
 const COVENANT = { pendingStart: 1, active: 2, released: 3, payoutDue: 4, paid: 5, recovered: 6, cancelled: 7 };
 const FEE = { none: 0, funded: 1, captured: 2, refunded: 3 };
+const FEE_REFUND_GRACE_SECONDS = 2 * 60;
+const FEE_EVIDENCE_MAX_AGE_SECONDS = 10 * 60;
 
 export class EvidenceAttesterError extends Error {
   constructor(code, status = 422) {
@@ -222,6 +227,10 @@ function assertDirectContext(context) {
   return direct;
 }
 
+function isFeeEscrowAction(action) {
+  return action === "capture_fee" || action === "refund_orphaned_fee";
+}
+
 function assertRequestEnvelope(request, configuration) {
   if (request?.protocol !== "PolicyPool Coverage Evidence" || request?.version !== "1") {
     throw new EvidenceAttesterError("attestation_protocol_invalid");
@@ -229,7 +238,7 @@ function assertRequestEnvelope(request, configuration) {
   const action = String(request.action || "");
   const digests = configuration.role === "primary" ? PRIMARY_DIGESTS : RECOVERY_DIGESTS;
   if (!digests[action]) throw new EvidenceAttesterError("attestation_action_not_allowed", 403);
-  const expectedManager = action === "capture_fee" ? configuration.feeEscrow : configuration.manager;
+  const expectedManager = isFeeEscrowAction(action) ? configuration.feeEscrow : configuration.manager;
   if (
     Number(request.domain?.chainId) !== XLAYER.id
     || !sameAddress(request.domain?.manager, expectedManager)
@@ -509,7 +518,7 @@ async function verifyDirectAuthorizationBinding({
     "authorizationState",
     [covenant.buyer, authorization.authorization.nonce],
   );
-  if (consumed !== expectedConsumed) {
+  if (typeof expectedConsumed === "boolean" && consumed !== expectedConsumed) {
     throw new EvidenceAttesterError(
       expectedConsumed
         ? "provider_authorization_not_consumed"
@@ -533,6 +542,7 @@ async function verifyPolicyFeeAuthorizationBinding({
   publicClient,
   chain,
   now,
+  expectedConsumed,
 }) {
   const evidence = context.policyFeeAuthorizationEvidence;
   let validAfter;
@@ -612,11 +622,19 @@ async function verifyPolicyFeeAuthorizationBinding({
     "authorizationState",
     [covenant.buyer, expectedNonce],
   );
-  const expectedConsumed = Number(fee.state) === FEE.refunded;
-  if (consumed !== expectedConsumed) {
+  const shouldBeConsumed = typeof expectedConsumed === "boolean"
+    ? expectedConsumed
+    : Number(fee.state) === FEE.refunded;
+  if (consumed !== shouldBeConsumed) {
     throw new EvidenceAttesterError("fee_authorization_state_mismatch", 409);
   }
-  return { id: expectedId, nonce: expectedNonce, validAfter, validBefore };
+  return {
+    id: expectedId,
+    nonce: expectedNonce,
+    validAfter,
+    validBefore,
+    amountAtomic: BigInt(feeAmount),
+  };
 }
 
 async function verifyRelayBinding({
@@ -661,6 +679,80 @@ async function verifyRelayBinding({
   });
 }
 
+async function verifyOrphanedFeeRefund({
+  request,
+  covenant,
+  policy,
+  configuration,
+  publicClient,
+  chain,
+  now,
+}) {
+  if (configuration.role !== "primary") {
+    throw new EvidenceAttesterError("orphaned_fee_refund_primary_only", 403);
+  }
+  const evidence = request.evidence;
+  const context = request.context || {};
+  const observedAt = positiveInteger(evidence.observedAt, "orphaned_fee_observed_at");
+  const nowSeconds = Math.floor(now() / 1_000);
+  const fee = await read(
+    publicClient,
+    configuration.feeEscrow,
+    ESCROW_ABI,
+    "getFee",
+    [evidence.feeId],
+  );
+  if (
+    !sameBytes32(evidence.feeId, covenant.feeAuthorizationHash)
+    || !sameBytes32(evidence.covenantId, covenant.id)
+    || !isBytes32(evidence.authorizationNonce)
+    || !isBytes32(evidence.paymentTransaction)
+    || Number(fee.state) !== FEE.none
+    || observedAt > nowSeconds
+    || nowSeconds - observedAt > FEE_EVIDENCE_MAX_AGE_SECONDS
+  ) throw new EvidenceAttesterError("orphaned_fee_refund_evidence_invalid");
+
+  const providerBinding = await verifyDirectAuthorizationBinding({
+    context,
+    covenant,
+    configuration,
+    publicClient,
+    chain,
+    now,
+    expectedConsumed: null,
+  });
+  const policyFeeAuthorization = await verifyPolicyFeeAuthorizationBinding({
+    context,
+    covenant,
+    policy,
+    fee,
+    providerAuthorization: providerBinding.authorization,
+    configuration,
+    publicClient,
+    chain,
+    now,
+    expectedConsumed: true,
+  });
+  const refundAvailableAt = Math.max(
+    Number(policyFeeAuthorization.validBefore),
+    Number(providerBinding.authorization.authorization.validBefore),
+  ) + FEE_REFUND_GRACE_SECONDS;
+  if (
+    !sameBytes32(evidence.authorizationNonce, policyFeeAuthorization.nonce)
+    || observedAt < refundAvailableAt
+    || nowSeconds < refundAvailableAt
+  ) throw new EvidenceAttesterError("orphaned_fee_refund_binding_invalid");
+
+  await chain.verifyProviderSettlement({
+    txHash: evidence.paymentTransaction,
+    payer: covenant.buyer,
+    payTo: configuration.feeEscrow,
+    asset: configuration.paymentAsset,
+    amountAtomic: policyFeeAuthorization.amountAtomic,
+    authorizationNonce: policyFeeAuthorization.nonce,
+  });
+}
+
 async function verifyLifecycle({ action, request, configuration, publicClient, chain, now }) {
   const evidence = request.evidence;
   const context = request.context || {};
@@ -672,6 +764,18 @@ async function verifyLifecycle({ action, request, configuration, publicClient, c
     String(covenant.policyId).toLowerCase(),
     { requireActive: false },
   );
+  if (action === "refund_orphaned_fee") {
+    await verifyOrphanedFeeRefund({
+      request,
+      covenant,
+      policy,
+      configuration,
+      publicClient,
+      chain,
+      now,
+    });
+    return;
+  }
   if (action === "cancel_unpaid") {
     const fee = await read(publicClient, configuration.feeEscrow, ESCROW_ABI, "getFee", [evidence.feeAuthorizationHash]);
     if (
@@ -848,8 +952,8 @@ async function verifyLifecycle({ action, request, configuration, publicClient, c
 }
 
 async function recomputeDigest({ action, digestFunctionName, request, configuration, publicClient }) {
-  const address = action === "capture_fee" ? configuration.feeEscrow : configuration.manager;
-  const abi = action === "capture_fee" ? ESCROW_ABI : MANAGER_ABI;
+  const address = isFeeEscrowAction(action) ? configuration.feeEscrow : configuration.manager;
+  const abi = isFeeEscrowAction(action) ? ESCROW_ABI : MANAGER_ABI;
   const digest = await read(publicClient, address, abi, digestFunctionName, [request.evidence]);
   if (!sameBytes32(digest, request.digest)) throw new EvidenceAttesterError("attestation_digest_mismatch");
   return digest;

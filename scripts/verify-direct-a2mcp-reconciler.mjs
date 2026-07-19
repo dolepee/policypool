@@ -5,6 +5,7 @@ import { ProviderRelayError } from "../api/lib/provider-relay.js";
 
 const buyer = "0x3000000000000000000000000000000000000003";
 const provider = "0xf4c9fa07f3bb852547fdc4df7c1d9fd9991cfa51";
+const policyId = `0x${"10".repeat(32)}`;
 const covenantId = `0x${"11".repeat(32)}`;
 const jobId = `0x${"22".repeat(32)}`;
 const feeId = `0x${"33".repeat(32)}`;
@@ -14,6 +15,7 @@ const receiptDigest = `0x${"66".repeat(32)}`;
 const settlementTransaction = `0x${"77".repeat(32)}`;
 const requestHash = `sha256:${"aa".repeat(32)}`;
 const requirementsHash = `sha256:${"bb".repeat(32)}`;
+const orphanedPaymentTransaction = `0x${"cc".repeat(32)}`;
 
 function directRecord() {
   return {
@@ -23,6 +25,7 @@ function directRecord() {
     buyer,
     agentId: "3808",
     serviceId: "33461",
+    policyId,
     endpoint: "https://warden.example/audit",
     servicePriceAtomic: "500000",
     providerAccepted: { payTo: provider, asset: PAYMENT.asset },
@@ -81,6 +84,7 @@ function harness({
   nowSeconds = 1784289700,
   relayGrant = true,
   refundFails = false,
+  orphanedFeePayment = false,
 } = {}) {
   let record = directRecord();
   if (!relayGrant) delete record.execution.stages.relayGrant;
@@ -104,6 +108,8 @@ function harness({
   let expiries = 0;
   let rotations = 0;
   let cancelContext = null;
+  let orphanedRefund = null;
+  const orphanedSearches = [];
   const sequence = [];
   const calls = { cancel: 0, capture: 0, mark: 0, refund: 0, release: 0, settle: 0, start: 0 };
   const state = {
@@ -164,12 +170,35 @@ function harness({
   const feeEscrow = {
     async getFee() { return structuredClone(fee); },
     async capture() { calls.capture += 1; fee.state = 2; return { transactionHash: `0x${"06".repeat(32)}` }; },
+    async findOrphanedPayment(input) {
+      orphanedSearches.push(structuredClone(input));
+      return orphanedFeePayment
+        ? { txHash: orphanedPaymentTransaction, blockNumber: "123" }
+        : null;
+    },
     async refund() {
       calls.refund += 1;
       sequence.push("refund");
       if (refundFails) throw new Error("refund_failed");
       fee.state = 3;
       return { transactionHash: `0x${"07".repeat(32)}` };
+    },
+    async refundOrphaned(authorization, evidence, context) {
+      sequence.push("orphan-refund");
+      orphanedRefund = {
+        authorization: structuredClone(authorization),
+        evidence: structuredClone(evidence),
+        context: structuredClone(context),
+      };
+      fee = {
+        buyer,
+        covenantId,
+        providerAuthorizationHash: directRecord().providerAuthorizationHash,
+        amountAtomic: "100000",
+        refundAvailableAt: directRecord().providerAuthorizationValidBefore + 120,
+        state: 3,
+      };
+      return { transactionHash: `0x${"09".repeat(32)}` };
     },
   };
   const reconciler = createDirectA2mcpReconciler({
@@ -200,6 +229,8 @@ function harness({
     getCancelContext: () => structuredClone(cancelContext),
     getExpiries: () => expiries,
     getRecoveryContextReads: () => recoveryContextReads,
+    getOrphanedRefund: () => structuredClone(orphanedRefund),
+    getOrphanedSearches: () => structuredClone(orphanedSearches),
     getRecoveries: () => recoveries,
     getRotations: () => rotations,
     getSequence: () => [...sequence],
@@ -260,6 +291,49 @@ assert.equal(
 assert.equal(unsettled.getRecord().state, "complete");
 assert.equal(unsettled.getRecord().result.outcome, "cancelled_without_charge");
 assert.equal(unsettled.getRotations(), 1);
+
+const orphanedFee = harness({
+  receipt: null,
+  feeState: 0,
+  nowSeconds: directRecord().providerAuthorizationValidBefore + 121,
+  orphanedFeePayment: true,
+});
+const orphanedFeeResult = await orphanedFee.reconcile();
+assert.equal(orphanedFeeResult.ok, true);
+assert.deepEqual(
+  orphanedFee.calls,
+  { cancel: 1, capture: 0, mark: 0, refund: 0, release: 0, settle: 0, start: 0 },
+);
+assert.deepEqual(orphanedFee.getSequence(), ["orphan-refund", "cancel"]);
+assert.deepEqual(orphanedFee.getOrphanedSearches()[0], {
+  buyer,
+  authorizationNonce: feeId,
+  notBeforeTimestamp: directRecord().feeValidBefore - 15 * 60,
+  notAfterTimestamp: directRecord().feeValidBefore,
+});
+assert.deepEqual(orphanedFee.getOrphanedRefund().authorization, {
+  buyer,
+  policyId,
+  jobId,
+  providerAuthorizationHash: directRecord().providerAuthorizationHash,
+  validAfter: directRecord().feeValidAfter,
+  validBefore: directRecord().feeValidBefore,
+  nonce: feeId,
+  providerAuthorizationValidBefore: directRecord().providerAuthorizationValidBefore,
+});
+assert.deepEqual(orphanedFee.getOrphanedRefund().evidence, {
+  feeId,
+  covenantId,
+  authorizationNonce: feeId,
+  paymentTransaction: orphanedPaymentTransaction,
+  observedAt: directRecord().providerAuthorizationValidBefore + 121,
+});
+assert.equal(
+  orphanedFee.getOrphanedRefund().context.policyFeeAuthorizationEvidence.paymentSignature,
+  "policy-fee-payment-signature",
+);
+assert.equal(orphanedFee.getRecord().state, "complete");
+assert.equal(orphanedFee.getRecord().result.outcome, "cancelled_without_charge");
 
 const missingGrant = harness({
   receipt: null,

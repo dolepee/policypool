@@ -7,6 +7,7 @@ const ACTIONS = new Set([
   "settlement",
   "cancel_unpaid",
   "capture_fee",
+  "refund_orphaned_fee",
 ]);
 
 export class EvidenceAttestationError extends Error {

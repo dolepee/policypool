@@ -19,8 +19,11 @@ const covenantId = `0x${"66".repeat(32)}`;
 const relayReceiptDigest = `0x${"77".repeat(32)}`;
 const settlementTransaction = `0x${"88".repeat(32)}`;
 const captureDigest = `0x${"99".repeat(32)}`;
+const orphanedRefundDigest = `0x${"98".repeat(32)}`;
+const orphanedPaymentTransaction = `0x${"97".repeat(32)}`;
 const writes = [];
 const attestations = [];
+const orphanedSearches = [];
 
 const publicClient = {
   async readContract({ functionName }) {
@@ -29,6 +32,7 @@ const publicClient = {
     if (functionName === "authorizationNonce") return nonce;
     if (functionName === "authorizationId") return feeId;
     if (functionName === "captureEvidenceDigest") return captureDigest;
+    if (functionName === "orphanedRefundEvidenceDigest") return orphanedRefundDigest;
     if (functionName === "getFee") {
       return {
         buyer,
@@ -62,6 +66,12 @@ const evidenceProvider = {
     return [`0x${"aa".repeat(65)}`, `0x${"bb".repeat(65)}`, `0x${"cc".repeat(65)}`];
   },
 };
+const chainService = {
+  async findProviderSettlement(input) {
+    orphanedSearches.push(input);
+    return { txHash: orphanedPaymentTransaction, blockNumber: "122" };
+  },
+};
 const client = createPolicyFeeEscrowClient({
   configuration: {
     ready: true,
@@ -74,6 +84,7 @@ const client = createPolicyFeeEscrowClient({
   publicClient,
   walletClient,
   evidenceProvider,
+  chainService,
   now: () => 500_000,
 });
 
@@ -112,6 +123,39 @@ assert.equal(attestations[0].domain.manager, feeEscrow);
 assert.equal(writes[1].functionName, "capture");
 await client.refund(feeId);
 assert.equal(writes[2].functionName, "refund");
+const orphaned = await client.findOrphanedPayment({
+  buyer,
+  authorizationNonce: nonce,
+  notBeforeTimestamp: 100,
+  notAfterTimestamp: 700,
+});
+assert.equal(orphaned.txHash, orphanedPaymentTransaction);
+assert.equal(orphanedSearches[0].payer, buyer);
+assert.equal(orphanedSearches[0].payTo, feeEscrow);
+assert.equal(orphanedSearches[0].amountAtomic, 100000n);
+assert.equal(orphanedSearches[0].authorizationNonce, nonce);
+await client.refundOrphaned({
+  buyer,
+  policyId,
+  jobId,
+  providerAuthorizationHash,
+  validAfter: 0,
+  validBefore: 700,
+  nonce,
+  providerAuthorizationValidBefore: 650,
+}, {
+  feeId,
+  covenantId,
+  authorizationNonce: nonce,
+  paymentTransaction: orphanedPaymentTransaction,
+  observedAt: 500,
+}, { source: "verified-direct-fee-transfer" });
+assert.equal(attestations[1].action, "refund_orphaned_fee");
+assert.equal(attestations[1].digest, orphanedRefundDigest);
+assert.equal(attestations[1].domain.manager, feeEscrow);
+assert.equal(writes[3].functionName, "refundOrphaned");
+assert.equal(writes[3].args[0].validBefore, 700n);
+assert.equal(writes[3].args[1].observedAt, 500n);
 
 assert.throws(
   () => createPolicyFeeEscrowClient({ configuration: { ready: true, evidenceVerifier } }),
@@ -218,4 +262,4 @@ await assert.rejects(
     && error.code === "direct_policy_fee_state_invalid",
 );
 
-console.log("PolicyPool fee escrow client passed: canonical authorization preview plus one boundary-safe, idempotent post-settlement capture/refund transition.");
+console.log("PolicyPool fee escrow client passed: canonical authorization preview, nonce-indexed orphan recovery, quorum refund, and one boundary-safe idempotent post-settlement transition.");

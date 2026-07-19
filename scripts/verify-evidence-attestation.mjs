@@ -44,6 +44,13 @@ await client.attest({
   domain,
 });
 assert.equal(calls[1].body.action, "capture_fee");
+await client.attest({
+  action: "refund_orphaned_fee",
+  digest,
+  evidence: { feeId: `0x${"77".repeat(32)}` },
+  domain,
+});
+assert.equal(calls[2].body.action, "refund_orphaned_fee");
 
 const invalid = createEvidenceAttestationClient({
   url: "https://evidence.example/attest",

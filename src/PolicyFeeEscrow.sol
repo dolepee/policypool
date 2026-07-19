@@ -5,6 +5,7 @@ import {CoverageManager} from "./CoverageManager.sol";
 
 interface IPolicyFeeAsset {
     function balanceOf(address account) external view returns (uint256);
+    function authorizationState(address authorizer, bytes32 nonce) external view returns (bool);
     function transfer(address to, uint256 amount) external returns (bool);
     function transferWithAuthorization(
         address from,
@@ -43,6 +44,8 @@ contract PolicyFeeEscrow {
     error InvalidCaptureEvidence();
     error EvidenceStale();
     error EvidenceAlreadyUsed();
+    error AuthorizationNotConsumed();
+    error UnaccountedFeeUnavailable();
     error TokenTransferFailed();
     error FeeOnTransferUnsupported();
     error Reentrancy();
@@ -85,15 +88,27 @@ contract PolicyFeeEscrow {
         uint256 providerAuthorizationValidBefore;
     }
 
+    struct OrphanedRefundEvidence {
+        bytes32 feeId;
+        bytes32 covenantId;
+        bytes32 authorizationNonce;
+        bytes32 paymentTransaction;
+        uint64 observedAt;
+    }
+
     uint256 public constant MAX_AUTHORIZATION_WINDOW = 15 minutes;
     uint256 public constant REFUND_GRACE_PERIOD = 2 minutes;
     uint256 public constant CAPTURE_EVIDENCE_MAX_AGE = 10 minutes;
     bytes32 public constant CAPTURE_ACTION = keccak256("CAPTURE_POLICYPOOL_FEE");
+    bytes32 public constant ORPHANED_REFUND_ACTION = keccak256("REFUND_ORPHANED_POLICYPOOL_FEE");
     bytes32 public constant AUTHORIZATION_NONCE_TYPEHASH = keccak256(
         "PolicyFeeAuthorization(bytes32 policyId,bytes32 jobId,address buyer,bytes32 providerAuthorizationHash,uint256 validAfter,uint256 validBefore,uint256 providerAuthorizationValidBefore)"
     );
     bytes32 public constant CAPTURE_TYPEHASH = keccak256(
         "CaptureEvidence(bytes32 feeId,bytes32 covenantId,bytes32 providerAuthorizationHash,bytes32 relayReceiptDigest,bytes32 providerSettlementTransaction,uint64 observedAt)"
+    );
+    bytes32 public constant ORPHANED_REFUND_TYPEHASH = keccak256(
+        "OrphanedRefundEvidence(bytes32 feeId,bytes32 covenantId,bytes32 authorizationNonce,bytes32 paymentTransaction,uint64 observedAt)"
     );
 
     IPolicyFeeAsset public immutable asset;
@@ -122,6 +137,13 @@ contract PolicyFeeEscrow {
         uint256 amountAtomic
     );
     event FeeRefunded(bytes32 indexed feeId, bytes32 indexed covenantId, address indexed buyer, uint256 amountAtomic);
+    event OrphanedFeeRefunded(
+        bytes32 indexed feeId,
+        bytes32 indexed covenantId,
+        bytes32 indexed paymentTransaction,
+        address buyer,
+        uint256 amountAtomic
+    );
 
     modifier nonReentrant() {
         if (entered != 1) revert Reentrancy();
@@ -207,6 +229,26 @@ contract PolicyFeeEscrow {
 
     function captureEvidenceDigest(CaptureEvidence calldata evidence) external view returns (bytes32) {
         return evidenceVerifier.attestationDigest(address(this), CAPTURE_ACTION, capturePayloadHash(evidence));
+    }
+
+    function orphanedRefundPayloadHash(OrphanedRefundEvidence calldata evidence) public pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                ORPHANED_REFUND_TYPEHASH,
+                evidence.feeId,
+                evidence.covenantId,
+                evidence.authorizationNonce,
+                evidence.paymentTransaction,
+                evidence.observedAt
+            )
+        );
+    }
+
+    function orphanedRefundEvidenceDigest(OrphanedRefundEvidence calldata evidence) external view returns (bytes32) {
+        return
+            evidenceVerifier.attestationDigest(
+                address(this), ORPHANED_REFUND_ACTION, orphanedRefundPayloadHash(evidence)
+            );
     }
 
     function getFee(bytes32 feeId) external view returns (FeeRecord memory) {
@@ -317,12 +359,66 @@ contract PolicyFeeEscrow {
         emit FeeRefunded(feeId, current.covenantId, current.buyer, current.amountAtomic);
     }
 
-    function _validateFundAuthorization(FundAuthorization calldata authorization) private view {
-        if (authorization.buyer == address(0)) revert ZeroAddress();
+    /// @notice Refunds a fee authorization that was executed directly on the token, bypassing `fund` bookkeeping.
+    /// @dev The evidence quorum must independently verify the exact AuthorizationUsed/Transfer transaction. The
+    ///      balance check prevents this recovery from consuming any normally-accounted fee.
+    function refundOrphaned(
+        FundAuthorization calldata authorization,
+        OrphanedRefundEvidence calldata evidence,
+        bytes[] calldata signatures
+    ) external nonReentrant {
+        _validateAuthorizationBinding(authorization);
+        bytes32 feeId = authorizationId(
+            authorization.buyer, authorization.validAfter, authorization.validBefore, authorization.nonce
+        );
         if (
-            authorization.policyId == bytes32(0) || authorization.jobId == bytes32(0)
-                || authorization.providerAuthorizationHash == bytes32(0)
+            evidence.feeId != feeId || evidence.authorizationNonce != authorization.nonce
+                || evidence.paymentTransaction == bytes32(0) || evidence.observedAt > block.timestamp
+        ) revert InvalidCaptureEvidence();
+        if (block.timestamp - evidence.observedAt > CAPTURE_EVIDENCE_MAX_AGE) revert EvidenceStale();
+        if (fees[feeId].state != FeeState.None) revert FeeAlreadyExists();
+
+        bytes32 covenantId =
+            coverageManager.covenantId(authorization.policyId, authorization.jobId, authorization.buyer, feeId);
+        CoverageManager.Covenant memory covenant = coverageManager.getCovenant(covenantId);
+        if (
+            evidence.covenantId != covenantId || covenant.id != covenantId
+                || covenant.policyId != authorization.policyId || covenant.jobId != authorization.jobId
+                || covenant.buyer != authorization.buyer || covenant.feeAuthorizationHash != feeId
+                || covenant.feeAuthorizationValidBefore != authorization.validBefore
         ) revert InvalidCovenant();
+
+        uint64 refundAvailableAt = _refundAvailableAt(authorization);
+        if (block.timestamp < refundAvailableAt) revert RefundNotReady();
+        if (!asset.authorizationState(authorization.buyer, authorization.nonce)) revert AuthorizationNotConsumed();
+
+        bytes32 evidenceDigest =
+            evidenceVerifier.verify(ORPHANED_REFUND_ACTION, orphanedRefundPayloadHash(evidence), signatures);
+        if (consumedEvidence[evidenceDigest]) revert EvidenceAlreadyUsed();
+
+        uint256 escrowBalance = asset.balanceOf(address(this));
+        if (escrowBalance < totalEscrowedAtomic || escrowBalance - totalEscrowedAtomic < feeAmountAtomic) {
+            revert UnaccountedFeeUnavailable();
+        }
+
+        consumedEvidence[evidenceDigest] = true;
+        fees[feeId] = FeeRecord({
+            buyer: authorization.buyer,
+            covenantId: covenantId,
+            providerAuthorizationHash: authorization.providerAuthorizationHash,
+            amountAtomic: feeAmountAtomic,
+            fundedAt: 0,
+            authorizationValidBefore: uint64(authorization.validBefore),
+            refundAvailableAt: refundAvailableAt,
+            state: FeeState.Refunded
+        });
+        _safeTransfer(authorization.buyer, feeAmountAtomic);
+        emit FeeRefunded(feeId, covenantId, authorization.buyer, feeAmountAtomic);
+        emit OrphanedFeeRefunded(feeId, covenantId, evidence.paymentTransaction, authorization.buyer, feeAmountAtomic);
+    }
+
+    function _validateFundAuthorization(FundAuthorization calldata authorization) private view {
+        _validateAuthorizationFields(authorization);
         if (
             authorization.validAfter > block.timestamp || authorization.validBefore <= block.timestamp
                 || authorization.validBefore > block.timestamp + MAX_AUTHORIZATION_WINDOW
@@ -341,6 +437,42 @@ contract PolicyFeeEscrow {
                     authorization.providerAuthorizationValidBefore
                 )
         ) revert InvalidCaptureEvidence();
+    }
+
+    function _validateAuthorizationBinding(FundAuthorization calldata authorization) private pure {
+        _validateAuthorizationFields(authorization);
+        if (
+            authorization.nonce
+                != authorizationNonce(
+                    authorization.policyId,
+                    authorization.jobId,
+                    authorization.buyer,
+                    authorization.providerAuthorizationHash,
+                    authorization.validAfter,
+                    authorization.validBefore,
+                    authorization.providerAuthorizationValidBefore
+                )
+        ) revert InvalidCaptureEvidence();
+    }
+
+    function _validateAuthorizationFields(FundAuthorization calldata authorization) private pure {
+        if (authorization.buyer == address(0)) revert ZeroAddress();
+        if (
+            authorization.policyId == bytes32(0) || authorization.jobId == bytes32(0)
+                || authorization.providerAuthorizationHash == bytes32(0)
+        ) revert InvalidCovenant();
+        if (
+            authorization.validAfter >= authorization.validBefore || authorization.validBefore > type(uint64).max
+                || authorization.providerAuthorizationValidBefore > type(uint64).max
+        ) revert InvalidAuthorizationWindow();
+    }
+
+    function _refundAvailableAt(FundAuthorization calldata authorization) private pure returns (uint64) {
+        uint256 authorizationClose = authorization.validBefore > authorization.providerAuthorizationValidBefore
+            ? authorization.validBefore
+            : authorization.providerAuthorizationValidBefore;
+        if (authorizationClose > type(uint64).max - REFUND_GRACE_PERIOD) revert InvalidAuthorizationWindow();
+        return uint64(authorizationClose + REFUND_GRACE_PERIOD);
     }
 
     function _safeTransfer(address to, uint256 amount) private {
