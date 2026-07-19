@@ -88,6 +88,53 @@
         </div>
       </section>
 
+      <section class="section external-proof-section" id="v04-house-proof" aria-labelledby="v04-proof-title">
+        <div class="site-shell">
+          <div class="section-heading split-heading">
+            <div><span class="section-index">V0.4 / CONTROLLED HOUSE PROOF</span><h2 id="v04-proof-title">Valid evidence.<br />Money still waits.</h2></div>
+            <p>The remediated eight-contract stack is live flag-off on X Layer. These house-operated covenants prove custody and challenge behavior; they are not revenue, public enrollment, or external traction.</p>
+          </div>
+          <p class="external-proof-summary">Production remains v0.3 · public v0.4 flags off · settlement challenge ends 20 July 2026 at 16:50:04 UTC</p>
+          <div class="external-proof-grid">
+            <article class="external-proof-card">
+              <header><span>FULL SLA CREDIT</span><b class="status-dot state-pending">PayoutDue</b></header>
+              <h3>0.5 USD₮0<br />fully locked</h3>
+              <p>The provider settled, missed the 120-second SLA, and the primary quorum marked the covenant payout due. Execution remains time-locked.</p>
+              <dl>
+                <div><dt>Covenant</dt><dd>0x0eb814…061b96</dd></div>
+                <div><dt>Planned payout</dt><dd>500000 atomic</dd></div>
+                <div><dt>Fee escrow</dt><dd>0 atomic</dd></div>
+              </dl>
+              <div class="external-proof-actions"><a href="https://www.oklink.com/x-layer/tx/0x00c39daeacb806dfc22a8e01a1d91e38a72f4eda39e6398fa02c53d9580e3944" target="_blank" rel="noreferrer">Open PayoutDue receipt ↗</a></div>
+            </article>
+
+            <article class="external-proof-card">
+              <header><span>NET-LOSS CREDIT</span><b class="status-dot state-pending">PayoutDue</b></header>
+              <h3>0.3 USD₮0<br />after recovery</h3>
+              <p>A real 0.2 USD₮0 direct recovery reduces the covered loss from 0.5 to 0.3. The signed settlement cannot overpay the remaining loss.</p>
+              <dl>
+                <div><dt>Covenant</dt><dd>0x165b3d…2be9cb</dd></div>
+                <div><dt>Direct recovery</dt><dd>200000 atomic</dd></div>
+                <div><dt>Planned payout</dt><dd>300000 atomic</dd></div>
+              </dl>
+              <div class="external-proof-actions"><a href="https://www.oklink.com/x-layer/tx/0x85f200d583e99f9160f0f1040602bb6b78cdd515524efd690c6804b71874afa0" target="_blank" rel="noreferrer">Open recovery receipt ↗</a><a href="https://www.oklink.com/x-layer/tx/0xfbfae41a2c882685480645aadb64199145574c63524449fb76207bfc9a3d8082" target="_blank" rel="noreferrer">PayoutDue ↗</a></div>
+            </article>
+
+            <article class="external-proof-card">
+              <header><span>CHALLENGE ENFORCEMENT</span><b class="status-dot is-positive">Guard active</b></header>
+              <h3>The quorum signed.<br />The contract refused.</h3>
+              <p>The primary attester independently reconstructed valid settlement evidence and returned three signatures. A read-only manager simulation still reverted with <code>SettlementChallengeActive</code>.</p>
+              <dl>
+                <div><dt>Threshold</dt><dd>3-of-5</dd></div>
+                <div><dt>Digest</dt><dd>0x6ad5b6…ea2da9</dd></div>
+                <div><dt>Evidence type</dt><dd>read-only simulation</dd></div>
+              </dl>
+              <div class="external-proof-actions"><a href="https://www.oklink.com/x-layer/address/0xb6c94274f8d7F7f7eBb600B3C848605e0b786468" target="_blank" rel="noreferrer">Inspect manager ↗</a><a href="https://github.com/dolepee/policypool/tree/v0.4.0-rc.1" target="_blank" rel="noreferrer">Open RC source ↗</a></div>
+            </article>
+          </div>
+        </div>
+      </section>
+
       <section class="section external-proof-section" id="external-usage" aria-labelledby="external-proof-title">
         <div class="site-shell">
           <div class="section-heading split-heading">
