@@ -71,7 +71,7 @@ Before a real external buyer:
 2. prove unauthorized, malformed, substituted, stale, wrong-policy, wrong-domain, and below-threshold requests fail closed;
 3. run one house direct-A2MCP issue, fee fund, provider settlement, clock start, fee capture, and release;
 4. run one funded-fee timeout where refund happens before cancellation and no settlement exists;
-5. run one direct-settled fee timeout where the nonce-indexed orphan refund happens before cancellation;
+5. run one mixed fee-lifecycle drill where a normally funded fee remains accounted while a second fee is directly settled, the nonce-indexed orphan refund returns only the unaccounted fee before cancellation, and the funded fee then completes its normal refund path;
 6. run a recovery-quorum drill without enabling public enrollment;
 7. complete the 24-hour read-only reconciler soak; and
 8. enroll Warden on the canonical eight-contract registry only after it signs a fresh registry-specific authorization.

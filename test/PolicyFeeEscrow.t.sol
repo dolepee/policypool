@@ -429,23 +429,35 @@ contract PolicyFeeEscrowTest is CoverageEvidenceTestBase {
         escrow.refundOrphaned(authorization, evidence, signatures);
     }
 
-    function testOrphanRefundCannotConsumeNormallyAccountedFee() public {
+    function testFundThenOrphanThenRefundOrphanedPreservesAccountedFee() public {
         (, bytes32 fundedFeeId,) = _funded(keccak256("normally-funded"), 5 minutes);
         PolicyFeeEscrow.FundAuthorization memory orphan = _authorization(JOB_ID, 5 minutes);
+        _allow(orphan);
         bytes32 orphanFeeId = _issueFor(orphan);
         bytes32 orphanCovenantId = manager.covenantId(policyId, JOB_ID, buyer, orphanFeeId);
-        asset.consumeWithoutTransfer(orphan.nonce);
+        asset.transferWithAuthorization(
+            orphan.buyer, address(escrow), FEE, orphan.validAfter, orphan.validBefore, orphan.nonce, hex"01"
+        );
         vm.warp(orphan.providerAuthorizationValidBefore + escrow.REFUND_GRACE_PERIOD());
         PolicyFeeEscrow.OrphanedRefundEvidence memory evidence =
             _orphanedRefundEvidence(orphanFeeId, orphanCovenantId, orphan.nonce);
         bytes32 digest = escrow.orphanedRefundEvidenceDigest(evidence);
         bytes[] memory signatures = _signatures(digest);
 
+        assertEq(asset.balanceOf(address(escrow)), FEE * 2);
+        assertEq(escrow.totalEscrowedAtomic(), FEE);
+        escrow.refundOrphaned(orphan, evidence, signatures);
+
         assertEq(asset.balanceOf(address(escrow)), FEE);
         assertEq(escrow.totalEscrowedAtomic(), FEE);
-        vm.expectRevert(PolicyFeeEscrow.UnaccountedFeeUnavailable.selector);
-        escrow.refundOrphaned(orphan, evidence, signatures);
         assertEq(uint256(escrow.getFee(fundedFeeId).state), uint256(PolicyFeeEscrow.FeeState.Funded));
+        assertEq(uint256(escrow.getFee(orphanFeeId).state), uint256(PolicyFeeEscrow.FeeState.Refunded));
+
+        escrow.refund(fundedFeeId);
+        assertEq(asset.balanceOf(address(escrow)), 0);
+        assertEq(escrow.totalEscrowedAtomic(), 0);
+        assertEq(uint256(escrow.getFee(fundedFeeId).state), uint256(PolicyFeeEscrow.FeeState.Refunded));
+        assertEq(asset.balanceOf(buyer), 1_000_000);
     }
 
     function testOrphanRefundRequiresBoundaryFreshEvidenceAndQuorum() public {
