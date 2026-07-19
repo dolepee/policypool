@@ -32,6 +32,7 @@ const buyerSigner = privateKeyToAccount(generatePrivateKey());
 const wrongSigner = privateKeyToAccount(generatePrivateKey());
 const relayVerifier = "0x9000000000000000000000000000000000000009";
 const provider = "0xf4c9fa07f3bb852547fdc4df7c1d9fd9991cfa51";
+const unrelatedRecipient = "0x5000000000000000000000000000000000000005";
 const buyer = buyerSigner.address;
 const paymentTransaction = `0x${"12".repeat(32)}`;
 const policy = {
@@ -395,33 +396,35 @@ const transferEvent = parseAbiItem("event Transfer(address indexed from, address
 const authorizationUsedEvent = parseAbiItem(
   "event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)",
 );
+let settlementReceiptMode = "valid";
 const chainBackedVerifier = createChainService({
   client: {
     verifyTypedData,
     async waitForTransactionReceipt() {
+      const authorizationUsedLog = {
+        address: PAYMENT.asset,
+        topics: encodeEventTopics({
+          abi: [authorizationUsedEvent],
+          eventName: "AuthorizationUsed",
+          args: { authorizer: buyer, nonce: validPayload.payload.authorization.nonce },
+        }),
+        data: "0x",
+      };
+      const transferLog = (to) => ({
+        address: PAYMENT.asset,
+        topics: encodeEventTopics({
+          abi: [transferEvent],
+          eventName: "Transfer",
+          args: { from: buyer, to },
+        }),
+        data: encodeAbiParameters([{ type: "uint256" }], [BigInt(policy.servicePriceAtomic)]),
+      });
       return {
         status: "success",
         blockNumber: 123n,
-        logs: [
-          {
-            address: PAYMENT.asset,
-            topics: encodeEventTopics({
-              abi: [transferEvent],
-              eventName: "Transfer",
-              args: { from: buyer, to: provider },
-            }),
-            data: encodeAbiParameters([{ type: "uint256" }], [BigInt(policy.servicePriceAtomic)]),
-          },
-          {
-            address: PAYMENT.asset,
-            topics: encodeEventTopics({
-              abi: [authorizationUsedEvent],
-              eventName: "AuthorizationUsed",
-              args: { authorizer: buyer, nonce: validPayload.payload.authorization.nonce },
-            }),
-            data: "0x",
-          },
-        ],
+        logs: settlementReceiptMode === "substitution"
+          ? [authorizationUsedLog, transferLog(unrelatedRecipient), transferLog(provider)]
+          : [authorizationUsedLog, transferLog(provider)],
       };
     },
   },
@@ -442,6 +445,21 @@ assert.equal((await chainBackedVerifier.verifyProviderSettlement({
   amountAtomic: policy.servicePriceAtomic,
   authorizationNonce: validPayload.payload.authorization.nonce,
 })).authorizationNonce, validPayload.payload.authorization.nonce);
+settlementReceiptMode = "substitution";
+await assert.rejects(
+  () => chainBackedVerifier.verifyProviderSettlement({
+    txHash: paymentTransaction,
+    payer: buyer,
+    payTo: provider,
+    asset: PAYMENT.asset,
+    amountAtomic: policy.servicePriceAtomic,
+    authorizationNonce: validPayload.payload.authorization.nonce,
+  }),
+  (error) => error instanceof EvidenceError
+    && error.code === "provider_payment_authorization_transfer_mismatch",
+  "a same-transaction transfer cannot be substituted for the authorization's own transfer",
+);
+settlementReceiptMode = "valid";
 await assert.rejects(
   () => chainBackedVerifier.verifyProviderSettlement({
     txHash: paymentTransaction,

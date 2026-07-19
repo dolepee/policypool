@@ -101,6 +101,10 @@ const issued = await issuer.issue({
   coverageCapAtomic: "500000",
   enrollmentClosesAt: "2026-07-16T12:01:00.000Z",
   paymentAuthorization,
+  attestationContext: {
+    directA2mcp: { requestHash: "sha256:test" },
+    policy: { substituted: true },
+  },
 });
 assert.match(issued.covenantId, /^0x[a-f0-9]{64}$/);
 assert.equal(issued.covenantId, issuer.previewCovenantId({
@@ -114,6 +118,9 @@ assert.equal(writes[0].request.args[0].coverageCapAtomic, 500000n);
 assert.equal(writes[0].request.args[0].feeAuthorization.authorizationHash, paymentAuthorization.hash);
 assert.equal(writes[0].request.args[0].feeAuthorization.validBefore, BigInt(paymentAuthorization.validBefore));
 assert.equal(writes[0].request.args[1].length, 3);
+assert.deepEqual(attestations[0].context.directA2mcp, { requestHash: "sha256:test" });
+assert.equal(attestations[0].context.policy.onchainPolicyId, `onchain:${policyId}`);
+assert.equal(attestations[0].context.policy.substituted, undefined);
 
 const directAcceptanceEvidenceHash = `0x${"77".repeat(32)}`;
 await issuer.issue({

@@ -246,7 +246,7 @@ function validateProviderChallenge(raw, policy, canonicalEndpoint) {
   };
 }
 
-async function providerPaymentAuthorization(
+export async function providerPaymentAuthorization(
   raw,
   policy,
   chain,

@@ -60,7 +60,7 @@ function quoteIdBytes32(id) {
   return `0x${String(id).padEnd(64, "0")}`;
 }
 
-function directJobId({ policyId, buyer, requestHash, providerAuthorizationHash }) {
+export function directJobId({ policyId, buyer, requestHash, providerAuthorizationHash }) {
   return keccak256(encodeAbiParameters(
     [
       { type: "bytes32" },
@@ -79,7 +79,7 @@ function directJobId({ policyId, buyer, requestHash, providerAuthorizationHash }
   ));
 }
 
-function directAcceptanceEvidenceHash({
+export function directAcceptanceEvidenceHash({
   jobId,
   policyId,
   buyer,
@@ -110,6 +110,29 @@ function directAcceptanceEvidenceHash({
       quoteIdBytes32(quoteId),
     ],
   ));
+}
+
+export function directProviderAuthorizationEvidence(record, paymentSignature) {
+  return {
+    paymentSignature,
+    requirementsHash: record.providerRequirementsHash,
+    requestHash: record.requestHash,
+    authorizationHash: record.providerAuthorizationHash,
+    authorizationId: record.providerAuthorizationId,
+    validAfter: record.providerAuthorizationValidAfter,
+    validBefore: record.providerAuthorizationValidBefore,
+  };
+}
+
+export function directPolicyFeeAuthorizationEvidence(record, paymentSignature, quoteToken) {
+  return {
+    paymentSignature,
+    quoteToken,
+    nonce: record.feeNonce,
+    validAfter: record.feeValidAfter,
+    validBefore: record.feeValidBefore,
+    maxTimeoutSeconds: record.feeMaxTimeoutSeconds,
+  };
 }
 
 function sameAddress(left, right) {
@@ -161,7 +184,7 @@ function feePaymentRequirements(record, token) {
   };
 }
 
-async function verifyFeePayment({ raw, record, token, chain, nowMs, allowExpired = false }) {
+export async function verifyFeePayment({ raw, record, token, chain, nowMs, allowExpired = false }) {
   if (!raw) throw new DirectA2mcpError("policy_fee_signature_required", 402);
   let payload;
   try {
@@ -488,6 +511,8 @@ export function createDirectA2mcpCoordinator({
       record = await state.retainRecovery(token, executionId, {
         providerRequest,
         providerPaymentSignature,
+        policyFeePaymentSignature,
+        quoteToken: token,
       });
       const acceptedAtMs = record.execution.startedAtMs;
       const acceptedAt = new Date(acceptedAtMs).toISOString();
@@ -520,6 +545,35 @@ export function createDirectA2mcpCoordinator({
           coverageCapAtomic: bound.coverageCapAtomic,
           enrollmentClosesAt,
           paymentAuthorization,
+          attestationContext: {
+            directA2mcp: {
+              transport: "direct-a2mcp",
+              quoteId: bound.id,
+              quoteToken: token,
+              agentId: bound.agentId,
+              serviceId: bound.serviceId,
+              endpoint: bound.endpoint,
+              requestHash: bound.requestHash,
+              providerRequirementsHash: bound.providerRequirementsHash,
+              providerRequest,
+              providerPaymentSignature,
+              policyFeePaymentSignature,
+              providerAuthorization: {
+                hash: bound.providerAuthorizationHash,
+                id: bound.providerAuthorizationId,
+                nonce: bound.providerAuthorizationNonce,
+                validAfter: bound.providerAuthorizationValidAfter,
+                validBefore: bound.providerAuthorizationValidBefore,
+              },
+              feeAuthorization: {
+                id: bound.feeId,
+                nonce: bound.feeNonce,
+                validAfter: bound.feeValidAfter,
+                validBefore: bound.feeValidBefore,
+                maxTimeoutSeconds: bound.feeMaxTimeoutSeconds,
+              },
+            },
+          },
         });
         if (issued.covenantId.toLowerCase() !== bound.covenantId) {
           throw new DirectA2mcpError("direct_covenant_id_mismatch", 503);
@@ -624,6 +678,14 @@ export function createDirectA2mcpCoordinator({
       if (!providerResult.receipt?.settlement || !providerResult.receipt?.clock) {
         throw new DirectA2mcpError("provider_payment_not_settled", 502);
       }
+      const lifecycleAttestationContext = {
+        relayReceipt: providerResult.receipt,
+        directQuote: bound.id,
+        providerAuthorizationEvidence: directProviderAuthorizationEvidence(
+          bound,
+          providerPaymentSignature,
+        ),
+      };
       if (Number(covenant.state) === 7) {
         throw new DirectA2mcpError("provider_settled_after_coverage_cancelled_manual_resolution", 503);
       }
@@ -641,7 +703,7 @@ export function createDirectA2mcpCoordinator({
           bound.covenantId,
           providerResult.receipt.clock.startedAt,
           providerResult.receipt.receiptDigest,
-          { relayReceipt: providerResult.receipt },
+          lifecycleAttestationContext,
         );
         record = await state.checkpoint(token, executionId, "clockStarted", clock);
         covenant = await issuer.getCovenant(bound.covenantId);
@@ -665,7 +727,7 @@ export function createDirectA2mcpCoordinator({
           providerSettlementTransaction: providerResult.receipt.settlement.transaction,
           observedAt: Math.floor(now() / 1_000),
         },
-        context: { relayReceipt: providerResult.receipt },
+        context: lifecycleAttestationContext,
         now,
       });
       fee = feeResolution.fee;
@@ -687,7 +749,7 @@ export function createDirectA2mcpCoordinator({
             bound.covenantId,
             providerResult.receipt.clock.completedAt,
             providerResult.receipt.receiptDigest,
-            { relayReceipt: providerResult.receipt },
+            lifecycleAttestationContext,
           );
           record = await state.checkpoint(token, executionId, "coverageReleased", released);
           covenant = await issuer.getCovenant(bound.covenantId);

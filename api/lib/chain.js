@@ -364,7 +364,7 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
     }
     const receipt = await getReceipt(txHash);
     if (receipt.status !== "success") throw new EvidenceError("transfer_tx_reverted");
-    const transfer = receipt.logs.find((log) => {
+    const isExpectedTransfer = (log) => {
       if (log.address.toLowerCase() !== expectedAsset.toLowerCase()) return false;
       try {
         const decoded = decodeEventLog({ abi: [TRANSFER_EVENT], data: log.data, topics: log.topics });
@@ -375,25 +375,43 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
       } catch {
         return false;
       }
-    });
-    if (!transfer) throw new EvidenceError("verified_transfer_event_missing");
+    };
+    let transfer;
     if (authorizationNonce) {
-      const authorizationUsed = receipt.logs.find((log) => {
-        if (log.address.toLowerCase() !== expectedAsset.toLowerCase()) return false;
-        try {
-          const decoded = decodeEventLog({
-            abi: [AUTHORIZATION_USED_EVENT],
-            data: log.data,
-            topics: log.topics,
-          });
-          return decoded.eventName === "AuthorizationUsed"
-            && decoded.args.authorizer.toLowerCase() === from.toLowerCase()
-            && decoded.args.nonce.toLowerCase() === authorizationNonce.toLowerCase();
-        } catch {
-          return false;
-        }
-      });
-      if (!authorizationUsed) throw new EvidenceError("provider_payment_authorization_event_missing");
+      const authorizationMatches = receipt.logs
+        .map((log, index) => ({ log, index }))
+        .filter(({ log }) => {
+          if (log.address.toLowerCase() !== expectedAsset.toLowerCase()) return false;
+          try {
+            const decoded = decodeEventLog({
+              abi: [AUTHORIZATION_USED_EVENT],
+              data: log.data,
+              topics: log.topics,
+            });
+            return decoded.eventName === "AuthorizationUsed"
+              && decoded.args.authorizer.toLowerCase() === from.toLowerCase()
+              && decoded.args.nonce.toLowerCase() === authorizationNonce.toLowerCase();
+          } catch {
+            return false;
+          }
+        });
+      if (authorizationMatches.length === 0) {
+        throw new EvidenceError("provider_payment_authorization_event_missing");
+      }
+      if (authorizationMatches.length !== 1) {
+        throw new EvidenceError("provider_payment_authorization_event_ambiguous");
+      }
+      // USD₮0 emits AuthorizationUsed immediately before the Transfer executed by that
+      // authorization. Requiring the ordered pair prevents a later batch transfer from
+      // being substituted for the signed nonce's actual recipient.
+      const authorizationIndex = authorizationMatches[0].index;
+      transfer = receipt.logs[authorizationIndex + 1];
+      if (!transfer || !isExpectedTransfer(transfer)) {
+        throw new EvidenceError("provider_payment_authorization_transfer_mismatch");
+      }
+    } else {
+      transfer = receipt.logs.find(isExpectedTransfer);
+      if (!transfer) throw new EvidenceError("verified_transfer_event_missing");
     }
     return {
       txHash,

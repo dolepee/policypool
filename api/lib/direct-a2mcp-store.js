@@ -13,7 +13,8 @@ import { clean, sha256, stableStringify } from "./utils.js";
 const TOKEN_PATTERN = /^ppd_([a-f0-9]{32})\.([a-f0-9]{64})$/;
 const DEFAULT_TTL_SECONDS = DIRECT_QUOTE_TTL_SECONDS;
 const DEFAULT_LEASE_SECONDS = 2 * 60;
-const DEFAULT_EXECUTION_RETENTION_SECONDS = 10 * 24 * 60 * 60;
+// Covers 7d max SLA + 30d recovery delay + 24h challenge with operational margin.
+const DEFAULT_EXECUTION_RETENTION_SECONDS = 45 * 24 * 60 * 60;
 const MINIMUM_SECRET_LENGTH = 32;
 const MAX_RECOVERY_CONTEXT_BYTES = 300_000;
 const RECOVERY_CIPHER_VERSION = 1;
@@ -156,9 +157,19 @@ function normalizedRecoveryContext(input) {
   if (!providerPaymentSignature) {
     throw new DirectA2mcpStateError("direct_recovery_payment_signature_invalid", 503);
   }
+  const policyFeePaymentSignature = clean(input.policyFeePaymentSignature, 16_000);
+  if (!policyFeePaymentSignature) {
+    throw new DirectA2mcpStateError("direct_recovery_fee_signature_invalid", 503);
+  }
+  const quoteToken = clean(input.quoteToken, 512);
+  if (!TOKEN_PATTERN.test(quoteToken)) {
+    throw new DirectA2mcpStateError("direct_recovery_quote_token_invalid", 503);
+  }
   const context = {
     providerRequest: clone(input.providerRequest),
     providerPaymentSignature,
+    policyFeePaymentSignature,
+    quoteToken,
   };
   if (Buffer.byteLength(stableStringify(context)) > MAX_RECOVERY_CONTEXT_BYTES) {
     throw new DirectA2mcpStateError("direct_recovery_context_too_large", 503);

@@ -5,6 +5,7 @@ import { ProviderRelayError } from "../api/lib/provider-relay.js";
 
 const buyer = "0x3000000000000000000000000000000000000003";
 const provider = "0xf4c9fa07f3bb852547fdc4df7c1d9fd9991cfa51";
+const policyId = `0x${"10".repeat(32)}`;
 const covenantId = `0x${"11".repeat(32)}`;
 const jobId = `0x${"22".repeat(32)}`;
 const feeId = `0x${"33".repeat(32)}`;
@@ -12,6 +13,9 @@ const authorizationNonce = `0x${"44".repeat(32)}`;
 const authorizationId = `sha256:${"55".repeat(32)}`;
 const receiptDigest = `0x${"66".repeat(32)}`;
 const settlementTransaction = `0x${"77".repeat(32)}`;
+const requestHash = `sha256:${"aa".repeat(32)}`;
+const requirementsHash = `sha256:${"bb".repeat(32)}`;
+const orphanedPaymentTransaction = `0x${"cc".repeat(32)}`;
 
 function directRecord() {
   return {
@@ -21,13 +25,21 @@ function directRecord() {
     buyer,
     agentId: "3808",
     serviceId: "33461",
+    policyId,
     endpoint: "https://warden.example/audit",
     servicePriceAtomic: "500000",
     providerAccepted: { payTo: provider, asset: PAYMENT.asset },
+    requestHash,
+    providerRequirementsHash: requirementsHash,
     providerAuthorizationId: authorizationId,
     providerAuthorizationNonce: authorizationNonce,
+    providerAuthorizationValidAfter: 0,
     providerAuthorizationValidBefore: 1784290200,
     providerAuthorizationHash: `0x${"88".repeat(32)}`,
+    feeNonce: feeId,
+    feeValidAfter: 0,
+    feeValidBefore: 1784290200,
+    feeMaxTimeoutSeconds: 600,
     covenantId,
     jobId,
     feeId,
@@ -44,7 +56,7 @@ function relayReceipt({ delivered = true, recovered = false } = {}) {
     receiptDigest,
     covenantId,
     provider: { targetJobId: jobId },
-    request: { paymentVerified: true, paymentAuthorizationId: authorizationId },
+    request: { hash: requestHash, paymentVerified: true, paymentAuthorizationId: authorizationId },
     response: recovered
       ? { status: null, hash: null, recovery: "provider_settlement_found_without_durable_upstream_response" }
       : { status: delivered ? 200 : 500, hash: `sha256:${"aa".repeat(32)}` },
@@ -71,6 +83,8 @@ function harness({
   feeState = 1,
   nowSeconds = 1784289700,
   relayGrant = true,
+  refundFails = false,
+  orphanedFeePayment = false,
 } = {}) {
   let record = directRecord();
   if (!relayGrant) delete record.execution.stages.relayGrant;
@@ -93,6 +107,10 @@ function harness({
   let recoveries = 0;
   let expiries = 0;
   let rotations = 0;
+  let cancelContext = null;
+  let orphanedRefund = null;
+  const orphanedSearches = [];
+  const sequence = [];
   const calls = { cancel: 0, capture: 0, mark: 0, refund: 0, release: 0, settle: 0, start: 0 };
   const state = {
     async listExecuting() { return record.state === "executing" ? [structuredClone(record)] : []; },
@@ -102,6 +120,8 @@ function harness({
       return {
         providerRequest: { target_url: "https://policypool.vercel.app/api/covered-job-receipt" },
         providerPaymentSignature: "provider-payment-signature",
+        policyFeePaymentSignature: "policy-fee-payment-signature",
+        quoteToken: "ppd_00000000000000000000000000000001.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       };
     },
     async reconcileCheckpoint(_id, _executionId, stage, value) {
@@ -138,12 +158,48 @@ function harness({
       return { transactionHash: `0x${"03".repeat(32)}` };
     },
     async settleNetLoss() { calls.settle += 1; covenant.state = 5; return { transactionHash: `0x${"04".repeat(32)}` }; },
-    async cancelUnpaid() { calls.cancel += 1; covenant.state = 7; return { transactionHash: `0x${"05".repeat(32)}` }; },
+    async cancelUnpaid(_covenantId, _feeId, _evidenceHash, context) {
+      assert.notEqual(fee.state, 1, "funded policy fees must be refunded before cancellation");
+      cancelContext = structuredClone(context);
+      calls.cancel += 1;
+      sequence.push("cancel");
+      covenant.state = 7;
+      return { transactionHash: `0x${"05".repeat(32)}` };
+    },
   };
   const feeEscrow = {
     async getFee() { return structuredClone(fee); },
     async capture() { calls.capture += 1; fee.state = 2; return { transactionHash: `0x${"06".repeat(32)}` }; },
-    async refund() { calls.refund += 1; fee.state = 3; return { transactionHash: `0x${"07".repeat(32)}` }; },
+    async findOrphanedPayment(input) {
+      orphanedSearches.push(structuredClone(input));
+      return orphanedFeePayment
+        ? { txHash: orphanedPaymentTransaction, blockNumber: "123" }
+        : null;
+    },
+    async refund() {
+      calls.refund += 1;
+      sequence.push("refund");
+      if (refundFails) throw new Error("refund_failed");
+      fee.state = 3;
+      return { transactionHash: `0x${"07".repeat(32)}` };
+    },
+    async refundOrphaned(authorization, evidence, context) {
+      sequence.push("orphan-refund");
+      orphanedRefund = {
+        authorization: structuredClone(authorization),
+        evidence: structuredClone(evidence),
+        context: structuredClone(context),
+      };
+      fee = {
+        buyer,
+        covenantId,
+        providerAuthorizationHash: directRecord().providerAuthorizationHash,
+        amountAtomic: "100000",
+        refundAvailableAt: directRecord().providerAuthorizationValidBefore + 120,
+        state: 3,
+      };
+      return { transactionHash: `0x${"09".repeat(32)}` };
+    },
   };
   const reconciler = createDirectA2mcpReconciler({
     state,
@@ -170,10 +226,14 @@ function harness({
   return {
     calls,
     getRecord: () => structuredClone(record),
+    getCancelContext: () => structuredClone(cancelContext),
     getExpiries: () => expiries,
     getRecoveryContextReads: () => recoveryContextReads,
+    getOrphanedRefund: () => structuredClone(orphanedRefund),
+    getOrphanedSearches: () => structuredClone(orphanedSearches),
     getRecoveries: () => recoveries,
     getRotations: () => rotations,
+    getSequence: () => [...sequence],
     reconcile: (input) => reconciler.reconcile(input),
     setReceipt(value) { currentReceipt = value; },
     setRecoveredProviderResult(value) { recoveredProviderResult = value; },
@@ -197,9 +257,83 @@ const unsettled = harness({
 const unsettledResult = await unsettled.reconcile();
 assert.equal(unsettledResult.ok, true);
 assert.deepEqual(unsettled.calls, { cancel: 1, capture: 0, mark: 0, refund: 1, release: 0, settle: 0, start: 0 });
+assert.deepEqual(unsettled.getSequence(), ["refund", "cancel"]);
+assert.deepEqual(unsettled.getCancelContext().providerSettlementSearch, {
+  payer: buyer,
+  payTo: provider,
+  asset: PAYMENT.asset,
+  amountAtomic: "500000",
+  authorizationNonce,
+  notBeforeTimestamp: directRecord().providerAuthorizationValidBefore - 15 * 60,
+  notAfterTimestamp: directRecord().providerAuthorizationValidBefore,
+});
+assert.deepEqual(unsettled.getCancelContext().providerAuthorizationEvidence, {
+  paymentSignature: "provider-payment-signature",
+  requirementsHash,
+  requestHash,
+  authorizationHash: directRecord().providerAuthorizationHash,
+  authorizationId,
+  validAfter: 0,
+  validBefore: directRecord().providerAuthorizationValidBefore,
+});
+assert.deepEqual(unsettled.getCancelContext().policyFeeAuthorizationEvidence, {
+  paymentSignature: "policy-fee-payment-signature",
+  quoteToken: "ppd_00000000000000000000000000000001.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  nonce: feeId,
+  validAfter: 0,
+  validBefore: directRecord().feeValidBefore,
+  maxTimeoutSeconds: 600,
+});
+assert.equal(
+  unsettled.getCancelContext().nonSettlement.settlementSearchNotBefore,
+  directRecord().providerAuthorizationValidBefore - 15 * 60,
+);
 assert.equal(unsettled.getRecord().state, "complete");
 assert.equal(unsettled.getRecord().result.outcome, "cancelled_without_charge");
 assert.equal(unsettled.getRotations(), 1);
+
+const orphanedFee = harness({
+  receipt: null,
+  feeState: 0,
+  nowSeconds: directRecord().providerAuthorizationValidBefore + 121,
+  orphanedFeePayment: true,
+});
+const orphanedFeeResult = await orphanedFee.reconcile();
+assert.equal(orphanedFeeResult.ok, true);
+assert.deepEqual(
+  orphanedFee.calls,
+  { cancel: 1, capture: 0, mark: 0, refund: 0, release: 0, settle: 0, start: 0 },
+);
+assert.deepEqual(orphanedFee.getSequence(), ["orphan-refund", "cancel"]);
+assert.deepEqual(orphanedFee.getOrphanedSearches()[0], {
+  buyer,
+  authorizationNonce: feeId,
+  notBeforeTimestamp: directRecord().feeValidBefore - 15 * 60,
+  notAfterTimestamp: directRecord().feeValidBefore,
+});
+assert.deepEqual(orphanedFee.getOrphanedRefund().authorization, {
+  buyer,
+  policyId,
+  jobId,
+  providerAuthorizationHash: directRecord().providerAuthorizationHash,
+  validAfter: directRecord().feeValidAfter,
+  validBefore: directRecord().feeValidBefore,
+  nonce: feeId,
+  providerAuthorizationValidBefore: directRecord().providerAuthorizationValidBefore,
+});
+assert.deepEqual(orphanedFee.getOrphanedRefund().evidence, {
+  feeId,
+  covenantId,
+  authorizationNonce: feeId,
+  paymentTransaction: orphanedPaymentTransaction,
+  observedAt: directRecord().providerAuthorizationValidBefore + 121,
+});
+assert.equal(
+  orphanedFee.getOrphanedRefund().context.policyFeeAuthorizationEvidence.paymentSignature,
+  "policy-fee-payment-signature",
+);
+assert.equal(orphanedFee.getRecord().state, "complete");
+assert.equal(orphanedFee.getRecord().result.outcome, "cancelled_without_charge");
 
 const missingGrant = harness({
   receipt: null,
@@ -212,10 +346,35 @@ assert.deepEqual(
   missingGrant.calls,
   { cancel: 1, capture: 0, mark: 0, refund: 1, release: 0, settle: 0, start: 0 },
 );
+assert.deepEqual(missingGrant.getSequence(), ["refund", "cancel"]);
 assert.equal(missingGrant.getRecoveries(), 0);
-assert.equal(missingGrant.getRecoveryContextReads(), 0);
+assert.equal(missingGrant.getRecoveryContextReads(), 1);
 assert.equal(missingGrant.getRecord().state, "complete");
 assert.equal(missingGrant.getRecord().result.outcome, "cancelled_without_charge");
+
+const refundFailure = harness({
+  receipt: null,
+  nowSeconds: directRecord().providerAuthorizationValidBefore + 121,
+  refundFails: true,
+});
+const refundFailureResult = await refundFailure.reconcile();
+assert.equal(refundFailureResult.ok, false);
+assert.equal(refundFailure.calls.refund, 1);
+assert.equal(refundFailure.calls.cancel, 0);
+assert.deepEqual(refundFailure.getSequence(), ["refund"]);
+
+const capturedWithoutProvider = harness({
+  receipt: null,
+  feeState: 2,
+  nowSeconds: directRecord().providerAuthorizationValidBefore + 121,
+});
+const capturedWithoutProviderResult = await capturedWithoutProvider.reconcile();
+assert.equal(capturedWithoutProviderResult.ok, true);
+assert.equal(capturedWithoutProviderResult.holds[0].reason, "policy_fee_not_refundable_provider_unsettled_manual_resolution");
+assert.deepEqual(
+  capturedWithoutProvider.calls,
+  { cancel: 0, capture: 0, mark: 0, refund: 0, release: 0, settle: 0, start: 0 },
+);
 
 const expiredClockRecovery = harness({
   nowSeconds: directRecord().providerAuthorizationValidBefore + 10 * 60 + 1,
@@ -314,5 +473,20 @@ const invalidReceipt = harness({ receipt: { receiptId: "malformed" } });
 const invalidReceiptResult = await invalidReceipt.reconcile();
 assert.equal(invalidReceiptResult.ok, false);
 assert.equal(invalidReceipt.getRotations(), 1, "failed executions must rotate instead of starving the queue");
+
+const substitutedRequestReceipt = relayReceipt();
+substitutedRequestReceipt.request.hash = `sha256:${"ff".repeat(32)}`;
+const substitutedRequest = harness({ receipt: substitutedRequestReceipt });
+const substitutedRequestResult = await substitutedRequest.reconcile();
+assert.equal(substitutedRequestResult.ok, false);
+assert.equal(
+  substitutedRequestResult.failures[0].error,
+  "direct_relay_receipt_binding_mismatch",
+);
+assert.deepEqual(
+  substitutedRequest.calls,
+  { cancel: 0, capture: 0, mark: 0, refund: 0, release: 0, settle: 0, start: 0 },
+  "an alternate-request receipt must fail before any lifecycle or fee action",
+);
 
 console.log("PolicyPool direct A2MCP reconciler passed: unattended lifecycle handling plus fair rotation for holds and failures.");

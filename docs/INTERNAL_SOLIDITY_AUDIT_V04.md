@@ -635,13 +635,13 @@ Status: Documented
 
 The post-review direct A2MCP extension is source-only and has not been deployed. It adds `PolicyFeeEscrow` as the eighth contract and a direct HTTP+x402 checkout that is deliberately separate from OKX Task Marketplace A2A tasks.
 
-The escrow has no owner, upgrade, sweep, or treasury-change path. It accepts one fixed buyer-signed EIP-3009 fee authorization bound to the policy, synthetic direct job, provider authorization hash, and authorization windows. It captures only after the manager reports a started covenant and the primary evidence quorum signs the exact provider relay receipt and settlement transaction. After the provider authorization plus safety delay expires, only the fixed buyer can reclaim an uncaptured fee. Exact inbound and outbound balance deltas reject taxed or short-transfer behavior.
+The escrow has no owner, upgrade, sweep, or treasury-change path. It accepts one fixed buyer-signed EIP-3009 fee authorization bound to the policy, synthetic direct job, provider authorization hash, and authorization windows. It captures only after the manager reports a started covenant and the primary evidence quorum signs the exact provider relay receipt and settlement transaction. After the provider authorization plus safety delay expires, only the fixed buyer can reclaim an uncaptured fee. If an x402 facilitator transfers the authorized fee directly to the escrow and bypasses `fund`, a separate primary-quorum action can record it as refunded only after verifying the exact consumed nonce and payment transaction; the contract pays from unaccounted surplus rather than recorded custody. Exact inbound and outbound balance deltas reject taxed or short-transfer behavior.
 
 Runtime ordering is covenant issue and provider-bond lock, refundable fee funding, one-time provider settlement, provider clock start, then fee capture. Provider challenge, request, authorization, payer, endpoint, service price, and policy fingerprint remain immutable across the three-step checkout. Provider response bytes and the signed receipt commit atomically. A lost HTTP reply recovers from durable state; a proven on-chain settlement without durable response never retries the paid provider and never automatically treats the provider as breached.
 
-The direct state store retains executing records for ten days, indexes them for authenticated minute reconciliation, and permits only the same quote and two original signatures to resume. Non-settlement after authorization expiry follows quorum-attested `cancelUnpaid` plus buyer fee refund. Settlement recovery scans only the bounded signed authorization window and requires the indexed `AuthorizationUsed` nonce and exact USD₮0 transfer in one transaction.
+The direct state store retains executing records for 45 days, indexes them for authenticated minute reconciliation, and permits only the same quote and two original signatures to resume. Non-settlement after authorization expiry follows quorum-attested `cancelUnpaid` plus buyer fee refund. Settlement recovery scans only the bounded signed authorization window and requires the indexed `AuthorizationUsed` nonce and exact USD₮0 transfer in one transaction.
 
-The extension raises the Foundry suite from 103 to 116 passing tests through thirteen `PolicyFeeEscrow` tests. The escrow reaches `98.21%` line and `91.30%` branch coverage; its remaining branches are defensive terminal-state or timestamp-overflow paths. JavaScript gates additionally exercise request and challenge drift, wrong payer, authorization replay, crash recovery, no duplicate provider call, fee capture, fee refund, settled-response safety hold, and challenged breach settlement. These are internal source checks and do not authorize a deployment or third-party-funded bond.
+The extension now raises the Foundry suite from 103 to 122 passing tests, including seventeen `PolicyFeeEscrow` tests. The escrow reaches `96.27%` line and `82.35%` branch coverage after adding the orphan-recovery authorization, evidence, covenant, and surplus guards. JavaScript gates additionally exercise request and challenge drift, wrong payer, authorization replay, crash recovery, no duplicate provider call, fee capture, normal fee refund, nonce-indexed orphan discovery, quorum orphan refund before cancellation, settled-response safety hold, and challenged breach settlement. These are internal source checks and do not authorize a deployment or third-party-funded bond.
 
 ## Automated Analysis
 
@@ -657,7 +657,7 @@ Relevant static-analysis dispositions:
 - Slither analyzed 47 contracts with 101 detectors and returned 44 raw results. No manager, verifier, vault, or fee-escrow custody bypass remained after classification.
 - `ProviderBondVault.depositFor` is `nonReentrant`, verifies exact balance delta, and rejects false-return and fee-on-transfer assets. A malicious callback test confirms rollback.
 - Vault withdrawal and slash also verify the exact vault debit and recipient credit. Slither's balance-read/reentrancy warning is covered by the vault guard, exact post-call deltas, and rollback regressions.
-- `PolicyFeeEscrow.fund` and `_safeTransfer` use low-level optional-return token calls. Every state-changing entry point is `nonReentrant`, a malicious authorization-token callback is rejected, terminal state is written before outbound transfer, exact inbound/outbound balance deltas are required, and callback or token failure rolls the entire transaction back.
+- `PolicyFeeEscrow.fund` and `_safeTransfer` use low-level optional-return token calls. Every state-changing entry point is `nonReentrant`, a malicious authorization-token callback is rejected, terminal state is written before outbound transfer, exact inbound/outbound balance deltas are required, and callback or token failure rolls the entire transaction back. `refundOrphaned` additionally requires the bound token nonce to be consumed, fresh primary-quorum evidence, and a full fee of balance above `totalEscrowedAtomic`.
 - Manager calls cross immutable verifier/vault dependencies. Every state-changing manager entry point is `nonReentrant`, manager state is written before the vault call, and dependency failure reverts the complete transaction.
 - Signature loops are bounded by `MAX_SIGNERS = 16`; ordering also prevents duplicate signer credit.
 - The manager's constructor-time signer-topology loop makes bounded calls to the two immutable verifiers. The manager requires exactly five signers and threshold three for each verifier and fails deployment closed on a dependency revert, topology drift, or signer overlap.
@@ -670,8 +670,8 @@ No production credential is intentionally tracked. The local dirty `lib/v4-core`
 
 ## Verification Results
 
-- clean `forge test --summary`: 118 tests passed
-- `PolicyFeeEscrow` branch coverage: 91.30% (`21/23`)
+- clean `forge test --summary`: 122 tests passed
+- `PolicyFeeEscrow` branch coverage: 82.35% (`28/34`)
 - `AgentPolicyRegistry` branch coverage: 100% (`23/23`)
 - `ProviderBondVault` branch coverage: 100% (`30/30`)
 - `CoverageEvidenceVerifier` branch coverage: 100% (`13/13`)

@@ -40,15 +40,23 @@ await assert.rejects(
 
 const executionId = `sha256:${"66".repeat(32)}`;
 assert.equal((await state.claim(issued.token, executionId)).status, "claimed");
+assert.equal(
+  store.quotes.get(issued.id).expiresAtMs,
+  now + 45 * 24 * 60 * 60 * 1_000,
+  "executing evidence must outlive the maximum SLA and emergency-recovery horizon",
+);
 assert.deepEqual((await state.listExecuting()).map((record) => record.id), [issued.id]);
 const recoveryContext = {
   providerRequest: { target_url: "https://policypool.vercel.app/api/covered-job-receipt" },
   providerPaymentSignature: "provider-payment-signature-sensitive-test-value",
+  policyFeePaymentSignature: "policy-fee-payment-signature-sensitive-test-value",
+  quoteToken: issued.token,
 };
 await state.retainRecovery(issued.token, executionId, recoveryContext);
 assert.deepEqual(await state.recoveryContext(issued.id, executionId), recoveryContext);
 const encryptedExecution = await store.get(issued.id);
 assert.equal(JSON.stringify(encryptedExecution).includes(recoveryContext.providerPaymentSignature), false);
+assert.equal(JSON.stringify(encryptedExecution).includes(recoveryContext.policyFeePaymentSignature), false);
 assert.equal(JSON.stringify(encryptedExecution).includes(recoveryContext.providerRequest.target_url), false);
 await assert.rejects(
   () => state.retainRecovery(issued.token, executionId, {

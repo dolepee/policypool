@@ -55,6 +55,11 @@ const [
   read("vercel.json").then(JSON.parse),
   read(".github/workflows/reconcile-agent-coverage.yml"),
 ]);
+const [evidenceAttester, evidenceAttestHandler, evidenceAttesterRunbook] = await Promise.all([
+  read("api/lib/evidence-attester.js"),
+  read("attesters/evidence-attest.js"),
+  read("docs/EVIDENCE_ATTESTER_RUNBOOK.md"),
+]);
 const [
   feeEscrowContract,
   feeEscrowClient,
@@ -134,8 +139,15 @@ assert.doesNotMatch(feeEscrowContract, /onlyOwner|function sweep|function setTre
 assert.match(feeEscrowContract, /covenant\.state != CoverageManager\.CovenantState\.PendingStart/);
 assert.match(feeEscrowContract, /block\.timestamp >= current\.refundAvailableAt/);
 assert.match(feeEscrowContract, /recipientBalanceAfter - recipientBalanceBefore != amount/);
+assert.match(feeEscrowContract, /function refundOrphaned/);
+assert.match(feeEscrowContract, /asset\.authorizationState\(authorization\.buyer, authorization\.nonce\)/);
+assert.match(feeEscrowContract, /escrowBalance - totalEscrowedAtomic < feeAmountAtomic/);
+assert.match(feeEscrowContract, /REFUND_ORPHANED_POLICYPOOL_FEE/);
 assert.match(feeEscrowClient, /function capture/);
 assert.match(feeEscrowClient, /function refund/);
+assert.match(feeEscrowClient, /function findOrphanedPayment/);
+assert.match(feeEscrowClient, /function refundOrphaned/);
+assert.match(feeEscrowClient, /action:\s*"refund_orphaned_fee"/);
 assert.match(issuer, /createEvidenceAttestationClient/);
 assert.match(issuer, /POLICYPOOL_RELAYER_PRIVATE_KEY/);
 assert.doesNotMatch(issuer, /POLICYPOOL_MANAGER_PRIVATE_KEY/);
@@ -156,6 +168,25 @@ assert.match(reconciler, /coverage_issuance_outcome_pending/);
 assert.match(coveredReceipt, /paymentAuthorization:\s*feeAuthorization/);
 assert.match(coveredReceipt, /provider_bond_cancellation_pending_authorization_expiry/);
 assert.match(evidenceClient, /evidence_attestation_domain_invalid/);
+assert.match(evidenceAttester, /providerPaymentAuthorization/);
+assert.match(evidenceAttester, /verifyProviderSettlement/);
+assert.match(evidenceAttester, /findProviderSettlement/);
+assert.match(evidenceAttester, /authorizationState/);
+assert.match(evidenceAttester, /verifyDirectAuthorizationBinding/);
+assert.match(evidenceAttester, /verifyPolicyFeeAuthorizationBinding/);
+assert.match(evidenceAttester, /authorizationIdForHash/);
+assert.match(evidenceAttester, /expectedConsumed:\s*false/);
+assert.match(evidenceAttester, /expectedConsumed:\s*true/);
+assert.match(evidenceAttester, /function verifyOrphanedFeeRefund/);
+assert.match(evidenceAttester, /payTo:\s*configuration\.feeEscrow/);
+assert.match(evidenceAttester, /requireActive:\s*false/);
+assert.match(evidenceAttester, /\[FEE\.none, FEE\.refunded\]/);
+assert.match(evidenceAttester, /attestation_digest_mismatch/);
+assert.match(evidenceAttester, /attester_signer_set_mismatch/);
+assert.match(evidenceAttestHandler, /timingSafeEqual/);
+assert.match(evidenceAttestHandler, /MAX_REQUEST_BYTES/);
+assert.match(evidenceAttesterRunbook, /house-operated beta topology/);
+assert.match(evidenceAttesterRunbook, /Third-party-funded provider bonds remain disabled/);
 assert.match(relay, /EIP712Domain\(string name,string version,uint256 chainId,address verifyingContract\)/);
 assert.match(providerRelay, /lookup:\s*createPinnedLookup\(record\)/);
 assert.match(providerRelay, /servername:\s*endpoint\.hostname/);
@@ -207,10 +238,20 @@ assert.doesNotMatch(providerRelay, /id:\s*`sha256:\$\{sha256\(raw\)\}`/);
 assert.match(directCoordinator, /canonicalEip3009AuthorizationIdentity/);
 assert.doesNotMatch(directCoordinator, /paymentHash:\s*`sha256:\$\{sha256\(raw\)\}`/);
 assert.match(directCoordinator, /provider_delivery_breach_reconciliation_pending/);
+assert.match(directCoordinator, /directProviderAuthorizationEvidence/);
+assert.match(directCoordinator, /providerRequestHash:\s*bound\.requestHash/);
+assert.match(providerRelay, /grant\.providerRequestHash && grant\.providerRequestHash !== requestHash/);
 assert.match(directReconciler, /if \(!relayGrant\?\.token\) return null/);
+assert.match(directReconciler, /receipt\?\.request\?\.hash[\s\S]*record\.requestHash/);
 assert.match(directReconciler, /coverage_clock_recovery_expired/);
 assert.match(reconciler, /relay_clock_recovery_pending/);
 assert.match(chain, /event AuthorizationUsed\(address indexed authorizer, bytes32 indexed nonce\)/);
+assert.match(chain, /provider_payment_authorization_transfer_mismatch/);
+assert.match(chain, /receipt\.logs\[authorizationIndex \+ 1\]/);
+assert.match(evidenceAttester, /sameSha256Id\(receipt\.request\?\.hash, requestHash\)/);
+assert.match(evidenceAttester, /requestHash:\s*String\(evidence\.requestHash\)\.toLowerCase\(\)/);
+assert.match(evidenceAttester, /cap > buyerPaid/);
+assert.doesNotMatch(evidenceAttester, /buyerPaid !== cap/);
 assert.match(chain, /verifyProviderPaymentAuthorization/);
 assert.match(chain, /findProviderSettlement/);
 assert.match(chain, /MAX_PROVIDER_SETTLEMENT_SEARCH_SECONDS = 20 \* 60/);
@@ -243,11 +284,12 @@ assert.match(directCoordinator, /allowExpired:\s*recoveringExistingExecution/);
 assert.match(directCoordinator, /settled_response_unavailable_coverage_remains_active/);
 assert.match(directCoordinator, /policy_fee_refunded_provider_unsettled/);
 assert.match(directCoordinator, /refunded_after_provider_settlement/);
-assert.match(directState, /DEFAULT_EXECUTION_RETENTION_SECONDS = 10 \* 24 \* 60 \* 60/);
+assert.match(directState, /DEFAULT_EXECUTION_RETENTION_SECONDS = 45 \* 24 \* 60 \* 60/);
 assert.match(directState, /createCipheriv\("aes-256-gcm"/);
 assert.match(directState, /createDecipheriv\("aes-256-gcm"/);
 assert.match(directState, /async function retainRecovery/);
 assert.match(directState, /async function recoveryContext/);
+assert.match(directState, /policyFeePaymentSignature/);
 assert.match(directState, /current\.state == 'complete'[\s\S]*current\.execution\.id ~= ARGV\[1\]/);
 assert.match(directState, /reconcileCheckpoint/);
 assert.match(directState, /executingIndexKey\(\)/);
@@ -256,6 +298,8 @@ assert.match(directState, /listExecuting/);
 assert.match(directState, /markExecutingScanned/);
 assert.match(directReconciler, /state\.listExecuting\(limit\)/);
 assert.match(directReconciler, /state\.recoveryContext\(record\.id, record\.execution\.id\)/);
+assert.match(directReconciler, /directProviderAuthorizationEvidence/);
+assert.match(directReconciler, /directPolicyFeeAuthorizationEvidence/);
 assert.match(directReconciler, /relay\.recover/);
 assert.match(directReconciler, /state\.markReconciled\(record\.id\)/);
 assert.doesNotMatch(directReconciler, /state\.list\(limit\)/);
@@ -264,6 +308,9 @@ assert.match(directReconciler, /provider_delivery_indeterminate_manual_resolutio
 assert.match(directReconciler, /provider_settled_after_unpaid_cancellation_manual_resolution/);
 assert.match(directReconciler, /cancel_unpaid_coverage/);
 assert.match(directReconciler, /refund_policy_fee/);
+assert.match(directReconciler, /refund_orphaned_policy_fee/);
+assert.match(directReconciler, /feeEscrow\.findOrphanedPayment/);
+assert.match(directReconciler, /feeEscrow\.refundOrphaned/);
 assert.match(directHandler, /marketplaceTaskCompatible:\s*false/);
 assert.match(directHandler, /provider-payment-signature/);
 assert.match(directReconcileHandler, /upstash-signature/);

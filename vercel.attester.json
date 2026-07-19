@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "attesters/evidence-attest.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/attest",
+      "dest": "/attesters/evidence-attest.js"
+    }
+  ]
+}

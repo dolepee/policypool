@@ -7,13 +7,15 @@ import {
   parseAbi,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { XLAYER } from "./config.js";
+import { createChainService } from "./chain.js";
+import { PAYMENT, XLAYER } from "./config.js";
 import { createEvidenceAttestationClient, EvidenceAttestationError } from "./evidence-attestation.js";
 import { universalConfiguration } from "./universal-config.js";
 import { isBytes32 } from "./utils.js";
 
 const FUND_TUPLE = "(address buyer,bytes32 policyId,bytes32 jobId,bytes32 providerAuthorizationHash,uint256 validAfter,uint256 validBefore,bytes32 nonce,uint256 providerAuthorizationValidBefore)";
 const CAPTURE_TUPLE = "(bytes32 feeId,bytes32 covenantId,bytes32 providerAuthorizationHash,bytes32 relayReceiptDigest,bytes32 providerSettlementTransaction,uint64 observedAt)";
+const ORPHANED_REFUND_TUPLE = "(bytes32 feeId,bytes32 covenantId,bytes32 authorizationNonce,bytes32 paymentTransaction,uint64 observedAt)";
 const ESCROW_ABI = parseAbi([
   "function feeAmountAtomic() view returns (uint128)",
   "function treasury() view returns (address)",
@@ -22,6 +24,8 @@ const ESCROW_ABI = parseAbi([
   `function fund(${FUND_TUPLE} authorization,bytes signature) returns (bytes32 feeId)`,
   `function capture(${CAPTURE_TUPLE} evidence,bytes[] signatures)`,
   `function captureEvidenceDigest(${CAPTURE_TUPLE} evidence) view returns (bytes32)`,
+  `function orphanedRefundEvidenceDigest(${ORPHANED_REFUND_TUPLE} evidence) view returns (bytes32)`,
+  `function refundOrphaned(${FUND_TUPLE} authorization,${ORPHANED_REFUND_TUPLE} evidence,bytes[] signatures)`,
   "function getFee(bytes32 feeId) view returns ((address buyer,bytes32 covenantId,bytes32 providerAuthorizationHash,uint128 amountAtomic,uint64 fundedAt,uint64 authorizationValidBefore,uint64 refundAvailableAt,uint8 state))",
   "function refund(bytes32 feeId)",
 ]);
@@ -58,6 +62,7 @@ export function createPolicyFeeEscrowClient({
   configuration = universalConfiguration(),
   account,
   evidenceProvider,
+  chainService,
   publicClient,
   walletClient,
   now = () => Date.now(),
@@ -71,6 +76,7 @@ export function createPolicyFeeEscrowClient({
     publicClient ||= defaults.publicClient;
     walletClient ||= defaults.walletClient;
   }
+  chainService ||= createChainService({ client: publicClient });
   evidenceProvider ||= createEvidenceAttestationClient({
     url: configuration.evidenceAttestationUrl,
     token: process.env.POLICYPOOL_EVIDENCE_ATTESTATION_TOKEN,
@@ -168,6 +174,39 @@ export function createPolicyFeeEscrowClient({
     }, signature]);
   }
 
+  async function findOrphanedPayment({
+    buyer,
+    authorizationNonce,
+    notBeforeTimestamp,
+    notAfterTimestamp,
+  }) {
+    if (!isBytes32(authorizationNonce)) {
+      throw new PolicyFeeEscrowError("policy_fee_orphan_authorization_nonce_invalid", 422);
+    }
+    let payer;
+    try {
+      payer = getAddress(buyer);
+    } catch {
+      throw new PolicyFeeEscrowError("policy_fee_buyer_invalid", 422);
+    }
+    const amountAtomic = await read("feeAmountAtomic");
+    try {
+      return await chainService.findProviderSettlement({
+        payer,
+        payTo: configuration.feeEscrow,
+        asset: PAYMENT.asset,
+        amountAtomic,
+        authorizationNonce,
+        notBeforeTimestamp,
+        notAfterTimestamp,
+      });
+    } catch (error) {
+      throw new PolicyFeeEscrowError(
+        `policy_fee_orphan_search_failed:${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   async function getFee(feeId) {
     if (!isBytes32(feeId)) throw new PolicyFeeEscrowError("policy_fee_id_invalid", 422);
     const value = await read("getFee", [feeId]);
@@ -217,12 +256,74 @@ export function createPolicyFeeEscrowClient({
     return write("capture", [normalized, signatures]);
   }
 
+  async function refundOrphaned(authorization, evidence, context = {}) {
+    if (
+      ![
+        authorization?.policyId,
+        authorization?.jobId,
+        authorization?.providerAuthorizationHash,
+        authorization?.nonce,
+        evidence?.feeId,
+        evidence?.covenantId,
+        evidence?.authorizationNonce,
+        evidence?.paymentTransaction,
+      ].every(isBytes32)
+    ) throw new PolicyFeeEscrowError("policy_fee_orphan_evidence_invalid", 422);
+    let buyer;
+    try {
+      buyer = getAddress(authorization.buyer);
+    } catch {
+      throw new PolicyFeeEscrowError("policy_fee_buyer_invalid", 422);
+    }
+    const normalizedAuthorization = {
+      ...authorization,
+      buyer,
+      validAfter: BigInt(authorization.validAfter),
+      validBefore: BigInt(authorization.validBefore),
+      providerAuthorizationValidBefore: BigInt(authorization.providerAuthorizationValidBefore),
+    };
+    const normalizedEvidence = {
+      ...evidence,
+      observedAt: BigInt(evidence.observedAt || Math.floor(now() / 1_000)),
+    };
+    const digest = await read("orphanedRefundEvidenceDigest", [normalizedEvidence]);
+    let signatures;
+    try {
+      signatures = await evidenceProvider.attest({
+        action: "refund_orphaned_fee",
+        digest,
+        evidence: normalizedEvidence,
+        context,
+        domain: {
+          chainId: XLAYER.id,
+          manager: configuration.feeEscrow,
+          verifier: configuration.evidenceVerifier,
+        },
+      });
+    } catch (error) {
+      if (error instanceof EvidenceAttestationError) {
+        throw new PolicyFeeEscrowError(error.code, error.status);
+      }
+      throw error;
+    }
+    return write("refundOrphaned", [normalizedAuthorization, normalizedEvidence, signatures]);
+  }
+
   async function refund(feeId) {
     if (!isBytes32(feeId)) throw new PolicyFeeEscrowError("policy_fee_id_invalid", 422);
     return write("refund", [feeId]);
   }
 
-  return { capture, fund, getFee, previewAuthorization, refund, terms };
+  return {
+    capture,
+    findOrphanedPayment,
+    fund,
+    getFee,
+    previewAuthorization,
+    refund,
+    refundOrphaned,
+    terms,
+  };
 }
 
 export const __test = { ESCROW_ABI };

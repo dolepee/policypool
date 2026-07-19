@@ -3,6 +3,11 @@ import {
   directPolicyFeeSettlementAction,
   finalizeDirectPolicyFee,
 } from "./direct-policy-fee.js";
+import {
+  directPolicyFeeAuthorizationEvidence,
+  directProviderAuthorizationEvidence,
+} from "./direct-a2mcp.js";
+import { MAX_DIRECT_AUTHORIZATION_WINDOW_SECONDS } from "./direct-a2mcp-constants.js";
 import { ProviderRelayError, verifyProviderRelayReceipt } from "./provider-relay.js";
 import { isBytes32, stableStringify } from "./utils.js";
 
@@ -48,6 +53,8 @@ function validateRelayBinding(record, receipt) {
     || !isBytes32(receipt?.settlement?.transaction)
     || String(receipt?.covenantId || "").toLowerCase() !== record.covenantId
     || String(receipt?.provider?.targetJobId || "").toLowerCase() !== record.jobId
+    || String(receipt?.request?.hash || "").toLowerCase()
+      !== String(record.requestHash || "").toLowerCase()
     || String(receipt?.request?.paymentAuthorizationId || "") !== record.providerAuthorizationId
     || String(receipt?.settlement?.authorizationNonce || "").toLowerCase()
       !== record.providerAuthorizationNonce
@@ -91,7 +98,13 @@ export function createDirectA2mcpReconciler({
   ) {
     throw new Error("direct_reconciler_issuer_unavailable");
   }
-  if (!feeEscrow?.getFee || !feeEscrow?.capture || !feeEscrow?.refund) {
+  if (
+    !feeEscrow?.getFee
+    || !feeEscrow?.capture
+    || !feeEscrow?.findOrphanedPayment
+    || !feeEscrow?.refund
+    || !feeEscrow?.refundOrphaned
+  ) {
     throw new Error("direct_reconciler_fee_escrow_unavailable");
   }
   if (!relaySigner || !relayVerifier) throw new Error("direct_reconciler_relay_identity_unavailable");
@@ -119,6 +132,98 @@ export function createDirectA2mcpReconciler({
     }, { "payment-signature": recovery.providerPaymentSignature });
   }
 
+  function orphanedFeeSearch(record) {
+    return {
+      buyer: record.buyer,
+      authorizationNonce: record.feeNonce,
+      notBeforeTimestamp: Math.max(
+        1,
+        Number(record.feeValidBefore) - MAX_DIRECT_AUTHORIZATION_WINDOW_SECONDS,
+      ),
+      notAfterTimestamp: Number(record.feeValidBefore),
+    };
+  }
+
+  function orphanedFeeAuthorization(record) {
+    return {
+      buyer: record.buyer,
+      policyId: record.policyId,
+      jobId: record.jobId,
+      providerAuthorizationHash: record.providerAuthorizationHash,
+      validAfter: record.feeValidAfter,
+      validBefore: record.feeValidBefore,
+      nonce: record.feeNonce,
+      providerAuthorizationValidBefore: record.providerAuthorizationValidBefore,
+    };
+  }
+
+  async function recoverOrphanedFee({
+    record,
+    fee,
+    dryRun,
+    changes,
+    holds,
+    recovery,
+  }) {
+    if (Number(fee.state) !== FEE.none) {
+      return { fee, found: false, pending: false, record, recovery };
+    }
+    const payment = await feeEscrow.findOrphanedPayment(orphanedFeeSearch(record));
+    if (!payment) return { fee, found: false, pending: false, record, recovery };
+
+    const nowSeconds = Math.floor(now() / 1_000);
+    const refundAvailableAt = Math.max(
+      Number(record.feeValidBefore),
+      Number(record.providerAuthorizationValidBefore),
+    ) + 120;
+    if (nowSeconds < refundAvailableAt) {
+      holds.push({
+        quoteId: record.id,
+        reason: "orphaned_policy_fee_refund_delay_active",
+        refundAvailableAt,
+        paymentTransaction: payment.txHash,
+      });
+      return { fee, found: true, pending: true, record, recovery };
+    }
+
+    changes.push({
+      quoteId: record.id,
+      action: "refund_orphaned_policy_fee",
+      paymentTransaction: payment.txHash,
+    });
+    if (dryRun) return { fee, found: true, pending: true, record, recovery };
+
+    recovery ||= await state.recoveryContext(record.id, record.execution.id);
+    const write = await feeEscrow.refundOrphaned(
+      orphanedFeeAuthorization(record),
+      {
+        feeId: record.feeId,
+        covenantId: record.covenantId,
+        authorizationNonce: record.feeNonce,
+        paymentTransaction: payment.txHash,
+        observedAt: nowSeconds,
+      },
+      {
+        directQuote: record.id,
+        providerAuthorizationEvidence: directProviderAuthorizationEvidence(
+          record,
+          recovery.providerPaymentSignature,
+        ),
+        policyFeeAuthorizationEvidence: directPolicyFeeAuthorizationEvidence(
+          record,
+          recovery.policyFeePaymentSignature,
+          recovery.quoteToken,
+        ),
+      },
+    );
+    record = await checkpoint(record, "orphanedFeeRefunded", write, false);
+    fee = await feeEscrow.getFee(record.feeId);
+    if (Number(fee.state) !== FEE.refunded) {
+      throw new Error("orphaned_policy_fee_refund_not_terminal");
+    }
+    return { fee, found: true, pending: false, record, recovery };
+  }
+
   async function reconcileSettled(record, receipt, dryRun, changes, holds) {
     validateRelayBinding(record, receipt);
     if (!await verifyReceipt(receipt, relaySigner, relayVerifier)) {
@@ -134,6 +239,38 @@ export function createDirectA2mcpReconciler({
       });
       return;
     }
+    let retained = null;
+    if (Number(fee.state) === FEE.none) {
+      const orphan = await recoverOrphanedFee({
+        record,
+        fee,
+        dryRun,
+        changes,
+        holds,
+        recovery: retained,
+      });
+      record = orphan.record;
+      fee = orphan.fee;
+      retained = orphan.recovery;
+      if (orphan.pending) return;
+      if (!orphan.found) {
+        holds.push({
+          quoteId: record.id,
+          reason: "policy_fee_missing_after_provider_settlement_manual_resolution",
+          settlementTransaction: receipt.settlement.transaction,
+        });
+        return;
+      }
+    }
+    retained ||= dryRun ? null : await state.recoveryContext(record.id, record.execution.id);
+    const lifecycleAttestationContext = dryRun ? null : {
+      relayReceipt: receipt,
+      directQuote: record.id,
+      providerAuthorizationEvidence: directProviderAuthorizationEvidence(
+        record,
+        retained.providerPaymentSignature,
+      ),
+    };
     if (Number(covenant.state) === COVENANT.pendingStart) {
       const nowSeconds = Math.floor(now() / 1_000);
       const clockRecoveryEndsAt = Number(covenant.feeAuthorizationValidBefore)
@@ -190,7 +327,7 @@ export function createDirectA2mcpReconciler({
           record.covenantId,
           receipt.clock.startedAt,
           receipt.receiptDigest,
-          { relayReceipt: receipt, directQuote: record.id },
+          lifecycleAttestationContext,
         );
         record = await checkpoint(record, "clockStarted", write, false);
         covenant = await issuer.getCovenant(record.covenantId);
@@ -214,7 +351,7 @@ export function createDirectA2mcpReconciler({
             providerSettlementTransaction: receipt.settlement.transaction,
             observedAt: Math.floor(now() / 1_000),
           },
-          context: { relayReceipt: receipt, directQuote: record.id },
+          context: lifecycleAttestationContext,
           now,
         });
         fee = feeResolution.fee;
@@ -233,7 +370,7 @@ export function createDirectA2mcpReconciler({
             record.covenantId,
             receipt.clock.completedAt,
             receipt.receiptDigest,
-            { relayReceipt: receipt, directQuote: record.id },
+            lifecycleAttestationContext,
           );
           record = await checkpoint(record, "coverageReleased", write, false);
           covenant = await issuer.getCovenant(record.covenantId);
@@ -264,7 +401,7 @@ export function createDirectA2mcpReconciler({
           const write = await issuer.markPayoutDue(
             record.covenantId,
             evidenceHash(breach),
-            { breach, relayReceipt: receipt },
+            { ...lifecycleAttestationContext, breach },
           );
           record = await checkpoint(record, "payoutDue", write, false);
           covenant = await issuer.getCovenant(record.covenantId);
@@ -293,7 +430,7 @@ export function createDirectA2mcpReconciler({
             "0",
             true,
             evidenceHash(recovery),
-            { recovery, relayReceipt: receipt },
+            { ...lifecycleAttestationContext, recovery },
           );
           record = await checkpoint(record, "coverageSettled", write, false);
           covenant = await issuer.getCovenant(record.covenantId);
@@ -334,11 +471,16 @@ export function createDirectA2mcpReconciler({
     }
     let covenant = await issuer.getCovenant(record.covenantId);
     let fee = await feeEscrow.getFee(record.feeId);
-    const refundReadyAt = Number(fee.refundAvailableAt || record.providerAuthorizationValidBefore + 120);
+    const refundReadyAt = Number(fee.refundAvailableAt || Math.max(
+      Number(record.feeValidBefore),
+      Number(record.providerAuthorizationValidBefore),
+    ) + 120);
     if (nowSeconds < refundReadyAt) {
       holds.push({ quoteId: record.id, reason: "fee_refund_delay_active", refundReadyAt });
       return;
     }
+    const settlementSearchNotBefore = Math.floor(Number(record.execution?.startedAtMs || 0) / 1_000)
+      || Math.max(1, Number(record.providerAuthorizationValidBefore) - 15 * 60);
     const nonSettlement = {
       protocol: "PolicyPool Direct A2MCP",
       version: "0.4.0",
@@ -347,30 +489,82 @@ export function createDirectA2mcpReconciler({
       buyer: record.buyer,
       provider: record.providerAccepted.payTo,
       amountAtomic: record.servicePriceAtomic,
+      providerAuthorizationHash: record.providerAuthorizationHash,
+      providerAuthorizationId: record.providerAuthorizationId,
       authorizationNonce: record.providerAuthorizationNonce,
+      authorizationValidAfter: record.providerAuthorizationValidAfter,
       authorizationValidBefore: record.providerAuthorizationValidBefore,
+      policyFeeAuthorizationHash: record.feeId,
+      policyFeeAuthorizationNonce: record.feeNonce,
+      policyFeeAuthorizationValidBefore: record.feeValidBefore,
+      settlementSearchNotBefore,
       settlementSearchResult: "not_found",
       observedAt: nowSeconds,
     };
-    if ([COVENANT.pendingStart, COVENANT.active, COVENANT.payoutDue].includes(Number(covenant.state))) {
-      changes.push({ quoteId: record.id, action: "cancel_unpaid_coverage" });
-      if (!dryRun) {
-        const write = await issuer.cancelUnpaid(
-          record.covenantId,
-          record.feeId,
-          evidenceHash(nonSettlement),
-          { nonSettlement, directQuote: record.id },
-        );
-        record = await checkpoint(record, "coverageCancelledUnpaid", write, false);
-        covenant = await issuer.getCovenant(record.covenantId);
-      }
-    }
+    let recovery;
     if (Number(fee.state) === FEE.funded) {
       changes.push({ quoteId: record.id, action: "refund_policy_fee" });
       if (!dryRun) {
         const write = await feeEscrow.refund(record.feeId);
         record = await checkpoint(record, "feeRefunded", write, false);
         fee = await feeEscrow.getFee(record.feeId);
+      }
+    } else if (Number(fee.state) === FEE.none) {
+      const orphan = await recoverOrphanedFee({
+        record,
+        fee,
+        dryRun,
+        changes,
+        holds,
+        recovery,
+      });
+      record = orphan.record;
+      fee = orphan.fee;
+      recovery = orphan.recovery;
+      if (orphan.pending) return;
+    }
+    if (![FEE.none, FEE.refunded].includes(Number(fee.state))) {
+      holds.push({
+        quoteId: record.id,
+        reason: "policy_fee_not_refundable_provider_unsettled_manual_resolution",
+        feeState: Number(fee.state),
+      });
+      return;
+    }
+    if ([COVENANT.pendingStart, COVENANT.active, COVENANT.payoutDue].includes(Number(covenant.state))) {
+      changes.push({ quoteId: record.id, action: "cancel_unpaid_coverage" });
+      if (!dryRun) {
+        recovery ||= await state.recoveryContext(record.id, record.execution.id);
+        const write = await issuer.cancelUnpaid(
+          record.covenantId,
+          record.feeId,
+          evidenceHash(nonSettlement),
+          {
+            nonSettlement,
+            directQuote: record.id,
+            policyFeeState: Number(fee.state),
+            providerAuthorizationEvidence: directProviderAuthorizationEvidence(
+              record,
+              recovery.providerPaymentSignature,
+            ),
+            policyFeeAuthorizationEvidence: directPolicyFeeAuthorizationEvidence(
+              record,
+              recovery.policyFeePaymentSignature,
+              recovery.quoteToken,
+            ),
+            providerSettlementSearch: {
+              payer: record.buyer,
+              payTo: record.providerAccepted.payTo,
+              asset: record.providerAccepted.asset,
+              amountAtomic: record.servicePriceAtomic,
+              authorizationNonce: record.providerAuthorizationNonce,
+              notBeforeTimestamp: settlementSearchNotBefore,
+              notAfterTimestamp: Number(record.providerAuthorizationValidBefore),
+            },
+          },
+        );
+        record = await checkpoint(record, "coverageCancelledUnpaid", write, false);
+        covenant = await issuer.getCovenant(record.covenantId);
       }
     }
     if (!dryRun) {
