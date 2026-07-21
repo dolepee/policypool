@@ -33,6 +33,7 @@
     "agent:verify-direct-reconciler": "node scripts/verify-direct-a2mcp-reconciler.mjs",
     "agent:verify-direct-settlement": "node scripts/verify-direct-settlement-recovery.mjs",
     "agent:verify-live": "node scripts/verify-agent-live.mjs",
+    "agent:verify-v04-payouts": "node scripts/verify-v04-house-payouts.mjs",
     "site:verify": "node scripts/verify-product-site.mjs",
     "agent:probe": "node scripts/probe-agent-coverage.mjs",
     "ops:breach:check": "node scripts/settle-controlled-breach.mjs",

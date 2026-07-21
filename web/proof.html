@@ -91,45 +91,45 @@
       <section class="section external-proof-section" id="v04-house-proof" aria-labelledby="v04-proof-title">
         <div class="site-shell">
           <div class="section-heading split-heading">
-            <div><span class="section-index">V0.4 / CONTROLLED HOUSE PROOF</span><h2 id="v04-proof-title">Valid evidence.<br />Money still waits.</h2></div>
-            <p>The remediated eight-contract stack is live flag-off on X Layer. These house-operated covenants prove custody and challenge behavior; they are not revenue, public enrollment, or external traction.</p>
+            <div><span class="section-index">V0.4 / CONTROLLED HOUSE PROOF</span><h2 id="v04-proof-title">The lock held.<br />The credits paid.</h2></div>
+            <p>The remediated eight-contract stack is live flag-off on X Layer. These house-operated covenants prove post-challenge custody and payout behavior; they are not revenue, public enrollment, or external traction.</p>
           </div>
-          <p class="external-proof-summary">Production remains v0.3 · public v0.4 flags off · settlement challenge ends 20 July 2026 at 16:50:04 UTC</p>
+          <p class="external-proof-summary">Production remains v0.3 · public v0.4 flags off · two fixed 0.5 USD₮0 credits Paid · covenant custody closed</p>
           <div class="external-proof-grid">
             <article class="external-proof-card">
-              <header><span>FULL SLA CREDIT</span><b class="status-dot state-pending">PayoutDue</b></header>
-              <h3>0.5 USD₮0<br />fully locked</h3>
-              <p>The provider settled, missed the 120-second SLA, and the primary quorum marked the covenant payout due. Execution remains time-locked.</p>
+              <header><span>FIXED SLA CREDIT A</span><b class="status-dot state-paid">Paid</b></header>
+              <h3>0.5 USD₮0<br />paid after 24h</h3>
+              <p>The provider settled and missed the 120-second SLA. After the complete challenge window, the vault transferred the exact fixed credit to the recorded buyer.</p>
               <dl>
                 <div><dt>Covenant</dt><dd>0x0eb814…061b96</dd></div>
-                <div><dt>Planned payout</dt><dd>500000 atomic</dd></div>
-                <div><dt>Fee escrow</dt><dd>0 atomic</dd></div>
+                <div><dt>Payout basis</dt><dd>Fixed SLA credit</dd></div>
+                <div><dt>Final payout</dt><dd>500000 atomic</dd></div>
               </dl>
-              <div class="external-proof-actions"><a href="https://www.oklink.com/x-layer/tx/0x00c39daeacb806dfc22a8e01a1d91e38a72f4eda39e6398fa02c53d9580e3944" target="_blank" rel="noreferrer">Open PayoutDue receipt ↗</a></div>
+              <div class="external-proof-actions"><a href="https://www.oklink.com/x-layer/tx/0x00c39daeacb806dfc22a8e01a1d91e38a72f4eda39e6398fa02c53d9580e3944" target="_blank" rel="noreferrer">PayoutDue ↗</a><a href="https://www.oklink.com/x-layer/tx/0x1b65afdc6f50e18a0dca2dd026b6450407234e0860e4e547b02a8c98dcc3e631" target="_blank" rel="noreferrer">Paid ↗</a></div>
             </article>
 
             <article class="external-proof-card">
-              <header><span>NET-LOSS CREDIT</span><b class="status-dot state-pending">PayoutDue</b></header>
-              <h3>0.3 USD₮0<br />after recovery</h3>
-              <p>A real 0.2 USD₮0 direct recovery reduces the covered loss from 0.5 to 0.3. The signed settlement cannot overpay the remaining loss.</p>
+              <header><span>FIXED SLA CREDIT B</span><b class="status-dot state-paid">Paid</b></header>
+              <h3>0.5 USD₮0<br />policy semantics held</h3>
+              <p>A separate 0.2 USD₮0 provider refund was recorded before settlement. This policy’s immutable fixed-credit basis keeps that refund separate rather than mislabeling it as a net-loss offset.</p>
               <dl>
                 <div><dt>Covenant</dt><dd>0x165b3d…2be9cb</dd></div>
-                <div><dt>Direct recovery</dt><dd>200000 atomic</dd></div>
-                <div><dt>Planned payout</dt><dd>300000 atomic</dd></div>
+                <div><dt>Separate refund</dt><dd>200000 atomic</dd></div>
+                <div><dt>Final payout</dt><dd>500000 atomic</dd></div>
               </dl>
-              <div class="external-proof-actions"><a href="https://www.oklink.com/x-layer/tx/0x85f200d583e99f9160f0f1040602bb6b78cdd515524efd690c6804b71874afa0" target="_blank" rel="noreferrer">Open recovery receipt ↗</a><a href="https://www.oklink.com/x-layer/tx/0xfbfae41a2c882685480645aadb64199145574c63524449fb76207bfc9a3d8082" target="_blank" rel="noreferrer">PayoutDue ↗</a></div>
+              <div class="external-proof-actions"><a href="https://www.oklink.com/x-layer/tx/0x85f200d583e99f9160f0f1040602bb6b78cdd515524efd690c6804b71874afa0" target="_blank" rel="noreferrer">Separate refund ↗</a><a href="https://www.oklink.com/x-layer/tx/0x14529d6d09489f8e446db8fa8cc70aac71e21aa529864a726dce04c5946aa44b" target="_blank" rel="noreferrer">Paid ↗</a></div>
             </article>
 
             <article class="external-proof-card">
-              <header><span>CHALLENGE ENFORCEMENT</span><b class="status-dot is-positive">Guard active</b></header>
-              <h3>The quorum signed.<br />The contract refused.</h3>
-              <p>The primary attester independently reconstructed valid settlement evidence and returned three signatures. A read-only manager simulation still reverted with <code>SettlementChallengeActive</code>.</p>
+              <header><span>CHALLENGE ENFORCEMENT</span><b class="status-dot is-positive">Guard passed</b></header>
+              <h3>The quorum signed.<br />The contract waited.</h3>
+              <p>The primary attester independently reconstructed valid evidence and returned three signatures. Before expiry, a read-only manager simulation reverted with <code>SettlementChallengeActive</code>; only fresh evidence after the full window could settle.</p>
               <dl>
                 <div><dt>Threshold</dt><dd>3-of-5</dd></div>
-                <div><dt>Digest</dt><dd>0x6ad5b6…ea2da9</dd></div>
-                <div><dt>Evidence type</dt><dd>read-only simulation</dd></div>
+                <div><dt>Challenge</dt><dd>24 hours</dd></div>
+                <div><dt>Final custody</dt><dd>0 locked · 0 escrow</dd></div>
               </dl>
-              <div class="external-proof-actions"><a href="https://www.oklink.com/x-layer/address/0xb6c94274f8d7F7f7eBb600B3C848605e0b786468" target="_blank" rel="noreferrer">Inspect manager ↗</a><a href="https://github.com/dolepee/policypool/tree/v0.4.0-rc.1" target="_blank" rel="noreferrer">Open RC source ↗</a></div>
+              <div class="external-proof-actions"><a href="https://www.oklink.com/x-layer/address/0xb6c94274f8d7F7f7eBb600B3C848605e0b786468" target="_blank" rel="noreferrer">Inspect manager ↗</a><a href="https://github.com/dolepee/policypool" target="_blank" rel="noreferrer">Open verifier source ↗</a></div>
             </article>
           </div>
         </div>

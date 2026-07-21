@@ -79,6 +79,7 @@ function enrollmentInput() {
 }
 
 async function connectWallet() {
+  if (!universalEnabled) throw new Error("v0.4 enrollment is feature-gated");
   if (!window.ethereum) throw new Error("No EVM wallet found in this browser");
   await ensureXLayer();
   const [account] = await window.ethereum.request({ method: "eth_requestAccounts" });
@@ -160,18 +161,21 @@ async function publishPolicy(event) {
 
 async function initialize() {
   const params = new URLSearchParams(window.location.search);
+  const connectButton = byId("connect-wallet");
   byId("agent-id").value = params.get("agent") || "";
   byId("service-id").value = params.get("service") || "";
   try {
     const response = await fetch("/api/universal-manifest", { cache: "no-store" });
     const manifest = await response.json();
     universalEnabled = Boolean(manifest.enabled);
+    connectButton.disabled = !universalEnabled;
     setStatus(
       "universal-status",
       universalEnabled ? "v0.4 enrollment is live." : "v0.4 enrollment is feature-gated; no transaction can be created yet.",
       universalEnabled ? "success" : "",
     );
   } catch {
+    connectButton.disabled = true;
     setStatus("universal-status", "Enrollment status unavailable. No transaction will be requested.");
   }
   byId("connect-wallet").addEventListener("click", () => connectWallet().catch((error) => setStatus("universal-status", error.message)));

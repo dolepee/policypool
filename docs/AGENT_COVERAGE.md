@@ -12,6 +12,11 @@ PolicyPool Agent Coverage is the OKX.AI-facing adapter for PolicyPool. It turns 
 - External provider opt-in: Warden Agent `#3808` service `#33461`; maximum cap `0.5 USDT`; coverage activation pending an independently verifiable funded-payload arrival timestamp
 - Minimum requested coverage: 0.5 USDT. Smaller requests are declined by the free preflight before payment.
 
+This v0.3 pending directory entry is separate from the superseded July 17 v0.4
+pilot policy, which was retired on 21 July after its controlled call stopped
+before provider payment and clock start. Warden is not enrolled on the canonical
+v0.4 stack, and no covered Warden job completed.
+
 Input:
 
 ```json

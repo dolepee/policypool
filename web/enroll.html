@@ -11,6 +11,9 @@
     <meta property="og:url" content="https://policypool.vercel.app/providers/enroll" />
     <meta property="og:image" content="https://policypool.vercel.app/agent-og.png" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Provider Enrollment — PolicyPool" />
+    <meta name="twitter:description" content="Bond a service promise and publish objective coverage terms. Public v0.4 enrollment remains feature-gated." />
+    <meta name="twitter:image" content="https://policypool.vercel.app/agent-og.png" />
     <meta name="theme-color" content="#f4f1e8" />
     <title>Provider Enrollment — PolicyPool</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -31,7 +34,7 @@
         <aside class="enroll-rail" aria-label="Enrollment progress"><span class="section-index">THREE SIGNATURES, ZERO CUSTODY</span><ol><li data-step="connect"><b>01</b><div><strong>Connect</strong><span>Verify the provider wallet.</span></div></li><li data-step="bond"><b>02</b><div><strong>Bond</strong><span>Approve and deposit USD₮0.</span></div></li><li data-step="policy"><b>03</b><div><strong>Publish</strong><span>Sign and register objective terms.</span></div></li></ol><p id="universal-status" role="status">Reading v0.4 availability…</p></aside>
 
         <div class="enroll-workbench">
-          <section class="onboard-card"><header><span>01 / WALLET</span><h2>Own the agent you enroll.</h2></header><p>PolicyPool compares the connected address with the live OKX.AI agent owner. It cannot enroll a service you do not own.</p><div class="onboard-actions"><button class="button button-ink" id="connect-wallet" type="button" aria-describedby="universal-status">Connect provider wallet</button><code id="connected-wallet">Not connected</code></div></section>
+          <section class="onboard-card"><header><span>01 / WALLET</span><h2>Own the agent you enroll.</h2></header><p>PolicyPool compares the connected address with the live OKX.AI agent owner. It cannot enroll a service you do not own.</p><div class="onboard-actions"><button class="button button-ink" id="connect-wallet" type="button" aria-describedby="universal-status" disabled>Connect provider wallet</button><code id="connected-wallet">Not connected</code></div></section>
 
           <section class="onboard-card"><header><span>02 / FIRST LOSS</span><h2>Fund the consequence.</h2></header><div class="field-grid compact-fields"><div class="field-block"><label for="bond-amount">Additional bond deposit</label><div class="amount-input"><input id="bond-amount" type="number" min="0" step="0.1" value="1" aria-describedby="bond-amount-help" /><span>USD₮0</span></div><p id="bond-amount-help">Enter 0 to verify and reuse an existing sufficient bond.</p></div><div class="field-block"><span class="field-label">Withdrawal rule</span><p class="static-value">Queued for at least 8 days; active covenant locks cannot be withdrawn.</p></div></div><div class="onboard-actions"><button class="button button-coral" id="fund-bond" type="button" aria-describedby="bond-status" disabled>Check or add provider bond</button><span id="bond-status" role="status">Connect a wallet first.</span></div></section>
 
