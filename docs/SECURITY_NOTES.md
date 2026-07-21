@@ -1,5 +1,21 @@
 # Security Notes
 
+## Current v0.4 Status — 2026-07-21
+
+The canonical remediated eight-contract stack is deployed, wired, and
+bytecode-verified flag-off on X Layer. Controlled house pilots completed
+orphaned-fee recovery, unpaid cancellation, release, challenge enforcement, and
+two fixed `0.5 USD₮0` post-challenge payouts. Both payout covenants are `Paid`;
+canonical provider-bond and fee-escrow custody is zero. The 24-hour attester soak
+completed, and both preview signer services were then retired. Production stays
+v0.3, public v0.4 flags stay off, and no production attester exists.
+
+The older sections below preserve the sequence of findings and source
+remediation as it stood during review. Where they describe the hardened direct
+extension as source-only or awaiting redeployment, this dated status supersedes
+that deployment wording. It does not supersede the independent-audit and
+operationally independent-signer gates for third-party-funded bonds.
+
 PolicyPool is a focused Hook submission, not a production risk engine. These notes define the v1 trust boundaries and the checks covered by the current test suite.
 
 ## Enforced In V1

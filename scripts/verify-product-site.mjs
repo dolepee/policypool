@@ -47,8 +47,10 @@ assert.match(legacyAgent, /http-equiv="refresh" content="0; url=\/"/, "legacy /a
 const providers = await readFile(new URL("../web/providers.html", import.meta.url), "utf8");
 assert.match(providers, /FOUNDING REGISTRY \/ 03 POLICIES/, "provider registry must publish all three founding policies");
 assert.match(providers, /href="\/providers\/enroll"/, "provider registry must expose enrollment without adding a nav item");
-assert.match(providers, /Warden/, "external provider opt-in must be visible");
-assert.match(providers, /Clock adapter pending/, "Warden must not be presented as coverable before its clock is verifiable");
+assert.match(providers, /Warden/, "Warden versioned status must be visible");
+assert.match(providers, /v0\.3 state<\/dt><dd>Pending clock adapter/, "Warden v0.3 directory status must remain explicit");
+assert.match(providers, /Canonical v0\.4<\/dt><dd>Not enrolled/, "Warden must not be presented as enrolled on the canonical stack");
+assert.match(providers, /independent audit and operationally independent signer topology/, "v0.4 enrollment must name the remaining activation gates");
 assert.match(providers, /0\.5 USD₮0 cap/, "Warden's published cap must be visible");
 assert.match(providers, /id="universal-provider-registry"/, "providers page must expose the signed v0.4 registry surface");
 assert.match(providers, /last-confirmed enrollment/, "provider projection must not claim live coverability without quote-time revalidation");
@@ -61,6 +63,12 @@ const proof = await readFile(new URL("../web/proof.html", import.meta.url), "utf
 assert.match(proof, /id="external-usage"/, "proof room must expose external usage separately from controlled proofs");
 assert.match(proof, /Buyer-funded covenants/, "external usage must lead with buyer-funded evidence");
 assert.match(proof, /controlled tests remain excluded/, "external usage must preserve the controlled-proof boundary");
+assert.match(proof, /id="v04-house-proof"/, "proof room must expose the controlled v0.4 payout proof");
+assert.equal((proof.match(/>Paid<\/b>/g) || []).length, 2, "v0.4 proof must show both fixed credits Paid");
+assert.match(proof, /0x1b65afdc6f50e18a0dca2dd026b6450407234e0860e4e547b02a8c98dcc3e631/, "first v0.4 settlement receipt must be linked");
+assert.match(proof, /0x14529d6d09489f8e446db8fa8cc70aac71e21aa529864a726dce04c5946aa44b/, "second v0.4 settlement receipt must be linked");
+assert.match(proof, /public v0\.4 flags off/, "v0.4 proof must retain the flag-off boundary");
+assert.doesNotMatch(proof, /NET-LOSS CREDIT|0\.3 USD₮0|state-pending">PayoutDue/, "v0.4 proof must not retain the invalid reduced-payout claim");
 
 const coverageScript = await readFile(new URL("../web/coverage-site.js", import.meta.url), "utf8");
 for (const receiptId of ["ppc-6c3d1dbe749cca96", "ppc-136a34aee2022a42", "ppc-5e59d4e5300b6fc3"]) {
@@ -72,8 +80,8 @@ assert.match(coverageScript, /Provider bond free/, "universal preflight results 
 const coverage = await readFile(new URL("../web/coverage.html", import.meta.url), "utf8");
 assert.match(
   coverage,
-  /<option value="Warden#3808" data-service-id="33461" disabled>Warden #3808 · opted in, clock adapter pending<\/option>/,
-  "coverage form must expose but disable the pending Warden policy",
+  /<option value="Warden#3808" data-service-id="33461" disabled>Warden #3808 · v0\.3 pending clock adapter<\/option>/,
+  "coverage form must expose but disable the pending Warden v0.3 policy",
 );
 assert.match(coverage, /Another OKX\.AI service/, "coverage form must accept demand for an unenrolled service");
 assert.match(coverage, /name="targetServiceId"/, "coverage form must bind dynamic policies to a service id");
@@ -87,6 +95,10 @@ for (const [file, route] of subordinatePages) {
   assert.ok(html.includes(`rel="canonical" href="https://policypool.vercel.app${route}"`), `${file} canonical mismatch`);
   assert.match(html, /id="enrollment-form"/, "provider enrollment must expose the signed policy form");
   assert.match(html, /Shared reserve<\/dt><dd>Off by default/, "provider enrollment must disclose that shared reserve is disabled");
+  assert.match(html, /id="connect-wallet"[^>]*disabled/, "provider enrollment must fail closed before the manifest enables it");
+  assert.match(html, /name="twitter:title"/, "provider enrollment must include a Twitter title");
+  assert.match(html, /name="twitter:description"/, "provider enrollment must include a Twitter description");
+  assert.match(html, /name="twitter:image"/, "provider enrollment must include a Twitter image");
 }
 
 console.log("PolicyPool product-site gate passed: five routes, shared navigation, metadata, and legacy redirect.");

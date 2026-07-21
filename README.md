@@ -20,9 +20,9 @@ PolicyPool does not rate subjective quality, accept caller-supplied policy overr
 [OKX.AI Agent #4674](https://www.okx.ai/agents/4674) ·
 [v4 foundation](https://policypool.vercel.app/hook)
 
-> **Genesis submission scope:** Agent Coverage is the current OKX.AI product and submission. The v4 liquidity-covenant implementation is the historical X Layer foundation retained below, not the listed Genesis service.
+> **OKX.AI marketplace scope:** Agent Coverage is the currently listed PolicyPool service. The v4 liquidity-covenant implementation is the historical X Layer foundation retained below, not the listed marketplace service.
 
-> **v0.4 deployment status:** the remediated eight-contract stack is deployed, wired, and bytecode-verified on X Layer behind disabled public feature flags. House-operated pilots have passed orphaned-fee recovery, unpaid cancellation, and the completed-job release path. Two payout proofs are currently in the mandatory 24-hour challenge period. Production remains v0.3, and third-party-funded bonds remain blocked until a qualified audit and operationally independent signers. See [Universal Coverage v0.4](docs/UNIVERSAL_COVERAGE_V04.md), the [evidence-attester runbook](docs/EVIDENCE_ATTESTER_RUNBOOK.md), and the [internal Solidity audit](docs/INTERNAL_SOLIDITY_AUDIT_V04.md).
+> **v0.4 deployment status:** the remediated eight-contract stack is deployed, wired, and bytecode-verified on X Layer behind disabled public feature flags. House-operated pilots have passed orphaned-fee recovery, unpaid cancellation, completed-job release, challenge enforcement, and two post-challenge fixed-credit payouts. The restarted 24-hour attester soak completed; both preview signer services were then retired, leaving no standing production or preview attester endpoint. Production remains v0.3, and third-party-funded bonds remain blocked until a qualified audit and operationally independent signers. See [Universal Coverage v0.4](docs/UNIVERSAL_COVERAGE_V04.md), the [evidence-attester runbook](docs/EVIDENCE_ATTESTER_RUNBOOK.md), and the [internal Solidity audit](docs/INTERNAL_SOLIDITY_AUDIT_V04.md).
 
 ## Agent Coverage Loop
 
@@ -42,7 +42,7 @@ The marketplace keeps its own escrow and order lifecycle. PolicyPool adds a capp
 - Listed service: `Covered Job Receipt`, 0.1 USDT, API service.
 - Listed provider: PolicyPool Agent `#4674` on OKX.AI.
 - Active registered targets in v0.3: GlassDesk `#3465` services `#30019`, `#30020`, and `#30021`; Foreman `#4348` service `#33357`.
-- External provider opt-in: Warden `#3808` service `#33461`, with a 0.5 USD₮0 cap and a 300-second clock from funded endpoint arrival. Coverage remains pre-payment blocked until that provider-side start event can be independently verified.
+- Warden status by version: the v0.3 directory still publishes Warden `#3808` service `#33461` as `pending_clock_adapter`, which fails closed before payment. Separately, Warden authorized a disclosed PolicyPool-sponsored 0.5 USD₮0 bond on the superseded July 17 v0.4 pilot; that controlled attempt stopped before provider payment and clock start, the covenant lock was released, and the pilot policy was retired. Warden is not enrolled on the canonical v0.4 stack and no covered Warden job completed.
 - Payment asset: X Layer USD₮0, 6 decimals, EIP-3009 domain `USD₮0` version `1`.
 - Objective breach: accepted job still undelivered after the stored deadline.
 - Reserve: public X Layer wallet, with every liability exposed by `/api/coverage-ledger`.
@@ -74,7 +74,13 @@ This is a controlled house-operated pilot, not revenue or external traction. Pub
 | OKX A2A adapter | [`0xA956…335c`](https://www.oklink.com/x-layer/address/0xA956A84c694DB91188eF262D0aA167ADdcA2335c) |
 | A2MCP relay adapter | [`0x42b7…1A1F`](https://www.oklink.com/x-layer/address/0x42b73d68465D1614eb72F8557417143604781A1F) |
 
-Two real covenants are now `PayoutDue`: a [`0.5 USD₮0` full-payout transition](https://www.oklink.com/x-layer/tx/0x00c39daeacb806dfc22a8e01a1d91e38a72f4eda39e6398fa02c53d9580e3944) and a [`0.3 USD₮0` net-loss transition](https://www.oklink.com/x-layer/tx/0xfbfae41a2c882685480645aadb64199145574c63524449fb76207bfc9a3d8082) after a verified [`0.2 USD₮0` direct recovery](https://www.oklink.com/x-layer/tx/0x85f200d583e99f9160f0f1040602bb6b78cdd515524efd690c6804b71874afa0). The primary attester independently reconstructed the settlement evidence and returned a valid 3-of-5 quorum; a read-only manager simulation then rejected early execution with `SettlementChallengeActive`. This proves the contract enforces its challenge window even when the evidence itself is valid. Final payout receipts will be added after the challenge ends on 20 July 2026 at 16:50:04 UTC.
+Two real covenants completed the same full lifecycle. The primary attester independently reconstructed valid settlement evidence and returned a 3-of-5 quorum, but a read-only manager simulation still rejected early execution with `SettlementChallengeActive`. After the full 24-hour window elapsed, [`fixed SLA credit A`](https://www.oklink.com/x-layer/tx/0x1b65afdc6f50e18a0dca2dd026b6450407234e0860e4e547b02a8c98dcc3e631) and [`fixed SLA credit B`](https://www.oklink.com/x-layer/tx/0x14529d6d09489f8e446db8fa8cc70aac71e21aa529864a726dce04c5946aa44b) each paid the buyer exactly `0.5 USD₮0` from provider bond. Both immutable policies use payout basis `1`, so an earlier separate [`0.2 USD₮0` provider refund](https://www.oklink.com/x-layer/tx/0x85f200d583e99f9160f0f1040602bb6b78cdd515524efd690c6804b71874afa0) is recorded but does not reduce either fixed credit. Both covenants are `Paid`; the house provider account, vault token balance, fee escrow balance, and fee escrow accounting are zero.
+
+The public no-secret verifier checks both settlement receipts, token transfers, slash events, immutable payout basis, final covenant state, inactive locks, the separate provider refund, and closed fee custody:
+
+```bash
+npm run agent:verify-v04-payouts
+```
 
 The live fee treasury balance is `0.5 USD₮0`: `0.2` predated this deployment and the three controlled v0.4 captures added exactly `0.3`. Fee escrow balance and accounting are both zero.
 
@@ -136,6 +142,7 @@ src/CoverageEvidenceVerifier.sol # immutable threshold evidence quorum
 src/CoverageManager.sol          # permissionless provider-funded covenant lifecycle
 scripts/verify-agent-api.mjs     # adversarial unit/integration gate
 scripts/verify-okx-task-evidence.mjs # real OKX acceptance proof replay
+scripts/verify-v04-house-payouts.mjs # live post-challenge v0.4 payout verifier
 scripts/verify-coverage-preflight.mjs # preflight parser, eligibility, and request tests
 web/home.html                    # current multi-page agent-coverage entry
 web/enroll.html                  # v0.4 provider enrollment workbench

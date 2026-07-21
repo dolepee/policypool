@@ -250,10 +250,16 @@ The authoritative addresses and current controlled proof transactions are listed
 in the [README](../README.md#flag-off-v04-deployment-and-house-proof).
 
 House validation has completed the direct happy path, normal unpaid refund and
-cancellation, and mixed funded-plus-orphaned fee recovery. The full and
-recovery-reduced payout covenants are currently `PayoutDue` and remain subject
-to their mandatory 24-hour settlement challenge. These are controlled proof
-runs, not revenue or third-party traction.
+cancellation, mixed funded-plus-orphaned fee recovery, completed-job release,
+challenge enforcement, and two post-challenge fixed-credit payouts. Both staged
+covenants had immutable payout basis `1`; each paid `500000` atomic USD₮0 after
+the full challenge window. An earlier `200000` provider refund is a separate
+transfer and was not netted against either fixed SLA credit. Both covenants are
+`Paid`, and the house provider account, canonical vault balance, fee escrow
+balance, and fee escrow accounting are zero. The restarted 24-hour attester soak
+also completed. The house preview attesters were retired after every controlled
+covenant became terminal, leaving no standing preview or production signer
+endpoint. These are controlled proof runs, not revenue or third-party traction.
 
 ## Internal Audit Checkpoint
 
@@ -280,14 +286,18 @@ npm run agent:gate-v04
 ```
 
 The canonical flag-off deployment has completed the source, topology,
-role-separation, no-broadcast simulation, bytecode, wiring, and initial house
-pilot gates. The remaining controlled-rollout gates are:
+role-separation, no-broadcast simulation, bytecode, wiring, orphaned-fee,
+release, cancellation, fixed-credit payout, and 24-hour read-only attester-soak
+gates. The no-secret payout verifier replays both final receipts and custody
+state with `npm run agent:verify-v04-payouts`.
 
-- finish the staged full and recovery-reduced payouts after their mandatory challenge period;
-- complete the restarted 24-hour read-only attester soak on the production-interlocked preview runtime;
-- interactive 390px browser checks and a dry-run reconciler preserve v0.3 receipts;
-- any externally owned provider using a PolicyPool-sponsored bond is disclosed as sponsored and follows a successful house canary;
-- third-party-funded provider bonds remain blocked until a qualified independent human Solidity audit and operationally independent signer topology are complete.
+The remaining public-activation gates are intentionally separate from tagging
+the flag-off source release:
+
+- complete a fresh payout-basis-`0` net-loss pilot before claiming a recovery-reduced payout; the two staged live covenants were fixed credits;
+- enroll an externally owned provider on the canonical eight-contract registry only after a fresh registry-specific authorization and a successful house canary;
+- disclose any PolicyPool-sponsored provider bond as sponsored rather than provider-funded traction;
+- keep third-party-funded provider bonds blocked until a qualified independent human Solidity audit and operationally independent signer topology are complete.
 
 ## Rollout And Rollback
 
@@ -296,7 +306,7 @@ pilot gates. The remaining controlled-rollout gates are:
 3. Verify bytecode, immutable dependencies, both 3-of-5 signer sets, zero signer overlap, thresholds, token, identity registry, ownership, monitor, relay signer, and immutable fee treasury from chain state.
 4. Configure the unprivileged relayer and both independently operated evidence services while the feature remains off.
 5. Run the complete gate and read-only reconciliation.
-6. Run separately labeled house covenants for release, full payout, payout reduced by verified recovery, direct A2MCP success, direct no-settlement cancellation/refund, and fee capture.
+6. Run separately labeled house covenants for release, fixed SLA credit, payout reduced by verified recovery, direct A2MCP success, direct no-settlement cancellation/refund, and fee capture. Do not substitute a fixed-credit covenant for the recovery-reduced proof.
 7. After a house A2MCP canary, enroll one externally owned provider with a clearly disclosed PolicyPool-sponsored bond and run a controlled house-buyer happy path.
 8. Treat a genuine non-reciprocal external buyer as upside, not a release prerequisite. Do not accept provider-funded external capital until the qualified audit and independent signer gate close.
 

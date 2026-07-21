@@ -2,6 +2,22 @@
 
 Date: 2026-07-16
 
+## Deployment Addendum — 2026-07-21
+
+The remediated eight-contract stack was subsequently deployed, wired, and
+bytecode-verified flag-off on X Layer. Controlled house pilots completed
+orphaned-fee recovery, unpaid cancellation, release, challenge enforcement, and
+two fixed `0.5 USD₮0` payouts after the mandatory 24-hour window. Both live
+covenants had immutable payout basis `1`; the earlier `0.2 USD₮0` provider
+refund was separate and did not create a recovery-reduced net-loss proof. The
+restarted attester soak completed and the preview services were retired after
+all controlled covenants became terminal. Production remains v0.3 and no public
+v0.4 feature or production attester is enabled.
+
+This addendum updates deployment and pilot status only. The report below remains
+an internal review, and its qualified-human-audit, independent-signer, fresh
+net-loss-pilot, and third-party-capital gates remain open.
+
 ## Classification
 
 This is an internal adversarial review and remediation performed with automated tooling and manual source analysis. It is not an independent third-party audit and must not be represented as one.
