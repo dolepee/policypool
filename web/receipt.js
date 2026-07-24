@@ -244,6 +244,20 @@ export function buildReceiptView(payload, options = {}) {
   };
 }
 
+// Lookups are chain-backed and can take seconds, so a second search may start
+// before the first returns. Each attempt takes a generation and renders only if
+// it is still the latest; otherwise a slower earlier response lands last and the
+// panel shows one receipt's lifecycle beside another's id in the input.
+export function createLookupSequencer() {
+  let generation = 0;
+  return {
+    begin() {
+      const mine = ++generation;
+      return () => mine === generation;
+    },
+  };
+}
+
 async function lookup(receiptId) {
   const response = await fetch(`/api/coverage-status?receiptId=${encodeURIComponent(receiptId)}`, {
     headers: { accept: "application/json" },
@@ -304,11 +318,15 @@ if (typeof document !== "undefined") {
   const input = document.getElementById("receipt-id");
   const status = document.getElementById("receipt-status");
 
+  const sequencer = createLookupSequencer();
+
   const run = async (receiptId) => {
     if (!receiptId) return;
+    const isCurrent = sequencer.begin();
     status.textContent = "Reading the public receipt…";
     try {
       const { body, httpStatus } = await lookup(receiptId);
+      if (!isCurrent()) return;
       const view = buildReceiptView(body, { httpStatus });
       render(view);
       // Only claim verification when a receipt was actually read.
@@ -320,6 +338,7 @@ if (typeof document !== "undefined") {
         status.textContent = "No receipt matched that ID.";
       }
     } catch {
+      if (!isCurrent()) return;
       status.textContent = "Could not reach the receipt API. Try again.";
     }
   };

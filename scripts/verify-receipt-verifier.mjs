@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { buildReceiptView } from "../web/receipt.js";
+import { buildReceiptView, createLookupSequencer } from "../web/receipt.js";
 
 // Fixtures are verbatim production responses for the three real receipts that
 // cover every terminal and non-terminal state the verifier can render.
@@ -294,6 +294,36 @@ assert.ok(
 );
 assert.ok(html.includes('href="/api/manifest"'), "receipt.html must link the machine-readable manifest");
 assert.match(html, /id="receipt-form"/, "receipt.html must expose the lookup form");
+
+// Overlapping lookups must not cross-render. A slow first request that resolves
+// after a second one was started would otherwise paint the wrong receipt's
+// lifecycle beside the newer id still shown in the input.
+const sequencer = createLookupSequencer();
+const first = sequencer.begin();
+assert.equal(first(), true, "a lone lookup is current");
+const second = sequencer.begin();
+assert.equal(second(), true, "the newest lookup is current");
+assert.equal(first(), false, "a superseded lookup must not render");
+const third = sequencer.begin();
+assert.equal(third(), true);
+assert.equal(second(), false, "only the latest lookup may render");
+assert.equal(first(), false, "older lookups stay superseded");
+
+// Independent sequencers do not interfere with one another.
+const other = createLookupSequencer();
+const otherFirst = other.begin();
+assert.equal(otherFirst(), true);
+assert.equal(third(), true, "a separate sequencer must not supersede this one");
+
+// The page must actually use the guard rather than merely export it.
+const wiring = await readFile(new URL("../web/receipt.js", import.meta.url), "utf8");
+assert.match(wiring, /const sequencer = createLookupSequencer\(\)/, "the page must create a sequencer");
+assert.match(wiring, /const isCurrent = sequencer\.begin\(\)/, "each lookup must take a generation");
+assert.equal(
+  (wiring.match(/if \(!isCurrent\(\)\) return;/g) || []).length,
+  2,
+  "both the success and failure paths must drop superseded responses",
+);
 
 // Every element the script reaches for must exist in the markup. A renamed id
 // would otherwise fail only in a browser, which nothing else here exercises.
