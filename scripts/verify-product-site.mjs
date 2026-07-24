@@ -69,6 +69,7 @@ assert.match(proof, /0x1b65afdc6f50e18a0dca2dd026b6450407234e0860e4e547b02a8c98d
 assert.match(proof, /0x14529d6d09489f8e446db8fa8cc70aac71e21aa529864a726dce04c5946aa44b/, "second v0.4 settlement receipt must be linked");
 assert.match(proof, /public v0\.4 flags off/, "v0.4 proof must retain the flag-off boundary");
 assert.doesNotMatch(proof, /NET-LOSS CREDIT|0\.3 USD₮0|state-pending">PayoutDue/, "v0.4 proof must not retain the invalid reduced-payout claim");
+assert.match(proof, /href="\/proof\/receipt"/, "proof room must expose the public receipt verifier for receipts it does not itself display");
 
 const coverageScript = await readFile(new URL("../web/coverage-site.js", import.meta.url), "utf8");
 for (const receiptId of ["ppc-6c3d1dbe749cca96", "ppc-136a34aee2022a42", "ppc-5e59d4e5300b6fc3"]) {

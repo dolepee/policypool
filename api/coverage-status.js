@@ -1,6 +1,13 @@
 import { createChainService } from "./lib/chain.js";
 import { createLedger } from "./lib/ledger.js";
-import { clean, sendJson } from "./lib/utils.js";
+import { clean, sendJson as rawSendJson } from "./lib/utils.js";
+import { enrichCoverageResponse } from "./lib/coverage-state.js";
+
+// Receipt lookups report the lifecycle state explicitly, so a reader never has
+// to infer whether coverage is still in force from the raw receipt shape.
+function sendJson(res, status, payload) {
+  return rawSendJson(res, status, enrichCoverageResponse(payload, { httpStatus: status }));
+}
 
 export function createCoverageStatusHandler(dependencies = {}) {
   let ledger = dependencies.ledger;
