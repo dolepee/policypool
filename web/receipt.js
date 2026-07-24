@@ -66,9 +66,23 @@ function isUnavailable(payload, httpStatus) {
   return UNAVAILABLE_ERRORS.has(String(payload?.error || ""));
 }
 
+// Coverage caps must not be quoted for records where coverage may never have
+// existed or has not been funded. A "maximum payout" row there reads as an
+// amount someone could claim.
+const NON_PAYABLE_STATES = new Set([
+  "compensation_required",
+  "pending",
+  "cancelled",
+  "cancelled_unpaid",
+]);
+
 export function buildReceiptView(payload, options = {}) {
   const httpStatus = options.httpStatus;
-  if (!payload || payload.ok !== true || !payload.receipt) {
+  // A cleanup record is copied from the pre-finalisation reservation, so it
+  // carries a ledger state but no receipt document. Requiring a receipt here
+  // would report a record that genuinely exists as missing.
+  const ledgerState = String(payload?.state || "").trim().toLowerCase();
+  if (!payload || payload.ok !== true || (!payload.receipt && !ledgerState)) {
     if (isUnavailable(payload, httpStatus)) {
       return {
         found: false,
@@ -93,8 +107,8 @@ export function buildReceiptView(payload, options = {}) {
     };
   }
 
-  const receipt = payload.receipt;
-  const state = String(payload.state || "").toLowerCase();
+  const receipt = payload.receipt || {};
+  const state = ledgerState;
   const presentation = STATE_PRESENTATION[state] || { label: state.toUpperCase(), headline: "Receipt found." };
   const target = receipt.target || {};
   const targetJob = receipt.targetJob || {};
@@ -134,7 +148,9 @@ export function buildReceiptView(payload, options = {}) {
   const values = [
     ["Receipt", payload.receiptId],
     ["Coverage state", presentation.label],
-    ["Maximum payout", capUSDT ? `${capUSDT} USD₮0` : null],
+    // Suppressed where coverage may never have existed or is unfunded, so the
+    // table cannot quote a payable-looking amount the explanation denies.
+    ["Maximum payout", capUSDT && !NON_PAYABLE_STATES.has(state) ? `${capUSDT} USD₮0` : null],
     // Report the fee actually recorded on this receipt. Older receipts carry a
     // different price than the current listing, and an assumed default here
     // would print a number that was never paid.

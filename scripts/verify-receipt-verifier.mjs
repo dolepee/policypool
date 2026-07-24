@@ -115,6 +115,50 @@ assert.doesNotMatch(cleanup.plain, /payout of up to/i, "a cleanup record must no
 assert.doesNotMatch(cleanup.plain, /is owed to the buyer/i, "a cleanup record must not assert a payout is owed");
 assert.match(cleanup.plain, /no payout is owed/i, "it must state plainly that nothing is owed on this receipt");
 assert.match(cleanup.plain, /awaiting reconciliation/i);
+// The fact table must agree with that explanation rather than quote an amount.
+assert.ok(
+  !cleanup.values.some(([label]) => label === "Maximum payout"),
+  "a cleanup record must not display a maximum payout row",
+);
+
+// Cleanup records are copied from the pre-finalisation reservation, so they
+// carry a ledger state but no receipt document. They must still render.
+const cleanupWithoutReceipt = buildReceiptView({
+  ok: true,
+  receiptId: "ppc-cleanup-bare",
+  state: "compensation_required",
+});
+assert.equal(cleanupWithoutReceipt.found, true, "a record with a state exists even without a receipt document");
+assert.equal(cleanupWithoutReceipt.stateLabel, "RECONCILIATION PENDING");
+assert.match(cleanupWithoutReceipt.plain, /awaiting reconciliation/i);
+assert.ok(
+  !cleanupWithoutReceipt.values.some(([label]) => label === "Maximum payout"),
+  "a receiptless cleanup record must not display a maximum payout row",
+);
+
+// A pre-settlement reservation is likewise a real record with no receipt yet.
+const reservedNoReceipt = buildReceiptView({ ok: true, receiptId: "ppc-reserved-view", state: "pending" });
+assert.equal(reservedNoReceipt.found, true);
+assert.equal(reservedNoReceipt.stateLabel, "PAYMENT NOT SETTLED");
+assert.ok(
+  !reservedNoReceipt.values.some(([label]) => label === "Maximum payout"),
+  "an unfunded reservation must not display a maximum payout row",
+);
+
+// A genuinely unknown id, carrying neither state nor receipt, is still absent.
+assert.equal(buildReceiptView({ ok: true, receiptId: "ppc-nothing" }).found, false);
+
+// A funded, in-force covenant still shows what it could pay.
+const payableCap = buildReceiptView({
+  ok: true,
+  receiptId: "ppc-payable",
+  state: "active",
+  receipt: { covenant: { coverageCapUSDT: "0.5", deadline: "2026-07-25T16:34:29.000Z" }, target: {}, servicePayment: {} },
+});
+assert.ok(
+  payableCap.values.some(([label, value]) => label === "Maximum payout" && value === "0.5 USD₮0"),
+  "active coverage must still state its maximum payout",
+);
 
 // A relay covenant awaiting its clock is paid and issued, not terminal.
 const awaitingClock = buildReceiptView({
