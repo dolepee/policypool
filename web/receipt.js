@@ -16,7 +16,9 @@ const STATE_PRESENTATION = Object.freeze({
   pending: { label: "PAYMENT NOT SETTLED", headline: "Reserved, not yet paid." },
   released: { label: "RELEASED", headline: "Delivered on time. Liability released." },
   payout_due: { label: "PAYOUT DUE", headline: "Deadline missed. Payout owed." },
-  compensation_required: { label: "PAYOUT DUE", headline: "Deadline missed. Payout owed." },
+  // Not a payout. This is the cleanup state for aborted, unconfirmed, or
+  // unsettled issuance, so coverage may never have existed.
+  compensation_required: { label: "RECONCILIATION PENDING", headline: "Awaiting reconciliation." },
   paid: { label: "PAID OUT", headline: "The buyer was paid on X Layer." },
   expired: { label: "EXPIRED", headline: "Coverage ended without a claim." },
   cancelled: { label: "CANCELLED", headline: "Coverage was cancelled before it started." },
@@ -112,8 +114,12 @@ export function buildReceiptView(payload, options = {}) {
     plain = `The covered job missed its objective deadline, so PolicyPool paid the buyer ${payoutUSDT} USD₮0 from the reserve. The payout transaction below is the proof.`;
   } else if (state === "released") {
     plain = `${providerName} delivered within the agreed deadline, so no payout was owed and the reserved liability was released. This is the normal outcome for coverage that is never claimed.`;
-  } else if (state === "payout_due" || state === "compensation_required") {
+  } else if (state === "payout_due") {
     plain = `The deadline passed without a verified delivery. A payout of up to ${capUSDT || "the cap"} USD₮0 is owed to the buyer and is pending execution.`;
+  } else if (state === "compensation_required") {
+    // Must not claim a payout: issuance or fee settlement may be unconfirmed,
+    // so this record may represent coverage that was never issued at all.
+    plain = "This record is awaiting reconciliation. Coverage issuance or its fee settlement is unconfirmed, so no payout is owed on the strength of this receipt. The reconciler will resolve it to a released, cancelled, or payable outcome.";
   } else if (state === "active") {
     plain = `Coverage is in force until ${deadline || "the stored deadline"}. If ${providerName} has not delivered by then, the buyer is owed up to ${capUSDT || "the cap"} USD₮0.`;
   } else if (state === "pending_start") {

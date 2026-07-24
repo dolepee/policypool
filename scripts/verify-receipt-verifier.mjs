@@ -102,6 +102,20 @@ assert.equal(
   "a genuine 404 is still reported as not found",
 );
 
+// A cleanup record must never be rendered as an owed payout. The page has to
+// agree with the lifecycle contract, which maps it to RECONCILIATION_PENDING.
+const cleanup = buildReceiptView({
+  ok: true,
+  receiptId: "ppc-cleanup",
+  state: "compensation_required",
+  receipt: { covenant: { coverageCapUSDT: "0.5" }, target: { agentName: "GlassDesk", agentId: "3465" }, servicePayment: {} },
+});
+assert.equal(cleanup.stateLabel, "RECONCILIATION PENDING");
+assert.doesNotMatch(cleanup.plain, /payout of up to/i, "a cleanup record must not quote a payable amount");
+assert.doesNotMatch(cleanup.plain, /is owed to the buyer/i, "a cleanup record must not assert a payout is owed");
+assert.match(cleanup.plain, /no payout is owed/i, "it must state plainly that nothing is owed on this receipt");
+assert.match(cleanup.plain, /awaiting reconciliation/i);
+
 // A relay covenant awaiting its clock is paid and issued, not terminal.
 const awaitingClock = buildReceiptView({
   ok: true,
