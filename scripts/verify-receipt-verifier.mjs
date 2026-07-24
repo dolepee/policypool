@@ -18,7 +18,18 @@ assert.match(active.plain, /0\.5 USD₮0/, "an active receipt must state the max
 const released = buildReceiptView(fixtures["ppc-d99d7f72895d70ab"]);
 assert.equal(released.state, "released");
 assert.equal(released.stateLabel, "RELEASED");
-assert.match(released.plain, /delivered within the agreed deadline/);
+// This real receipt was released with reason `platform_job_completed`, which the
+// reconciler records from job status alone. It establishes that the job
+// eventually completed, not that it completed inside the SLA, so the page must
+// report it neutrally and surface the recorded reason instead.
+assert.equal(released.release?.reason ?? "platform_job_completed", "platform_job_completed");
+assert.doesNotMatch(
+  released.plain,
+  /delivered within the agreed deadline/i,
+  "completion status alone must not be presented as timely delivery",
+);
+assert.doesNotMatch(released.headline, /delivered on time/i);
+assert.match(released.plain, /platform_job_completed/, "the recorded reason must be shown to the reader");
 assert.ok(
   released.values.some(([label]) => label === "Released because"),
   "a released receipt must show why it was released",
@@ -195,15 +206,32 @@ const expiredRelease = buildReceiptView({
 assert.doesNotMatch(expiredRelease.plain, /delivered within the agreed deadline/i);
 assert.match(expiredRelease.plain, /not a statement that the service was delivered/i);
 
-// A genuine on-time release still reads as one.
+// Only a reason that actually verified timing may claim delivery was on time,
+// and the headline must agree with the paragraph beneath it. The reconciler
+// records `platform_job_completed` from job status alone, with no completion
+// timestamp and no deadline comparison, so a late job still earns that reason.
+for (const reason of ["platform_job_completed", "expire_unstarted", "recovered_without_payout"]) {
+  const view = buildReceiptView({
+    ok: true,
+    receiptId: "ppc-neutral",
+    state: "released",
+    release: { reason },
+    receipt: { covenant: { coverageCapUSDT: "0.5" }, target: { agentName: "GlassDesk", agentId: "3465" }, servicePayment: {} },
+  });
+  assert.doesNotMatch(view.plain, /delivered within the agreed deadline/i, `${reason} must not claim timely delivery`);
+  assert.doesNotMatch(view.headline, /delivered on time/i, `${reason} headline must stay neutral`);
+}
+
+// A time-verified release still reads as an on-time delivery, headline included.
 const deliveredRelease = buildReceiptView({
   ok: true,
   receiptId: "ppc-delivered",
   state: "released",
-  release: { reason: "platform_job_completed" },
+  release: { reason: "service_delivered_within_sla" },
   receipt: { covenant: { coverageCapUSDT: "0.5" }, target: { agentName: "GlassDesk", agentId: "3465" }, servicePayment: {} },
 });
 assert.match(deliveredRelease.plain, /delivered within the agreed deadline/i);
+assert.match(deliveredRelease.headline, /delivered on time/i);
 
 // A relay covenant awaiting its clock is paid and issued, not terminal.
 const awaitingClock = buildReceiptView({

@@ -14,7 +14,10 @@ const STATE_PRESENTATION = Object.freeze({
   active: { label: "COVERAGE ACTIVE", headline: "Coverage is in force." },
   pending_start: { label: "AWAITING CLOCK START", headline: "Paid and issued. Deadline not started." },
   pending: { label: "PAYMENT NOT SETTLED", headline: "Reserved, not yet paid." },
-  released: { label: "RELEASED", headline: "Delivered on time. Liability released." },
+  // Neutral by default. Released is reached by on-time delivery, by expiry of
+  // an unstarted clock, and by recovery without payout, so the headline is
+  // only specialised once the recorded reason proves which occurred.
+  released: { label: "RELEASED", headline: "Ended without a payout." },
   payout_due: { label: "PAYOUT DUE", headline: "Deadline missed. Payout owed." },
   // Not a payout. This is the cleanup state for aborted, unconfirmed, or
   // unsettled issuance, so coverage may never have existed.
@@ -129,14 +132,23 @@ export function buildReceiptView(payload, options = {}) {
   const providerName = target.agentName || `agent ${target.agentId || "unknown"}`;
 
   let plain;
+  // Defaults to the state's neutral headline; only a reason that proves timing
+  // may upgrade it to a delivery claim.
+  let headline = presentation.headline;
   if (state === "paid" && payoutUSDT) {
     plain = `The covered job missed its objective deadline, so PolicyPool paid the buyer ${payoutUSDT} USD₮0 from the reserve. The payout transaction below is the proof.`;
   } else if (state === "released") {
     // Released is also reached by expiry of an unstarted relay clock and by
     // recovery without payout, where nothing was delivered. Only the recorded
     // reason can say which happened, so it is never assumed.
-    const deliveredReasons = new Set(["service_delivered_within_sla", "platform_job_completed"]);
-    if (deliveredReasons.has(release?.reason)) {
+    //
+    // `platform_job_completed` is deliberately excluded: the reconciler records
+    // it from job status alone, with no completion timestamp and no comparison
+    // against the deadline, so a job that finished late still earns it. Only a
+    // reason that verified timing may claim delivery was within the SLA.
+    const timeVerifiedDelivery = new Set(["service_delivered_within_sla"]);
+    if (timeVerifiedDelivery.has(release?.reason)) {
+      headline = "Delivered on time. Liability released.";
       plain = `${providerName} delivered within the agreed deadline, so no payout was owed and the reserved liability was released. This is the normal outcome for coverage that is never claimed.`;
     } else if (release?.reason) {
       plain = `This covenant ended without a payout and its reserved liability was released. Recorded reason: ${release.reason}. That is not a statement that the service was delivered on time.`;
@@ -216,7 +228,7 @@ export function buildReceiptView(payload, options = {}) {
     found: true,
     state,
     stateLabel: presentation.label,
-    headline: presentation.headline,
+    headline,
     plain,
     values,
     evidence,

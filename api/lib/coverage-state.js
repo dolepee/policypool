@@ -376,7 +376,11 @@ export function enrichCoverageResponse(payload, options = {}) {
   setIfAbsent(enriched, "coverageState", state);
   setIfAbsent(enriched, "covered", IN_FORCE_STATES.has(state));
   setIfAbsent(enriched, "paymentMade", PURCHASED_STATES.has(state) || payload.charged === true);
-  setIfAbsent(enriched, "receiptIssued", hasReceipt || PURCHASED_STATES.has(state));
+  // Only the receipt document proves a receipt exists. If finalisation failed
+  // after settlement, a record can be synchronised to a purchased state while
+  // carrying no receipt at all, and inferring one from the state would send an
+  // agent looking for something the API cannot return.
+  setIfAbsent(enriched, "receiptIssued", hasReceipt);
 
   if (state === COVERAGE_STATES.REQUEST_FAILED || state === COVERAGE_STATES.NOT_COVERABLE) {
     const failure = describeFailure(payload.error ?? payload.reason, options.httpStatus);

@@ -46,11 +46,22 @@ assert.equal(indexing.retryAfterSeconds, 10);
 assert.match(indexing.nextAction, /Do not create another marketplace task/);
 
 // Receipt lifecycle states.
-const active = enrich({ ok: true, receiptId: "ppc-active", state: "active" });
+const active = enrich({ ok: true, receiptId: "ppc-active", state: "active", receipt: { receiptId: "ppc-active" } });
 assert.equal(active.coverageState, COVERAGE_STATES.COVERAGE_ACTIVE);
 assert.equal(active.covered, true);
 assert.equal(active.paymentMade, true);
 assert.equal(active.receiptIssued, true);
+
+// Finalisation can fail after settlement, leaving a record whose state is later
+// synchronised to a purchased value while it still carries no receipt document.
+// The state must not manufacture a receipt an agent would then go looking for.
+const purchasedWithoutDocument = enrich({ ok: true, receiptId: "ppc-nodoc", state: "active" });
+assert.equal(purchasedWithoutDocument.covered, true, "the ledger state still governs coverage");
+assert.equal(
+  purchasedWithoutDocument.receiptIssued,
+  false,
+  "a purchased state must not imply a receipt document that does not exist",
+);
 
 const released = enrich({ ok: true, receiptId: "ppc-released", state: "released" });
 assert.equal(released.coverageState, COVERAGE_STATES.COVERAGE_RELEASED);
