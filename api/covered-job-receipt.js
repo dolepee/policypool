@@ -29,10 +29,19 @@ import {
   header,
   isBytes32,
   parseUsdtAtomic,
-  sendJson,
+  sendJson as rawSendJson,
   sha256,
   stableStringify,
 } from "./lib/utils.js";
+import { enrichCoverageResponse } from "./lib/coverage-state.js";
+
+// The 402 body accompanies the x402 payment challenge that OKX QA validated at
+// listing time, so it is passed through untouched. Every other response gains
+// the explicit lifecycle state and actionable failure fields.
+function sendJson(res, status, payload) {
+  if (status === 402) return rawSendJson(res, status, payload);
+  return rawSendJson(res, status, enrichCoverageResponse(payload));
+}
 
 const FORBIDDEN_PATTERNS = [
   [/investment advice|financial advice|buy signal|sell signal|price prediction/i, "regulated_or_trading_advice"],

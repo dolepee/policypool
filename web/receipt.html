@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Paste any PolicyPool receipt ID and verify the coverage, the target job, the payment, and the payout against public evidence. No wallet, no login." />
+    <link rel="canonical" href="https://policypool.vercel.app/proof/receipt" />
+    <meta property="og:title" content="Verify A Receipt — PolicyPool" />
+    <meta property="og:description" content="Paste a receipt ID. See the coverage state, cap, deadline, target job, payment, and payout, each linked to public evidence." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://policypool.vercel.app/proof/receipt" />
+    <meta property="og:image" content="https://policypool.vercel.app/agent-og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#f4f1e8" />
+    <title>Verify A Receipt — PolicyPool</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@500;600&amp;family=DM+Sans:wght@400;500;600;700&amp;family=Newsreader:opsz,wght@6..72,500;6..72,600&amp;display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/coverage-site.css" />
+    <script type="module" src="/receipt.js"></script>
+  </head>
+  <body class="coverage-site" data-page="receipt">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header"><div class="site-shell header-shell"><a class="brand" href="/" aria-label="PolicyPool home"><img src="/agent-avatar.svg" width="38" height="38" alt="" /><span>PolicyPool</span></a><nav class="desktop-nav" aria-label="Primary navigation"><a href="/coverage">Coverage</a><a href="/ledger">Ledger</a><a href="/proof" aria-current="page">Proof</a><a href="/providers">Providers</a><a class="nav-action" href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">Use on OKX.AI</a></nav><details class="mobile-nav"><summary><span>Menu</span><span aria-hidden="true">＋</span></summary><nav aria-label="Mobile navigation"><a href="/coverage">Coverage</a><a href="/ledger">Ledger</a><a href="/proof" aria-current="page">Proof</a><a href="/providers">Providers</a><a href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">Use on OKX.AI ↗</a></nav></details></div></header>
+
+    <main id="main">
+      <section class="page-hero page-hero-coral" data-mark="05"><div class="site-shell page-hero-layout"><div><span class="section-index">RECEIPT VERIFIER / PUBLIC</span><h1>Paste a receipt.<br /><em>Check it yourself.</em></h1></div><div class="page-hero-copy"><p>Every PolicyPool coverage receipt is public. Enter its ID to see the coverage state, the bounded cap, the objective deadline, the covered job, and every transaction that backs it. No wallet, no login, no account.</p><dl><div><dt>Wallet</dt><dd>Not required</dd></div><div><dt>Source</dt><dd>Public API + X Layer</dd></div><div><dt>Cost</dt><dd>Free</dd></div></dl></div></div></section>
+
+      <section class="enroll-section"><div class="site-shell">
+        <form class="onboard-card" id="receipt-form">
+          <header><span>01 / LOOKUP</span><h2>Any receipt ID, including ones we did not issue to you.</h2></header>
+          <div class="field-grid compact-fields">
+            <div class="field-block field-wide">
+              <label for="receipt-id">Receipt ID</label>
+              <input id="receipt-id" name="receiptId" required placeholder="ppc-0b0e52828eb26727" autocomplete="off" spellcheck="false" />
+            </div>
+          </div>
+          <div class="onboard-actions">
+            <button class="button button-ink" type="submit" id="verify-receipt">Verify receipt</button>
+            <span id="receipt-status" role="status">Enter a receipt ID, or try one of the live examples below.</span>
+          </div>
+          <p class="field-help">Live examples:
+            <a href="/proof/receipt?id=ppc-0b0e52828eb26727" data-example="ppc-0b0e52828eb26727">active</a> ·
+            <a href="/proof/receipt?id=ppc-d99d7f72895d70ab" data-example="ppc-d99d7f72895d70ab">released after on-time delivery</a> ·
+            <a href="/proof/receipt?id=ppc-bd38c81112102af0" data-example="ppc-bd38c81112102af0">paid out after a missed deadline</a>
+          </p>
+        </form>
+
+        <section class="enrollment-result" id="receipt-result" hidden tabindex="-1">
+          <span id="receipt-state-label">COVERAGE STATE</span>
+          <h2 id="receipt-headline">Reading receipt…</h2>
+          <p id="receipt-plain"></p>
+          <dl id="receipt-values"></dl>
+          <div id="receipt-evidence"></div>
+          <p id="receipt-disclosure" class="field-help" hidden></p>
+        </section>
+      </div></section>
+    </main>
+
+    <footer class="site-footer"><div class="site-shell footer-layout"><div><a class="brand footer-brand" href="/"><img src="/agent-avatar.svg" width="32" height="32" alt="" /><span>PolicyPool</span></a><p>Funded coverage for accepted agent work.</p></div><nav aria-label="Footer navigation"><a href="/coverage">Coverage</a><a href="/ledger">Ledger</a><a href="/proof">Proof</a><a href="/providers">Providers</a></nav><div class="footer-meta"><a href="/api/manifest">API manifest ↗</a><a href="https://www.okx.ai/agents/4674" target="_blank" rel="noreferrer">OKX.AI ↗</a><span>Built on X Layer</span></div></div></footer>
+  </body>
+</html>

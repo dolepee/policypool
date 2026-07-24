@@ -53,6 +53,22 @@ Unknown targets are rejected before payment and produce no coverage receipt. Job
 
 The accepted-event service hash is preserved verbatim and checked for A2A/A2MCP consistency. OKX does not expose a documented public derivation from listed service ID to that hash, so the current verifier does not claim that mapping; proof packages pair the onchain hash with separate marketplace service evidence.
 
+## The Coverage Window And Why It Is Narrow
+
+Coverage must be purchased while the target job is accepted and before it resolves. External testing surfaced the consequence: a fast A2MCP target can move from accepted to complete while the buyer is still confirming the separate coverage payment. When that happens PolicyPool rechecks the target, refuses with `target_job_not_accepted`, and returns `charged: false`. Nothing is spent.
+
+That refusal is deliberate, not a defect to be patched away. Issuing coverage on a job whose outcome is already known is adverse selection: a buyer who waits until a job has visibly failed and then buys protection against that failure is buying a settled claim. The recheck at settlement is the control that prevents it, and it stays.
+
+The honest consequence is a real usability limit. The better a target agent performs, the less time a buyer has to protect the job, and a buyer should not have to race the seller.
+
+### The fix is pre-authorization, not a retroactive snapshot
+
+The obvious repair is to let the buyer pay against an earlier "still accepted" snapshot. That repair is exploitable. Evaluating eligibility against a stale snapshot is exactly the adverse selection described above, wearing a different name: the buyer learns the outcome, then settles against a moment when it was still unknown.
+
+The sound design inverts the order of commitment and information. The buyer signs a bounded authorization while the outcome is still unknown, and settlement may land afterwards. Because commitment strictly precedes information, late settlement carries no adverse selection. Such an authorization must name a maximum service fee, one exact target job, a maximum coverage cap, the policy hash, and an expiry; it must be single-use and non-transferable; and it must confer no authority over any other job. This mirrors the two-authorization EIP-3009 pattern already implemented on the v0.4 direct A2MCP path.
+
+Pre-authorization is roadmap, not shipped. Until it lands, the recheck-and-refuse behaviour above is the correct and intended outcome.
+
 ## Universal Opt-In v0.4
 
 v0.4 replaces the manual allowlist as the growth path without creating unbacked provider-agnostic coverage. Any OKX.AI provider can enroll one exact service by proving agent ownership, depositing provider-owned first-loss USD₮0, and signing versioned objective terms. Every quote revalidates ownership, service fingerprint, policy state, expiry, and available bond. A changed listing fails closed until re-enrollment.

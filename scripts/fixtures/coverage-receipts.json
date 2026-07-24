@@ -1,0 +1,380 @@
+{
+  "ppc-0b0e52828eb26727": {
+    "ok": true,
+    "receiptId": "ppc-0b0e52828eb26727",
+    "state": "active",
+    "receipt": {
+      "protocol": "PolicyPool Agent Coverage",
+      "version": "0.3.0",
+      "receiptId": "ppc-0b0e52828eb26727",
+      "generatedAt": "2026-07-24T16:36:09.321Z",
+      "outcome": {
+        "type": "ISSUED",
+        "status": "coverage_active",
+        "reason": "registered_policy_matched_and_target_job_acceptance_verified"
+      },
+      "buyer": {
+        "address": "0x52E19669d7b199531bF689f7ec943632Bd211B75"
+      },
+      "target": {
+        "agentId": "3465",
+        "agentName": "GlassDesk",
+        "serviceIds": [
+          "30019",
+          "30020",
+          "30021"
+        ],
+        "serviceName": "Evidence Pack Services",
+        "serviceType": "A2A",
+        "providerWallet": "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7",
+        "policyHash": "sha256:4f20a6e1f6aff9fe225670a6dfa80a4337bca3d193a4541c2f35a4771fcb17ed",
+        "slaSeconds": 86400,
+        "publishedScope": [
+          "verify a specific public market-data claim",
+          "source appendix",
+          "confidence labels",
+          "receipt hashes",
+          "unavailable-data disclosure"
+        ],
+        "maxCoverageAtomic": "5000000",
+        "providerAvailableBondAtomic": null,
+        "payoutBasis": "legacy_reserve_covenant",
+        "clockMode": "verified_acceptance",
+        "coverageStatus": "active",
+        "clockSource": "verified_acceptance_block",
+        "processingStart": "verified target-job acceptance",
+        "enrollmentWindowSeconds": 14400,
+        "exclusions": []
+      },
+      "targetJob": {
+        "jobId": "0xe48aaa1f983b93fc56c359e215120c9fcf1596ea55bb8a81552ddfbe6904f27d",
+        "creationTxHash": "0x7dbfcf81d086d229ef378aca9bab30b87d6e3d19a23d0bdbf343357d21f9fe4a",
+        "acceptanceTxHash": "0xdb36819d8aa874d1ee263b6adcb37f2dc3e21094b05833d5c738adb410782d3e",
+        "creationBlock": "66141486",
+        "acceptanceBlock": "66141833",
+        "createdAt": "2026-07-24T16:28:42.000Z",
+        "acceptedAt": "2026-07-24T16:34:29.000Z",
+        "buyer": "0x52E19669d7b199531bF689f7ec943632Bd211B75",
+        "provider": "0x4ABBAe03affF90F50d4F6B42b3E362f5228aD4C7",
+        "agentId": "3465",
+        "asset": "0x779Ded0c9e1022225f8E0630b35a9b54bE713736",
+        "amountAtomic": "500000",
+        "serviceHash": "0x394ac5c4fea98537728a249442b599c4a7e6dbb10f48b403bbeb257e340a84b4",
+        "serviceType": "A2A",
+        "serviceTypeVerified": true,
+        "listedServiceIdMapping": "manual_external_evidence_required",
+        "status": 1,
+        "statusLabel": "accepted",
+        "publicTaskReference": "414499"
+      },
+      "covenant": {
+        "deadline": "2026-07-25T16:34:29.000Z",
+        "enrollmentClosedAt": "2026-07-24T20:34:29.000Z",
+        "coverageCapAtomic": "500000",
+        "coverageCapUSDT": "0.5",
+        "objectiveBreachRules": [
+          "accepted_job_still_undelivered_after_deadline"
+        ],
+        "onchain": null
+      },
+      "providerRelay": null,
+      "guard": {
+        "verdict": "ALLOW",
+        "reason": "registered_policy_and_objective_job_evidence_required",
+        "callerSuppliedPolicyIgnored": true,
+        "callerSuppliedDeadlineIgnored": true,
+        "callerSuppliedBreachAndPayoutFieldsIgnored": true,
+        "derivedCoverageDeadline": "2026-07-25T16:34:29.000Z",
+        "derivedEnrollmentClosesAt": "2026-07-24T20:34:29.000Z"
+      },
+      "coverageQuote": {
+        "id": "92ece6eafea4c83287bd52174d68fa9d",
+        "source": "verified_preflight",
+        "issuedAt": "2026-07-24T16:36:01.986Z",
+        "expiresAt": "2026-07-24T16:46:01.986Z",
+        "canonicalRequestRecovered": true
+      },
+      "reserve": {
+        "chain": "X Layer",
+        "chainId": 196,
+        "wallet": "0xE2F0c858724A9a72310D7264400e04B37423FBBC",
+        "asset": "0x779Ded0c9e1022225f8E0630b35a9b54bE713736",
+        "balanceAtomicAtDecision": "5000000",
+        "balanceUSDTAtDecision": "5",
+        "publicUrl": "https://policypool.vercel.app/ledger#reserve"
+      },
+      "providerBond": null,
+      "servicePayment": {
+        "verified": true,
+        "settled": true,
+        "network": "eip155:196",
+        "transaction": "0x06baf25c8d35fa025cb04a5665ab3048416915af6a84ee251ecd0d08fb3220b8",
+        "payer": "0x52E19669d7b199531bF689f7ec943632Bd211B75",
+        "recipient": "0xE2F0c858724A9a72310D7264400e04B37423FBBC",
+        "amountAtomic": "100000",
+        "amountUSDT": "0.1",
+        "transferBlock": "66141932"
+      },
+      "limitations": [
+        "Coverage is objective and limited to the stated cap.",
+        "PolicyPool is not protocol-native escrow or insurance.",
+        "A payout-due state must be derived from the stored covenant and public OKX.AI job status.",
+        "A payout is paid only after its X Layer token transfer is independently verified."
+      ],
+      "receiptHash": "sha256:6c6bb351075c792fd61ffaa92d3e407ccf8ccd5850162d5748902382ddf6ecab"
+    },
+    "liabilityAtomic": "500000",
+    "targetJobStatus": 2,
+    "reconciliation": {
+      "deadlinePassed": false,
+      "payoutDueCandidate": false,
+      "note": "State changes only after the reconciler reads the public job status and updates the durable ledger."
+    },
+    "payout": null,
+    "release": null
+  },
+  "ppc-d99d7f72895d70ab": {
+    "ok": true,
+    "receiptId": "ppc-d99d7f72895d70ab",
+    "state": "released",
+    "receipt": {
+      "protocol": "PolicyPool Agent Coverage",
+      "version": "0.2.0",
+      "receiptId": "ppc-d99d7f72895d70ab",
+      "generatedAt": "2026-07-11T06:32:05.604Z",
+      "outcome": {
+        "type": "ISSUED",
+        "status": "coverage_active",
+        "reason": "registered_policy_matched_and_target_job_acceptance_verified"
+      },
+      "buyer": {
+        "address": "0x4ABBAe03affF90F50d4F6B42b3E362f5228aD4C7"
+      },
+      "target": {
+        "agentId": "3465",
+        "agentName": "GlassDesk",
+        "serviceIds": [
+          "30019",
+          "30020",
+          "30021"
+        ],
+        "serviceName": "Evidence Pack Services",
+        "serviceType": "A2A",
+        "providerWallet": "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7",
+        "policyHash": "sha256:05714c2d7ec96d6f0bfd7a566f85f0121961defe32965b3d6d527f21c70bbb84",
+        "slaSeconds": 86400,
+        "publishedScope": [
+          "verify a specific public market-data claim",
+          "source appendix",
+          "confidence labels",
+          "receipt hashes",
+          "unavailable-data disclosure"
+        ]
+      },
+      "targetJob": {
+        "jobId": "0x567044bcd533567a6d874044accdffd06b8901bc9988e700b29741cd9d1070a1",
+        "creationTxHash": "0xb09188606430acf7b8ca1c02b9ff8ad335937aef31b3b93c9c41abeadf750214",
+        "acceptanceTxHash": "0x9f2970429e0f57b0ba59173e2ca5d5fb6040f47c5937ff35f560a8be8675a213",
+        "creationBlock": "64981670",
+        "acceptanceBlock": "64981787",
+        "createdAt": "2026-07-11T06:18:26.000Z",
+        "acceptedAt": "2026-07-11T06:20:23.000Z",
+        "buyer": "0x4ABBAe03affF90F50d4F6B42b3E362f5228aD4C7",
+        "provider": "0x4ABBAe03affF90F50d4F6B42b3E362f5228aD4C7",
+        "agentId": "3465",
+        "asset": "0x779Ded0c9e1022225f8E0630b35a9b54bE713736",
+        "amountAtomic": "500000",
+        "serviceHash": "0x454a01bf18af167860cc8d96c6a2ce8abe07250d111af9e1d62197abdee9e874",
+        "serviceType": "A2A",
+        "serviceTypeVerified": true,
+        "listedServiceIdMapping": "manual_external_evidence_required",
+        "status": 1,
+        "statusLabel": "accepted"
+      },
+      "covenant": {
+        "deadline": "2026-07-12T06:20:23.000Z",
+        "coverageCapAtomic": "500000",
+        "coverageCapUSDT": "0.5",
+        "objectiveBreachRules": [
+          "accepted_job_still_undelivered_after_deadline"
+        ]
+      },
+      "guard": {
+        "verdict": "ALLOW",
+        "reason": "registered_policy_and_objective_job_evidence_required",
+        "callerSuppliedPolicyIgnored": true,
+        "callerSuppliedDeadlineIgnored": true,
+        "callerSuppliedBreachAndPayoutFieldsIgnored": true,
+        "derivedCoverageDeadline": "2026-07-12T06:20:23.000Z"
+      },
+      "reserve": {
+        "chain": "X Layer",
+        "chainId": 196,
+        "wallet": "0xE2F0c858724A9a72310D7264400e04B37423FBBC",
+        "asset": "0x779Ded0c9e1022225f8E0630b35a9b54bE713736",
+        "balanceAtomicAtDecision": "5800000",
+        "balanceUSDTAtDecision": "5.8",
+        "publicUrl": "https://policypool.vercel.app/agent#reserve"
+      },
+      "servicePayment": {
+        "verified": true,
+        "settled": true,
+        "network": "eip155:196",
+        "transaction": "0x14a22c769eb1c0b7ccaf39d274922aa3983fdbc2d2bc3e1fc56fd9af0aa2a17d",
+        "payer": "0x4ABBAe03affF90F50d4F6B42b3E362f5228aD4C7",
+        "recipient": "0xE2F0c858724A9a72310D7264400e04B37423FBBC",
+        "amountAtomic": "1000000",
+        "amountUSDT": "1",
+        "transferBlock": "64982489"
+      },
+      "limitations": [
+        "Coverage is objective and limited to the stated cap.",
+        "PolicyPool is not protocol-native escrow or insurance.",
+        "A payout-due state must be derived from the stored covenant and public OKX.AI job status.",
+        "A payout is paid only after its X Layer token transfer is independently verified."
+      ],
+      "receiptHash": "sha256:7f2c967194fb1dfd9d7d98d5835d216de3a7471694021216d2b9490458c8dad7"
+    },
+    "liabilityAtomic": "500000",
+    "targetJobStatus": 6,
+    "reconciliation": {
+      "deadlinePassed": true,
+      "payoutDueCandidate": false,
+      "note": "State changes only after the reconciler reads the public job status and updates the durable ledger."
+    },
+    "payout": null,
+    "release": {
+      "from": "active",
+      "to": "released",
+      "observedAt": "2026-07-11T06:49:37.494Z",
+      "reason": "platform_job_completed",
+      "targetJobStatus": 6,
+      "source": "OKX task escrow getJobStatus(bytes32)"
+    }
+  },
+  "ppc-bd38c81112102af0": {
+    "ok": true,
+    "receiptId": "ppc-bd38c81112102af0",
+    "state": "paid",
+    "receipt": {
+      "protocol": "PolicyPool Agent Coverage",
+      "version": "0.2.0",
+      "receiptId": "ppc-bd38c81112102af0",
+      "generatedAt": "2026-07-11T06:14:57.475Z",
+      "outcome": {
+        "type": "ISSUED",
+        "status": "coverage_active",
+        "reason": "registered_policy_matched_and_target_job_acceptance_verified"
+      },
+      "buyer": {
+        "address": "0x4ABBAe03affF90F50d4F6B42b3E362f5228aD4C7"
+      },
+      "target": {
+        "agentId": "3465",
+        "agentName": "GlassDesk",
+        "serviceIds": [
+          "30019",
+          "30020",
+          "30021"
+        ],
+        "serviceName": "Evidence Pack Services",
+        "serviceType": "A2A",
+        "providerWallet": "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7",
+        "policyHash": "sha256:05714c2d7ec96d6f0bfd7a566f85f0121961defe32965b3d6d527f21c70bbb84",
+        "slaSeconds": 86400,
+        "publishedScope": [
+          "verify a specific public market-data claim",
+          "source appendix",
+          "confidence labels",
+          "receipt hashes",
+          "unavailable-data disclosure"
+        ]
+      },
+      "targetJob": {
+        "jobId": "0xbcc30569223f5db2cd9fa8fd0708560be5b2e9d819caa5f3e3670183a438ac42",
+        "creationTxHash": "0x0a2767350f335c03a54cf28caab3ceeabe2be44a4d3bd2cbadddccd9bba3627e",
+        "acceptanceTxHash": "0xdab7ba4138c7f23712cfcc3a27ec915fb54890a0491063345ad19237290d9c62",
+        "creationBlock": "64955094",
+        "acceptanceBlock": "64955200",
+        "createdAt": "2026-07-10T22:55:30.000Z",
+        "acceptedAt": "2026-07-10T22:57:16.000Z",
+        "buyer": "0x4ABBAe03affF90F50d4F6B42b3E362f5228aD4C7",
+        "provider": "0x4ABBAe03affF90F50d4F6B42b3E362f5228aD4C7",
+        "agentId": "3465",
+        "asset": "0x779Ded0c9e1022225f8E0630b35a9b54bE713736",
+        "amountAtomic": "500000",
+        "serviceHash": "0x42c85fafc20b2af60c19ab83cf1cef6bf266b7348d706b5ea1b066620eaf2725",
+        "serviceType": "A2A",
+        "serviceTypeVerified": true,
+        "listedServiceIdMapping": "manual_external_evidence_required",
+        "status": 1,
+        "statusLabel": "accepted"
+      },
+      "covenant": {
+        "deadline": "2026-07-11T22:57:16.000Z",
+        "coverageCapAtomic": "500000",
+        "coverageCapUSDT": "0.5",
+        "objectiveBreachRules": [
+          "accepted_job_still_undelivered_after_deadline"
+        ]
+      },
+      "guard": {
+        "verdict": "ALLOW",
+        "reason": "registered_policy_and_objective_job_evidence_required",
+        "callerSuppliedPolicyIgnored": true,
+        "callerSuppliedDeadlineIgnored": true,
+        "callerSuppliedBreachAndPayoutFieldsIgnored": true,
+        "derivedCoverageDeadline": "2026-07-11T22:57:16.000Z"
+      },
+      "reserve": {
+        "chain": "X Layer",
+        "chainId": 196,
+        "wallet": "0xE2F0c858724A9a72310D7264400e04B37423FBBC",
+        "asset": "0x779Ded0c9e1022225f8E0630b35a9b54bE713736",
+        "balanceAtomicAtDecision": "5000000",
+        "balanceUSDTAtDecision": "5",
+        "publicUrl": "https://policypool.vercel.app/agent#reserve"
+      },
+      "servicePayment": {
+        "verified": true,
+        "settled": true,
+        "network": "eip155:196",
+        "transaction": "0x48b71f1d1de04e9e7138db3d0a8c7aa20c1a5d0364e465210f5dbeb9da03aae8",
+        "payer": "0x4ABBAe03affF90F50d4F6B42b3E362f5228aD4C7",
+        "recipient": "0xE2F0c858724A9a72310D7264400e04B37423FBBC",
+        "amountAtomic": "1000000",
+        "amountUSDT": "1",
+        "transferBlock": "64981461"
+      },
+      "limitations": [
+        "Coverage is objective and limited to the stated cap.",
+        "PolicyPool is not protocol-native escrow or insurance.",
+        "A payout-due state must be derived from the stored covenant and public OKX.AI job status.",
+        "A payout is paid only after its X Layer token transfer is independently verified."
+      ],
+      "receiptHash": "sha256:bc6b537d9a55d4aad3bd767ec17e9db2b1f9757d53203448faeb74a5934e503a"
+    },
+    "liabilityAtomic": "500000",
+    "targetJobStatus": 8,
+    "reconciliation": {
+      "deadlinePassed": true,
+      "payoutDueCandidate": false,
+      "note": "State changes only after the reconciler reads the public job status and updates the durable ledger."
+    },
+    "payout": {
+      "transaction": "0x492a8e5effbbf9fc2b064c3da0435d797fc2f498967439a970e97439908adffa",
+      "amountAtomic": "500000",
+      "recipient": "0x4ABBAe03affF90F50d4F6B42b3E362f5228aD4C7",
+      "verifiedAt": "2026-07-11T22:58:31.315Z",
+      "proof": {
+        "txHash": "0x492a8e5effbbf9fc2b064c3da0435d797fc2f498967439a970e97439908adffa",
+        "blockNumber": "65041673",
+        "asset": "0x779Ded0c9e1022225f8E0630b35a9b54bE713736",
+        "from": "0xE2F0c858724A9a72310D7264400e04B37423FBBC",
+        "to": "0x4ABBAe03affF90F50d4F6B42b3E362f5228aD4C7",
+        "amountAtomic": "500000"
+      }
+    },
+    "release": null
+  }
+}
