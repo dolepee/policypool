@@ -12,7 +12,8 @@ const POLICYPOOL_OWNER_WALLET = "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7";
 
 const STATE_PRESENTATION = Object.freeze({
   active: { label: "COVERAGE ACTIVE", headline: "Coverage is in force." },
-  pending_start: { label: "PAYMENT PENDING", headline: "Payment is settling." },
+  pending_start: { label: "AWAITING CLOCK START", headline: "Paid and issued. Deadline not started." },
+  pending: { label: "PAYMENT NOT SETTLED", headline: "Reserved, not yet paid." },
   released: { label: "RELEASED", headline: "Delivered on time. Liability released." },
   payout_due: { label: "PAYOUT DUE", headline: "Deadline missed. Payout owed." },
   compensation_required: { label: "PAYOUT DUE", headline: "Deadline missed. Payout owed." },
@@ -47,10 +48,40 @@ function shortHash(value) {
   return `${text.slice(0, 10)}…${text.slice(-6)}`;
 }
 
-export function buildReceiptView(payload) {
+// A service outage must not be reported as a missing receipt. The API answers
+// with JSON on failure, so `fetch` resolves and the payload alone cannot tell
+// "no such receipt" apart from "the lookup could not run right now".
+const UNAVAILABLE_ERRORS = new Set([
+  "coverage_status_unavailable",
+  "ledger_unavailable",
+  "rpc_error",
+  "chain_unavailable",
+]);
+
+function isUnavailable(payload, httpStatus) {
+  if (Number.isInteger(httpStatus) && httpStatus >= 500) return true;
+  if (Number.isInteger(httpStatus) && httpStatus === 429) return true;
+  return UNAVAILABLE_ERRORS.has(String(payload?.error || ""));
+}
+
+export function buildReceiptView(payload, options = {}) {
+  const httpStatus = options.httpStatus;
   if (!payload || payload.ok !== true || !payload.receipt) {
+    if (isUnavailable(payload, httpStatus)) {
+      return {
+        found: false,
+        unavailable: true,
+        stateLabel: "TEMPORARILY UNAVAILABLE",
+        headline: "The lookup could not run just now.",
+        plain: "This does not mean the receipt is missing. The public receipt service or its chain lookup is briefly unavailable. Try the same ID again in a few seconds.",
+        values: [],
+        evidence: [],
+        disclosure: null,
+      };
+    }
     return {
       found: false,
+      unavailable: false,
       stateLabel: "NOT FOUND",
       headline: "No receipt with that ID.",
       plain: "Check the ID and try again. Receipt IDs look like ppc- followed by sixteen hex characters.",
@@ -85,6 +116,11 @@ export function buildReceiptView(payload) {
     plain = `The deadline passed without a verified delivery. A payout of up to ${capUSDT || "the cap"} USD₮0 is owed to the buyer and is pending execution.`;
   } else if (state === "active") {
     plain = `Coverage is in force until ${deadline || "the stored deadline"}. If ${providerName} has not delivered by then, the buyer is owed up to ${capUSDT || "the cap"} USD₮0.`;
+  } else if (state === "pending_start") {
+    // Paid and issued, but the relay clock has not started. Not terminal.
+    plain = `The coverage fee has settled and this receipt is issued. Its deadline starts when the funded request reaches ${providerName}, so cover is not counting down yet.`;
+  } else if (state === "pending") {
+    plain = "This coverage was reserved but its fee has not settled yet, so no cover is in force and no receipt has been finalised.";
   } else {
     plain = "This receipt is no longer in force.";
   }
@@ -155,7 +191,8 @@ async function lookup(receiptId) {
   const response = await fetch(`/api/coverage-status?receiptId=${encodeURIComponent(receiptId)}`, {
     headers: { accept: "application/json" },
   });
-  return response.json().catch(() => null);
+  const body = await response.json().catch(() => null);
+  return { body, httpStatus: response.status };
 }
 
 function render(view) {
@@ -214,8 +251,17 @@ if (typeof document !== "undefined") {
     if (!receiptId) return;
     status.textContent = "Reading the public receipt…";
     try {
-      render(buildReceiptView(await lookup(receiptId)));
-      status.textContent = "Verified against the public API and X Layer.";
+      const { body, httpStatus } = await lookup(receiptId);
+      const view = buildReceiptView(body, { httpStatus });
+      render(view);
+      // Only claim verification when a receipt was actually read.
+      if (view.found) {
+        status.textContent = "Verified against the public API and X Layer.";
+      } else if (view.unavailable) {
+        status.textContent = "The receipt service is briefly unavailable. Try the same ID again.";
+      } else {
+        status.textContent = "No receipt matched that ID.";
+      }
     } catch {
       status.textContent = "Could not reach the receipt API. Try again.";
     }

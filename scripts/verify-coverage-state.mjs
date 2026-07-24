@@ -110,8 +110,18 @@ assert.equal(reservedId.covered, false);
 // The paid endpoint carries its ledger state, so replays and relay covenants
 // awaiting a clock are not described as coverage in force.
 const relayPending = enrich({ ok: true, state: "pending_start", receipt: { receiptId: "ppc-relay" } });
-assert.equal(relayPending.coverageState, COVERAGE_STATES.PAYMENT_PENDING);
+assert.equal(relayPending.coverageState, COVERAGE_STATES.AWAITING_CLOCK_START);
 assert.equal(relayPending.covered, false, "a relay covenant awaiting its clock is not yet in force");
+assert.equal(relayPending.paymentMade, true, "pending_start is written only after the fee settles");
+
+// The pre-settlement ledger reservation is a different thing entirely: nothing
+// has been paid and no receipt exists, so it must claim neither.
+const reserved = enrich({ ok: true, receiptId: "ppc-reserved-record", state: "pending" });
+assert.equal(reserved.coverageState, COVERAGE_STATES.PAYMENT_NOT_SETTLED);
+assert.equal(reserved.covered, false);
+assert.equal(reserved.paymentMade, false, "a reservation before settlement has not been paid");
+assert.equal(reserved.receiptIssued, false, "no receipt exists before settlement");
+assert.equal(reserved.nextAction, "COMPLETE_PAYMENT");
 
 for (const [ledgerState, expected] of [["released", COVERAGE_STATES.COVERAGE_RELEASED], ["paid", COVERAGE_STATES.PAID_OUT]]) {
   const replay = enrich({ ok: true, state: ledgerState, idempotentReplay: true, receipt: { receiptId: "ppc-replay" } });

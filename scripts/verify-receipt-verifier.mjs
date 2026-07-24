@@ -83,6 +83,37 @@ assert.equal(missing.evidence.length, 0);
 assert.equal(buildReceiptView(null).found, false);
 assert.equal(buildReceiptView({ ok: true }).found, false, "a payload without a receipt is not a receipt");
 
+// A service outage must not be presented as a missing receipt, or a judge
+// checking a valid ID during a chain-lookup blip is told it does not exist.
+for (const outage of [
+  { payload: { ok: false, error: "coverage_status_unavailable" }, options: {} },
+  { payload: { ok: false, error: "rpc_error" }, options: {} },
+  { payload: { ok: false, error: "anything" }, options: { httpStatus: 503 } },
+  { payload: null, options: { httpStatus: 502 } },
+]) {
+  const view = buildReceiptView(outage.payload, outage.options);
+  assert.equal(view.unavailable, true, "an outage must be reported as unavailable");
+  assert.equal(view.stateLabel, "TEMPORARILY UNAVAILABLE");
+  assert.match(view.plain, /does not mean the receipt is missing/);
+}
+assert.equal(
+  buildReceiptView({ ok: false, error: "receipt_not_found" }, { httpStatus: 404 }).unavailable,
+  false,
+  "a genuine 404 is still reported as not found",
+);
+
+// A relay covenant awaiting its clock is paid and issued, not terminal.
+const awaitingClock = buildReceiptView({
+  ok: true,
+  receiptId: "ppc-relay",
+  state: "pending_start",
+  receipt: { covenant: { coverageCapUSDT: "0.5" }, target: { agentName: "Foreman", agentId: "4348" }, servicePayment: {} },
+});
+assert.equal(awaitingClock.found, true);
+assert.equal(awaitingClock.stateLabel, "AWAITING CLOCK START");
+assert.doesNotMatch(awaitingClock.plain, /no longer in force/, "a pending relay receipt is not terminal");
+assert.match(awaitingClock.plain, /not counting down yet/);
+
 // The page must ship, be routed, and keep the shared navigation contract.
 const html = await readFile(new URL("../web/receipt.html", import.meta.url), "utf8");
 assert.equal((html.match(/<h1\b/g) || []).length, 1, "receipt.html must have one h1");
