@@ -179,7 +179,11 @@ export function buildReceiptView(payload, options = {}) {
     // so this record may represent coverage that was never issued at all.
     plain = "This record is awaiting reconciliation. Coverage issuance or its fee settlement is unconfirmed, so no payout is owed on the strength of this receipt. The reconciler will resolve it to a released, cancelled, or payable outcome.";
   } else if (state === "active") {
-    plain = `Coverage is in force until ${deadline || "the stored deadline"}. If ${providerName} has not delivered by then, the buyer is owed up to ${capUSDT || "the cap"} USD₮0.`;
+    // The payout condition is that the job is still accepted and undelivered at
+    // the deadline. Other non-delivery endings, such as the platform stopping,
+    // closing, or expiring the job, release the covenant instead of paying, so
+    // promising payment for any non-delivery would overstate the protection.
+    plain = `Coverage is in force until ${deadline || "the stored deadline"}. If the job is still accepted and ${providerName} has not delivered by then, the buyer is owed up to ${capUSDT || "the cap"} USD₮0. If the platform instead stops, closes, or expires the job, the covenant is released without a payout.`;
   } else if (state === "pending_start") {
     // Paid and issued, but the relay clock has not started. Not terminal.
     plain = `The coverage fee has settled and this receipt is issued. Its deadline starts when the funded request reaches ${providerName}, so cover is not counting down yet.`;
@@ -374,12 +378,20 @@ if (typeof document !== "undefined") {
     status.textContent = "Reading the public receipt…";
     try {
       const { body, httpStatus } = await lookup(receiptId);
-      if (!isCurrent()) return;
+      // The invariant is stated against the id presently in the input, so it is
+      // checked against the input itself, not only against the generation. A
+      // reader who edits the field mid-request must never be shown the answer
+      // to the id they replaced.
+      if (!isCurrent() || input.value.trim() !== receiptId) return;
       const view = buildReceiptView(body, { httpStatus });
       render(view);
       // Only claim verification when a receipt was actually read.
       if (view.found) {
-        status.textContent = "Verified against the public API and X Layer.";
+        // Records with no target job never reach a chain lookup, so claiming an
+        // X Layer check for them would assert evidence that was never gathered.
+        status.textContent = view.evidence.length
+          ? "Verified against the public API and X Layer."
+          : "Read from the public API. No chain evidence is attached to this record.";
       } else if (view.unavailable) {
         status.textContent = "The receipt service is briefly unavailable. Try the same ID again.";
       } else {
@@ -394,6 +406,13 @@ if (typeof document !== "undefined") {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     run(input.value.trim());
+  });
+
+  // Editing the field changes "the id presently in the input", so it is a
+  // mutation of the invariant's subject and must reset through the same point.
+  input.addEventListener("input", () => {
+    beginLookup();
+    status.textContent = "Enter a receipt ID to check.";
   });
 
   for (const example of document.querySelectorAll("[data-example]")) {

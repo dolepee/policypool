@@ -399,9 +399,29 @@ const wiring = await readFile(new URL("../web/receipt.js", import.meta.url), "ut
 assert.match(wiring, /const sequencer = createLookupSequencer\(\)/, "the page must create a sequencer");
 assert.match(wiring, /const isCurrent = sequencer\.begin\(\)/, "each lookup must take a generation");
 assert.equal(
-  (wiring.match(/if \(!isCurrent\(\)\) return;/g) || []).length,
+  (wiring.match(/if \(!isCurrent\(\)/g) || []).length,
   2,
   "both the success and failure paths must drop superseded responses",
+);
+// The invariant is stated against the input, so the render path checks the
+// input itself. A reader editing the field mid-request must not be shown the
+// answer to the id they replaced.
+assert.match(
+  wiring,
+  /if \(!isCurrent\(\) \|\| input\.value\.trim\(\) !== receiptId\) return;/,
+  "the render path must verify the response still matches the id in the input",
+);
+// Editing the field mutates the invariant's subject, so it must reset too.
+assert.match(
+  wiring,
+  /input\.addEventListener\("input", \(\) => \{\s*beginLookup\(\);/,
+  "editing the input must retire the panel and invalidate the in-flight lookup",
+);
+// A record with no chain evidence must not be described as chain-verified.
+assert.match(
+  wiring,
+  /view\.evidence\.length[\s\S]{0,160}No chain evidence is attached/,
+  "the verification claim must depend on evidence actually being present",
 );
 
 // Superseding a callback is not enough: the previously rendered receipt must be
