@@ -325,6 +325,19 @@ const blankGuard = await readFile(new URL("../web/receipt.js", import.meta.url),
 const blankBranch = blankGuard.match(/if \(!receiptId\) \{[\s\S]*?\n    \}/)?.[0] || "";
 assert.ok(blankBranch, "the blank-input branch must exist");
 assert.match(blankBranch, /clearRenderedReceipt\(\)/, "a blank submission must retire the displayed receipt");
+assert.match(
+  blankBranch,
+  /sequencer\.begin\(\)/,
+  "a blank submission must also advance the generation, or a lookup still in flight renders afterwards",
+);
+
+// The sequencer must genuinely invalidate an outstanding lookup, not merely
+// hand out a newer token: this is the blank-submission case in miniature.
+const invalidation = createLookupSequencer();
+const inFlight = invalidation.begin();
+assert.equal(inFlight(), true, "the lookup is current while it is the only one");
+invalidation.begin();
+assert.equal(inFlight(), false, "starting another generation must invalidate the in-flight lookup");
 
 // Example links must not assert more than the referenced receipt can support.
 const examplesHtml = await readFile(new URL("../web/receipt.html", import.meta.url), "utf8");

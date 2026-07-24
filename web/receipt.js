@@ -356,6 +356,9 @@ if (typeof document !== "undefined") {
     // empty here. Retiring the panel first stops the previous receipt sitting
     // on screen beside a now-blank input.
     if (!receiptId) {
+      // Advance the generation as well as clearing, or a lookup still in flight
+      // remains current and renders its receipt beside the now-empty input.
+      sequencer.begin();
       clearRenderedReceipt();
       status.textContent = "Enter a receipt ID to check.";
       return;
