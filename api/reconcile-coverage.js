@@ -12,6 +12,12 @@ const RELEASE_STATUSES = new Map([
   [9, "platform_arbitration_refunded_buyer"],
 ]);
 
+// A submitted job is one the provider has delivered, awaiting buyer review. It
+// is not a platform-terminal status, so it never appeared in the map above and
+// such covenants stayed active indefinitely even though the service was
+// delivered on time.
+const DELIVERED_STATUS = 2;
+
 function rawRequestBody(req) {
   if (typeof req.rawBody === "string") return req.rawBody;
   if (typeof req.body === "string") return req.body;
@@ -107,13 +113,24 @@ export function createReconcileHandler(dependencies = {}) {
             changes.push({ receiptId: record.receiptId, from: "active", to: "payout_due" });
             continue;
           }
-          if (RELEASE_STATUSES.has(status)) {
+          // Observing a delivered job while its deadline is still ahead proves
+          // the delivery happened inside the SLA, so the covenant can be
+          // released without needing a separate delivery timestamp. Observed
+          // after the deadline the timing is ambiguous from status alone, so it
+          // is left for evidence-based reconciliation rather than guessed in
+          // either direction.
+          const deliveredWithinSla = status === DELIVERED_STATUS
+            && Number.isFinite(deadlineMs)
+            && now() <= deadlineMs;
+          const releaseReason = RELEASE_STATUSES.get(status)
+            || (deliveredWithinSla ? "service_delivered_within_sla" : null);
+          if (releaseReason) {
             const observedAt = new Date(now()).toISOString();
             const transition = {
               from: "active",
               to: "released",
               observedAt,
-              reason: RELEASE_STATUSES.get(status),
+              reason: releaseReason,
               targetJobStatus: status,
               source: "OKX task escrow getJobStatus(bytes32)",
             };
