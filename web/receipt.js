@@ -119,7 +119,12 @@ export function buildReceiptView(payload, options = {}) {
 
   const capUSDT = covenant.coverageCapUSDT || usdt(covenant.coverageCapAtomic);
   const feeUSDT = servicePayment.amountUSDT || usdt(servicePayment.amountAtomic);
-  const payoutUSDT = payout ? usdt(payout.amountAtomic) : null;
+  // A zero-recovery settlement stores a payout object with amountAtomic "0" and
+  // its settlement transaction. That is not money paid to the buyer, so payout
+  // rows and links are gated on a positive amount rather than object presence.
+  const payoutAtomic = payout ? Number(payout.amountAtomic) : 0;
+  const payoutIsPositive = Number.isFinite(payoutAtomic) && payoutAtomic > 0;
+  const payoutUSDT = payoutIsPositive ? usdt(payout.amountAtomic) : null;
   const deadline = instant(covenant.deadline);
   const providerName = target.agentName || `agent ${target.agentId || "unknown"}`;
 
@@ -127,7 +132,17 @@ export function buildReceiptView(payload, options = {}) {
   if (state === "paid" && payoutUSDT) {
     plain = `The covered job missed its objective deadline, so PolicyPool paid the buyer ${payoutUSDT} USD₮0 from the reserve. The payout transaction below is the proof.`;
   } else if (state === "released") {
-    plain = `${providerName} delivered within the agreed deadline, so no payout was owed and the reserved liability was released. This is the normal outcome for coverage that is never claimed.`;
+    // Released is also reached by expiry of an unstarted relay clock and by
+    // recovery without payout, where nothing was delivered. Only the recorded
+    // reason can say which happened, so it is never assumed.
+    const deliveredReasons = new Set(["service_delivered_within_sla", "platform_job_completed"]);
+    if (deliveredReasons.has(release?.reason)) {
+      plain = `${providerName} delivered within the agreed deadline, so no payout was owed and the reserved liability was released. This is the normal outcome for coverage that is never claimed.`;
+    } else if (release?.reason) {
+      plain = `This covenant ended without a payout and its reserved liability was released. Recorded reason: ${release.reason}. That is not a statement that the service was delivered on time.`;
+    } else {
+      plain = "This covenant ended without a payout and its reserved liability was released.";
+    }
   } else if (state === "payout_due") {
     plain = `The deadline passed without a verified delivery. A payout of up to ${capUSDT || "the cap"} USD₮0 is owed to the buyer and is pending execution.`;
   } else if (state === "compensation_required") {
@@ -179,7 +194,7 @@ export function buildReceiptView(payload, options = {}) {
   addTx("Target job created", targetJob.creationTxHash);
   addTx("Target job accepted", targetJob.acceptanceTxHash);
   addTx("Coverage paid for", servicePayment.transaction);
-  if (payout) addTx("Payout to buyer", payout.transaction);
+  if (payout) addTx(payoutIsPositive ? "Payout to buyer" : "Recovery settlement, no payout", payout.transaction);
   if (receipt.reserve && receipt.reserve.wallet) {
     evidence.push({
       label: "Reserve wallet",

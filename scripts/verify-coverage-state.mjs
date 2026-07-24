@@ -6,7 +6,7 @@ import {
 } from "../api/lib/coverage-state.js";
 
 const correlationId = "test-correlation-id";
-const enrich = (payload) => enrichCoverageResponse(payload, { correlationId });
+const enrich = (payload, options = {}) => enrichCoverageResponse(payload, { correlationId, ...options });
 
 // A free preflight that found the target coverable must never read as covered.
 const eligible = enrich({
@@ -133,6 +133,41 @@ for (const [ledgerState, expected] of [["released", COVERAGE_STATES.COVERAGE_REL
 const freshIssue = enrich({ ok: true, state: "active", receipt: { receiptId: "ppc-fresh" } });
 assert.equal(freshIssue.coverageState, COVERAGE_STATES.COVERAGE_ACTIVE);
 assert.equal(freshIssue.covered, true);
+
+// Architectural rule: coverage is claimed only from an authoritative ledger
+// state. A receipt-shaped payload, or a charged flag, is not evidence that
+// cover is in force. Inferring it is what repeatedly reported cleanup records,
+// replays, reservations, and terminal covenants as active.
+for (const shape of [
+  { ok: true, receipt: { receiptId: "ppc-shaped" } },
+  { ok: true, charged: true },
+  { ok: true, receiptId: "ppc-bare", charged: true },
+]) {
+  const view = enrich(shape);
+  assert.notEqual(view.coverageState, COVERAGE_STATES.COVERAGE_ACTIVE, "coverage must not be inferred");
+  assert.equal(view.covered, false, "a payload without a ledger state must never claim cover");
+}
+
+// Transient infrastructure and throttling failures must stay retryable even
+// when the specific code is absent from the contract, or an agent will
+// permanently abandon a valid request during a 503 or a 429.
+const throttled = enrich({ ok: false, error: "rate_limit_exceeded", charged: false }, { httpStatus: 429 });
+assert.equal(throttled.retryable, true, "a 429 must be retryable");
+assert.equal(throttled.retryAfterSeconds, 30);
+
+const serviceDown = enrich({ ok: false, error: "coverage_status_unavailable", charged: false }, { httpStatus: 503 });
+assert.equal(serviceDown.retryable, true, "a 503 must be retryable");
+assert.match(serviceDown.nextAction, /do not change the input/i);
+
+// A caller error stays non-retryable: the transport says the input was wrong.
+const badInput = enrich({ ok: false, error: "okx_task_reference_required", charged: false }, { httpStatus: 400 });
+assert.equal(badInput.retryable, false, "a 4xx input error must not invite blind retries");
+
+// Release is also reached by expiry and by recovery without payout, so the
+// shared next action must not assert the service was delivered on time.
+const releasedAction = enrich({ ok: true, receiptId: "ppc-rel", state: "released" });
+assert.equal(releasedAction.coverageState, COVERAGE_STATES.COVERAGE_RELEASED);
+assert.doesNotMatch(releasedAction.nextAction, /DELIVERED/i, "release must not claim delivery happened");
 
 // Invariant: across every state this module can produce from a ledger value,
 // only an active covenant or an unpaid obligation is ever "in force".

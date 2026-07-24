@@ -160,6 +160,51 @@ assert.ok(
   "active coverage must still state its maximum payout",
 );
 
+// A zero-recovery settlement stores a payout object with amountAtomic "0" and
+// its settlement transaction. That is not money paid to the buyer.
+const zeroRecovery = buildReceiptView({
+  ok: true,
+  receiptId: "ppc-zero",
+  state: "recovered_without_payout",
+  payout: { amountAtomic: "0", transaction: `0x${"cd".repeat(32)}`, verifiedAt: "2026-07-20T00:00:00.000Z" },
+  release: { reason: "recovered_without_payout" },
+  receipt: { covenant: { coverageCapUSDT: "0.5" }, target: {}, servicePayment: {} },
+});
+assert.ok(
+  !zeroRecovery.values.some(([label]) => label === "Paid to buyer"),
+  "a zero-value recovery must not report money paid to the buyer",
+);
+assert.ok(
+  !zeroRecovery.evidence.some((item) => item.label === "Payout to buyer"),
+  "a zero-value settlement must not be labelled a payout",
+);
+assert.ok(
+  zeroRecovery.evidence.some((item) => item.label === "Recovery settlement, no payout"),
+  "the settlement transaction is still linked, labelled honestly",
+);
+assert.doesNotMatch(zeroRecovery.plain, /delivered within the agreed deadline/i, "recovery is not a delivery claim");
+
+// Released reached by expiry must not be presented as on-time delivery.
+const expiredRelease = buildReceiptView({
+  ok: true,
+  receiptId: "ppc-expired",
+  state: "released",
+  release: { reason: "expire_unstarted" },
+  receipt: { covenant: { coverageCapUSDT: "0.5" }, target: { agentName: "Foreman", agentId: "4348" }, servicePayment: {} },
+});
+assert.doesNotMatch(expiredRelease.plain, /delivered within the agreed deadline/i);
+assert.match(expiredRelease.plain, /not a statement that the service was delivered/i);
+
+// A genuine on-time release still reads as one.
+const deliveredRelease = buildReceiptView({
+  ok: true,
+  receiptId: "ppc-delivered",
+  state: "released",
+  release: { reason: "platform_job_completed" },
+  receipt: { covenant: { coverageCapUSDT: "0.5" }, target: { agentName: "GlassDesk", agentId: "3465" }, servicePayment: {} },
+});
+assert.match(deliveredRelease.plain, /delivered within the agreed deadline/i);
+
 // A relay covenant awaiting its clock is paid and issued, not terminal.
 const awaitingClock = buildReceiptView({
   ok: true,

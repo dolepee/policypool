@@ -21,7 +21,7 @@ import { enrichCoverageResponse } from "./lib/coverage-state.js";
 // Every response from this endpoint carries an explicit lifecycle state and
 // next action, so a buyer agent can tell "coverable" from "covered".
 function sendJson(res, status, payload) {
-  return rawSendJson(res, status, enrichCoverageResponse(payload));
+  return rawSendJson(res, status, enrichCoverageResponse(payload, { httpStatus: status }));
 }
 
 const INPUT_ALIASES = {

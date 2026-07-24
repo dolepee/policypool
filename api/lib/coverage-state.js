@@ -62,7 +62,11 @@ const NEXT_ACTION_BY_STATE = Object.freeze({
   [COVERAGE_STATES.PAYMENT_NOT_SETTLED]: "COMPLETE_PAYMENT",
   [COVERAGE_STATES.AWAITING_CLOCK_START]: "AWAIT_PROVIDER_CLOCK_START",
   [COVERAGE_STATES.COVERAGE_ACTIVE]: "NONE_COVERAGE_IN_FORCE",
-  [COVERAGE_STATES.COVERAGE_RELEASED]: "NONE_TARGET_DELIVERED_WITHIN_SLA",
+  // Neutral on purpose. A covenant also reaches released through expiry of an
+  // unstarted relay clock and through recovery without payout, where the
+  // provider did not deliver inside the SLA. The record's own reason is the
+  // only thing that can say which happened.
+  [COVERAGE_STATES.COVERAGE_RELEASED]: "NONE_COVERAGE_ENDED_WITHOUT_PAYOUT",
   [COVERAGE_STATES.PAYOUT_DUE]: "AWAIT_PAYOUT",
   [COVERAGE_STATES.PAID_OUT]: "NONE_PAYOUT_COMPLETE",
   [COVERAGE_STATES.COVERAGE_EXPIRED]: "NONE_COVERAGE_ENDED",
@@ -277,19 +281,48 @@ function refineTargetNotAccepted(detail) {
   return { targetState: known.label };
 }
 
-export function describeFailure(rawCode) {
+// The transport already says whether a failure is the caller's fault. Using it
+// means an unlisted infrastructure or throttling code is still described as
+// retryable, instead of telling an agent to permanently abandon a valid request
+// during a 503 or a 429.
+function transportRetry(httpStatus) {
+  if (!Number.isInteger(httpStatus)) return null;
+  if (httpStatus === 429) {
+    return {
+      retryable: true,
+      retryAfterSeconds: 30,
+      nextAction: "This request was throttled. Wait and retry the same request.",
+    };
+  }
+  if (httpStatus >= 500) {
+    return {
+      retryable: true,
+      retryAfterSeconds: 15,
+      nextAction: "This is a service-side failure. Retry the same request; do not change the input.",
+    };
+  }
+  return null;
+}
+
+export function describeFailure(rawCode, httpStatus = undefined) {
   const { base, detail } = splitCode(rawCode);
   const contract = ERROR_CONTRACT[base];
   const refinement = base === "target_job_not_accepted" ? refineTargetNotAccepted(detail) : null;
+  const transport = transportRetry(httpStatus);
   if (!contract && !refinement) {
     return {
       code: base ? base.toUpperCase() : "REQUEST_FAILED",
-      message: "The request could not be completed.",
+      message: transport
+        ? "The request could not be completed right now."
+        : "The request could not be completed.",
       retryable: false,
       nextAction: "Review the error code and retry with corrected input.",
+      ...(transport || {}),
     };
   }
-  return { ...(contract || {}), ...(refinement || {}) };
+  // A listed contract wins on wording, but a transport-level transient failure
+  // still forces retryable, since the caller's input was never the problem.
+  return { ...(contract || {}), ...(refinement || {}), ...(transport || {}) };
 }
 
 // Several failure paths reserve a receipt id before any receipt exists, so a
@@ -316,8 +349,17 @@ function deriveState(payload) {
     return mapped || COVERAGE_STATES.COVERAGE_STATE_UNRECOGNISED;
   }
   if (payload?.ok === false) return COVERAGE_STATES.REQUEST_FAILED;
+  // Preflight verdicts describe eligibility, never coverage, so they are safe
+  // to read directly from the response.
   if (payload?.eligible === false) return COVERAGE_STATES.NOT_COVERABLE;
-  if (payload?.charged === true || hasIssuedReceipt(payload)) return COVERAGE_STATES.COVERAGE_ACTIVE;
+  // Coverage is only ever claimed from an authoritative ledger state. A payload
+  // that merely looks receipt-shaped, or that was charged, is not evidence that
+  // cover is in force: that inference is what repeatedly reported cleanup
+  // records, replays, reservations, and terminal covenants as active. If the
+  // source did not state its lifecycle, this layer refuses to invent one.
+  if (hasIssuedReceipt(payload) || payload?.charged === true) {
+    return COVERAGE_STATES.COVERAGE_STATE_UNRECOGNISED;
+  }
   if (payload?.eligible === true) return COVERAGE_STATES.COVERABLE_NOT_PURCHASED;
   return null;
 }
@@ -337,7 +379,7 @@ export function enrichCoverageResponse(payload, options = {}) {
   setIfAbsent(enriched, "receiptIssued", hasReceipt || PURCHASED_STATES.has(state));
 
   if (state === COVERAGE_STATES.REQUEST_FAILED || state === COVERAGE_STATES.NOT_COVERABLE) {
-    const failure = describeFailure(payload.error ?? payload.reason);
+    const failure = describeFailure(payload.error ?? payload.reason, options.httpStatus);
     setIfAbsent(enriched, "code", failure.code);
     setIfAbsent(enriched, "message", failure.message);
     setIfAbsent(enriched, "retryable", Boolean(failure.retryable));

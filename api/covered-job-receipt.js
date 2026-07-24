@@ -40,7 +40,7 @@ import { enrichCoverageResponse } from "./lib/coverage-state.js";
 // the explicit lifecycle state and actionable failure fields.
 function sendJson(res, status, payload) {
   if (status === 402) return rawSendJson(res, status, payload);
-  return rawSendJson(res, status, enrichCoverageResponse(payload));
+  return rawSendJson(res, status, enrichCoverageResponse(payload, { httpStatus: status }));
 }
 
 const FORBIDDEN_PATTERNS = [
