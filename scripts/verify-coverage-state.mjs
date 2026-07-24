@@ -68,6 +68,41 @@ assert.equal(payoutDue.coverageState, COVERAGE_STATES.PAYOUT_DUE);
 assert.equal(payoutDue.covered, true, "an unpaid obligation is still in force");
 assert.equal(payoutDue.nextAction, "AWAIT_PAYOUT");
 
+// The v0.4 universal reconciler persists terminal states beyond the v0.3 set.
+// These must never be reported as coverage in force.
+const recovered = enrich({ ok: true, receiptId: "ppc-recovered", state: "recovered_without_payout" });
+assert.equal(recovered.coverageState, COVERAGE_STATES.COVERAGE_RELEASED);
+assert.equal(recovered.covered, false, "a recovered covenant is settled, not in force");
+
+const cancelledUnpaid = enrich({ ok: true, receiptId: "ppc-cancelled", state: "cancelled_unpaid" });
+assert.equal(cancelledUnpaid.coverageState, COVERAGE_STATES.COVERAGE_CANCELLED);
+assert.equal(cancelledUnpaid.covered, false);
+assert.equal(cancelledUnpaid.paymentMade, false, "an unpaid cancellation never captured a fee");
+
+// An unfamiliar ledger state must fail closed rather than inherit the receipt
+// heuristic, which previously reported any unknown state as active.
+for (const unknown of ["some_future_state", "constructor", "toString", "   "]) {
+  const view = enrich({ ok: true, receiptId: "ppc-unknown", state: unknown });
+  assert.equal(view.covered, false, `state "${unknown}" must never report coverage in force`);
+  assert.notEqual(view.coverageState, COVERAGE_STATES.COVERAGE_ACTIVE, `state "${unknown}" must not be active`);
+}
+
+// Invariant: across every state this module can produce from a ledger value,
+// only an active covenant or an unpaid obligation is ever "in force".
+const inForce = new Set();
+for (const ledgerState of [
+  "pending_start", "pending", "active", "released", "payout_due", "compensation_required",
+  "paid", "expired", "cancelled", "cancelled_unpaid", "recovered_without_payout", "mystery",
+]) {
+  const view = enrich({ ok: true, receiptId: "ppc-invariant", state: ledgerState });
+  if (view.covered) inForce.add(view.coverageState);
+}
+assert.deepEqual(
+  [...inForce].sort(),
+  [COVERAGE_STATES.COVERAGE_ACTIVE, COVERAGE_STATES.PAYOUT_DUE].sort(),
+  "only an active covenant or an owed payout may report coverage in force",
+);
+
 // Nested receipt shape (coverage-status returns receipt.state).
 const nested = enrich({ ok: true, receipt: { receiptId: "ppc-nested", state: "active" } });
 assert.equal(nested.coverageState, COVERAGE_STATES.COVERAGE_ACTIVE);

@@ -21,6 +21,8 @@ export const COVERAGE_STATES = Object.freeze({
   PAYOUT_DUE: "PAYOUT_DUE",
   PAID_OUT: "PAID_OUT",
   COVERAGE_EXPIRED: "COVERAGE_EXPIRED",
+  COVERAGE_CANCELLED: "COVERAGE_CANCELLED",
+  COVERAGE_STATE_UNRECOGNISED: "COVERAGE_STATE_UNRECOGNISED",
   REQUEST_FAILED: "REQUEST_FAILED",
 });
 
@@ -33,7 +35,12 @@ const RECEIPT_STATE_TO_COVERAGE_STATE = Object.freeze({
   compensation_required: COVERAGE_STATES.PAYOUT_DUE,
   paid: COVERAGE_STATES.PAID_OUT,
   expired: COVERAGE_STATES.COVERAGE_EXPIRED,
-  cancelled: COVERAGE_STATES.COVERAGE_EXPIRED,
+  // The v0.4 universal reconciler persists these terminal outcomes. They must
+  // be mapped explicitly; treating them as unrecognised, or worse as active,
+  // would report a settled covenant as still protecting the buyer.
+  recovered_without_payout: COVERAGE_STATES.COVERAGE_RELEASED,
+  cancelled_unpaid: COVERAGE_STATES.COVERAGE_CANCELLED,
+  cancelled: COVERAGE_STATES.COVERAGE_CANCELLED,
 });
 
 const NEXT_ACTION_BY_STATE = Object.freeze({
@@ -47,6 +54,8 @@ const NEXT_ACTION_BY_STATE = Object.freeze({
   [COVERAGE_STATES.PAYOUT_DUE]: "AWAIT_PAYOUT",
   [COVERAGE_STATES.PAID_OUT]: "NONE_PAYOUT_COMPLETE",
   [COVERAGE_STATES.COVERAGE_EXPIRED]: "NONE_COVERAGE_ENDED",
+  [COVERAGE_STATES.COVERAGE_CANCELLED]: "NONE_COVERAGE_CANCELLED",
+  [COVERAGE_STATES.COVERAGE_STATE_UNRECOGNISED]: "READ_THE_RECEIPT_DIRECTLY",
   [COVERAGE_STATES.REQUEST_FAILED]: "SEE_ERROR_NEXT_ACTION",
 });
 
@@ -270,9 +279,19 @@ export function describeFailure(rawCode) {
 
 function deriveState(payload) {
   const receiptState = payload?.state ?? payload?.receipt?.state;
+  // Any string state at all, including blank, is answered from this branch. A
+  // ledger value that is present but unreadable is unrecognised, never active.
   if (typeof receiptState === "string") {
-    const mapped = RECEIPT_STATE_TO_COVERAGE_STATE[receiptState.toLowerCase()];
-    if (mapped) return mapped;
+    const key = receiptState.trim().toLowerCase();
+    // Own-property lookup only: an inherited key such as "constructor" would
+    // otherwise resolve to a truthy value and be treated as a real state.
+    const mapped = key && Object.prototype.hasOwnProperty.call(RECEIPT_STATE_TO_COVERAGE_STATE, key)
+      ? RECEIPT_STATE_TO_COVERAGE_STATE[key]
+      : null;
+    // A ledger state this module does not recognise must never fall through to
+    // the receipt heuristic below, which would report it as coverage in force.
+    // Fail closed to an explicit unrecognised state instead.
+    return mapped || COVERAGE_STATES.COVERAGE_STATE_UNRECOGNISED;
   }
   if (payload?.ok === false) return COVERAGE_STATES.REQUEST_FAILED;
   if (payload?.eligible === false) return COVERAGE_STATES.NOT_COVERABLE;
