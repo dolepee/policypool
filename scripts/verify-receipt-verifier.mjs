@@ -295,6 +295,48 @@ assert.ok(
 assert.ok(html.includes('href="/api/manifest"'), "receipt.html must link the machine-readable manifest");
 assert.match(html, /id="receipt-form"/, "receipt.html must expose the lookup form");
 
+// The v0.4 universal reconciler persists these terminal states and
+// /api/coverage-status forwards them, so the page must explain them rather than
+// print a raw internal label and call a resolved covenant "no longer in force".
+const universalTerminal = {
+  recovered_without_payout: { label: "RELEASED", plain: /recovery without any payout/i },
+  cancelled_unpaid: { label: "CANCELLED", plain: /cancelled before its fee settled/i },
+};
+for (const [ledgerState, expected] of Object.entries(universalTerminal)) {
+  const view = buildReceiptView({
+    ok: true,
+    receiptId: `ppc-${ledgerState}`,
+    state: ledgerState,
+    receipt: { covenant: { coverageCapUSDT: "0.5" }, target: { agentName: "GlassDesk", agentId: "3465" }, servicePayment: {} },
+  });
+  assert.equal(view.stateLabel, expected.label, `${ledgerState} must have a presentation`);
+  assert.doesNotMatch(view.plain, /no longer in force/i, `${ledgerState} must be explained, not dismissed`);
+  assert.doesNotMatch(view.plain, /delivered within the agreed deadline/i, `${ledgerState} is not a delivery claim`);
+  assert.match(view.plain, expected.plain);
+  assert.ok(
+    !view.values.some(([label]) => label === "Maximum payout"),
+    `${ledgerState} must not quote a payable amount`,
+  );
+}
+
+// A blank or whitespace-only submission must retire the previous receipt rather
+// than leave it beside an empty input.
+const blankGuard = await readFile(new URL("../web/receipt.js", import.meta.url), "utf8");
+const blankBranch = blankGuard.match(/if \(!receiptId\) \{[\s\S]*?\n    \}/)?.[0] || "";
+assert.ok(blankBranch, "the blank-input branch must exist");
+assert.match(blankBranch, /clearRenderedReceipt\(\)/, "a blank submission must retire the displayed receipt");
+
+// Example links must not assert more than the referenced receipt can support.
+const examplesHtml = await readFile(new URL("../web/receipt.html", import.meta.url), "utf8");
+assert.doesNotMatch(
+  examplesHtml,
+  /ppc-d99d7f72895d70ab"[^>]*>released after on-time delivery/,
+  "that receipt was released by completion status, which does not establish on-time delivery",
+);
+for (const id of ["ppc-affca246b1cf8c9b", "ppc-d99d7f72895d70ab", "ppc-bd38c81112102af0"]) {
+  assert.ok(examplesHtml.includes(`data-example="${id}"`), `${id} must be offered as a live example`);
+}
+
 // Overlapping lookups must not cross-render. A slow first request that resolves
 // after a second one was started would otherwise paint the wrong receipt's
 // lifecycle beside the newer id still shown in the input.

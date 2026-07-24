@@ -25,6 +25,12 @@ const STATE_PRESENTATION = Object.freeze({
   paid: { label: "PAID OUT", headline: "The buyer was paid on X Layer." },
   expired: { label: "EXPIRED", headline: "Coverage ended without a claim." },
   cancelled: { label: "CANCELLED", headline: "Coverage was cancelled before it started." },
+  // Persisted by the v0.4 universal reconciler and forwarded by
+  // /api/coverage-status, so they need presentations here too. Without them the
+  // page shows a raw internal label and calls a resolved covenant "no longer in
+  // force" rather than explaining what actually happened.
+  recovered_without_payout: { label: "RELEASED", headline: "Ended without a payout." },
+  cancelled_unpaid: { label: "CANCELLED", headline: "Cancelled before the fee settled." },
 });
 
 function usdt(atomic, decimals = 6) {
@@ -77,6 +83,9 @@ const NON_PAYABLE_STATES = new Set([
   "pending",
   "cancelled",
   "cancelled_unpaid",
+  // Resolved through recovery with nothing paid to the buyer, so quoting a
+  // maximum payout would imply a claim that can no longer occur.
+  "recovered_without_payout",
 ]);
 
 export function buildReceiptView(payload, options = {}) {
@@ -176,6 +185,10 @@ export function buildReceiptView(payload, options = {}) {
     plain = `The coverage fee has settled and this receipt is issued. Its deadline starts when the funded request reaches ${providerName}, so cover is not counting down yet.`;
   } else if (state === "pending") {
     plain = "This coverage was reserved but its fee has not settled yet, so no cover is in force and no receipt has been finalised.";
+  } else if (state === "recovered_without_payout") {
+    plain = "This covenant was resolved through recovery without any payout to the buyer, and its reserved liability was released. That is not a statement that the service was delivered on time.";
+  } else if (state === "cancelled_unpaid") {
+    plain = "This coverage was cancelled before its fee settled, so no cover ever took effect and nothing is owed. Any authorised fee is refundable to the buyer.";
   } else {
     plain = "This receipt is no longer in force.";
   }
@@ -339,7 +352,14 @@ if (typeof document !== "undefined") {
   const sequencer = createLookupSequencer();
 
   const run = async (receiptId) => {
-    if (!receiptId) return;
+    // A whitespace-only submission passes the HTML required check and trims to
+    // empty here. Retiring the panel first stops the previous receipt sitting
+    // on screen beside a now-blank input.
+    if (!receiptId) {
+      clearRenderedReceipt();
+      status.textContent = "Enter a receipt ID to check.";
+      return;
+    }
     const isCurrent = sequencer.begin();
     // Retire the previous result synchronously, before any awaiting, so no
     // stale receipt is ever displayed alongside a newer id in the input.
