@@ -325,6 +325,22 @@ assert.equal(
   "both the success and failure paths must drop superseded responses",
 );
 
+// Superseding a callback is not enough: the previously rendered receipt must be
+// retired synchronously, or it stays on screen for the seconds the new lookup
+// takes while the input already shows a different id.
+assert.match(wiring, /function clearRenderedReceipt\(\)/, "the page must be able to retire a rendered receipt");
+const runBody = wiring.match(/const run = async \(receiptId\) => \{[\s\S]*?\n  \};/)?.[0] || "";
+assert.ok(runBody, "the lookup routine must be present");
+const clearIndex = runBody.indexOf("clearRenderedReceipt()");
+const awaitIndex = runBody.indexOf("await lookup(");
+assert.ok(clearIndex > -1, "each lookup must retire the previous result");
+assert.ok(awaitIndex > -1, "each lookup must await the receipt request");
+assert.ok(
+  clearIndex < awaitIndex,
+  "the previous receipt must be retired before awaiting, not after the response returns",
+);
+assert.match(wiring, /clearRenderedReceipt[\s\S]{0,400}result\.hidden = true/, "retiring must hide the panel");
+
 // Every element the script reaches for must exist in the markup. A renamed id
 // would otherwise fail only in a browser, which nothing else here exercises.
 const script = await readFile(new URL("../web/receipt.js", import.meta.url), "utf8");

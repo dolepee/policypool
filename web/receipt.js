@@ -266,6 +266,24 @@ async function lookup(receiptId) {
   return { body, httpStatus: response.status };
 }
 
+// Retiring the panel is separate from superseding a callback. Without this, an
+// already-rendered receipt stays on screen for the seconds a new chain-backed
+// lookup takes, so the input shows one id while the page presents another's
+// lifecycle and evidence.
+function clearRenderedReceipt() {
+  const result = document.getElementById("receipt-result");
+  if (!result) return;
+  result.hidden = true;
+  document.getElementById("receipt-state-label").textContent = "";
+  document.getElementById("receipt-headline").textContent = "";
+  document.getElementById("receipt-plain").textContent = "";
+  document.getElementById("receipt-values").replaceChildren();
+  document.getElementById("receipt-evidence").replaceChildren();
+  const disclosure = document.getElementById("receipt-disclosure");
+  disclosure.textContent = "";
+  disclosure.hidden = true;
+}
+
 function render(view) {
   const result = document.getElementById("receipt-result");
   document.getElementById("receipt-state-label").textContent = view.stateLabel;
@@ -323,6 +341,9 @@ if (typeof document !== "undefined") {
   const run = async (receiptId) => {
     if (!receiptId) return;
     const isCurrent = sequencer.begin();
+    // Retire the previous result synchronously, before any awaiting, so no
+    // stale receipt is ever displayed alongside a newer id in the input.
+    clearRenderedReceipt();
     status.textContent = "Reading the public receipt…";
     try {
       const { body, httpStatus } = await lookup(receiptId);
