@@ -351,22 +351,26 @@ if (typeof document !== "undefined") {
 
   const sequencer = createLookupSequencer();
 
+  // One invariant governs this panel: it may only ever show a receipt that a
+  // still-current lookup returned for the id presently in the input. Enforcing
+  // that branch by branch produced a run of near-identical defects, each a path
+  // that met one half of it. Every entry point now resets both the generation
+  // and the panel here, before any branching, so no future path can satisfy one
+  // obligation and quietly miss the other.
+  const beginLookup = () => {
+    const isCurrent = sequencer.begin();
+    clearRenderedReceipt();
+    return isCurrent;
+  };
+
   const run = async (receiptId) => {
+    const isCurrent = beginLookup();
     // A whitespace-only submission passes the HTML required check and trims to
-    // empty here. Retiring the panel first stops the previous receipt sitting
-    // on screen beside a now-blank input.
+    // empty here; it is answered after the reset above, never before it.
     if (!receiptId) {
-      // Advance the generation as well as clearing, or a lookup still in flight
-      // remains current and renders its receipt beside the now-empty input.
-      sequencer.begin();
-      clearRenderedReceipt();
       status.textContent = "Enter a receipt ID to check.";
       return;
     }
-    const isCurrent = sequencer.begin();
-    // Retire the previous result synchronously, before any awaiting, so no
-    // stale receipt is ever displayed alongside a newer id in the input.
-    clearRenderedReceipt();
     status.textContent = "Reading the public receipt…";
     try {
       const { body, httpStatus } = await lookup(receiptId);

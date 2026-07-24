@@ -324,11 +324,35 @@ for (const [ledgerState, expected] of Object.entries(universalTerminal)) {
 const blankGuard = await readFile(new URL("../web/receipt.js", import.meta.url), "utf8");
 const blankBranch = blankGuard.match(/if \(!receiptId\) \{[\s\S]*?\n    \}/)?.[0] || "";
 assert.ok(blankBranch, "the blank-input branch must exist");
-assert.match(blankBranch, /clearRenderedReceipt\(\)/, "a blank submission must retire the displayed receipt");
+
+// The panel invariant is enforced at one choke point rather than per branch,
+// because enforcing it per branch produced four near-identical defects in a
+// row, each a path that met one half of it. Assert the structure, so a future
+// branch cannot reintroduce the split.
 assert.match(
-  blankBranch,
-  /sequencer\.begin\(\)/,
-  "a blank submission must also advance the generation, or a lookup still in flight renders afterwards",
+  blankGuard,
+  /const beginLookup = \(\) => \{\s*const isCurrent = sequencer\.begin\(\);\s*clearRenderedReceipt\(\);/,
+  "generation and panel must be reset together in one helper",
+);
+const runRoutine = blankGuard.match(/const run = async \(receiptId\) => \{[\s\S]*?\n  \};/)?.[0] || "";
+assert.match(
+  runRoutine,
+  /^\s*const run = async \(receiptId\) => \{\s*const isCurrent = beginLookup\(\);/,
+  "every lookup must reset through beginLookup before any branching",
+);
+assert.ok(
+  runRoutine.indexOf("beginLookup()") < runRoutine.indexOf("if (!receiptId)"),
+  "the reset must precede the blank-input check, not follow it",
+);
+assert.equal(
+  (runRoutine.match(/sequencer\.begin\(\)/g) || []).length,
+  0,
+  "no branch may advance the generation on its own; that split is the defect",
+);
+assert.equal(
+  (runRoutine.match(/clearRenderedReceipt\(\)/g) || []).length,
+  0,
+  "no branch may clear the panel on its own; that split is the defect",
 );
 
 // The sequencer must genuinely invalidate an outstanding lookup, not merely
@@ -386,13 +410,13 @@ assert.equal(
 assert.match(wiring, /function clearRenderedReceipt\(\)/, "the page must be able to retire a rendered receipt");
 const runBody = wiring.match(/const run = async \(receiptId\) => \{[\s\S]*?\n  \};/)?.[0] || "";
 assert.ok(runBody, "the lookup routine must be present");
-const clearIndex = runBody.indexOf("clearRenderedReceipt()");
+const resetIndex = runBody.indexOf("beginLookup()");
 const awaitIndex = runBody.indexOf("await lookup(");
-assert.ok(clearIndex > -1, "each lookup must retire the previous result");
+assert.ok(resetIndex > -1, "each lookup must reset through the shared choke point");
 assert.ok(awaitIndex > -1, "each lookup must await the receipt request");
 assert.ok(
-  clearIndex < awaitIndex,
-  "the previous receipt must be retired before awaiting, not after the response returns",
+  resetIndex < awaitIndex,
+  "the reset must happen before awaiting, not after the response returns",
 );
 assert.match(wiring, /clearRenderedReceipt[\s\S]{0,400}result\.hidden = true/, "retiring must hide the panel");
 
