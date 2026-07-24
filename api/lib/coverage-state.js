@@ -22,6 +22,7 @@ export const COVERAGE_STATES = Object.freeze({
   PAID_OUT: "PAID_OUT",
   COVERAGE_EXPIRED: "COVERAGE_EXPIRED",
   COVERAGE_CANCELLED: "COVERAGE_CANCELLED",
+  RECONCILIATION_PENDING: "RECONCILIATION_PENDING",
   COVERAGE_STATE_UNRECOGNISED: "COVERAGE_STATE_UNRECOGNISED",
   REQUEST_FAILED: "REQUEST_FAILED",
 });
@@ -32,7 +33,11 @@ const RECEIPT_STATE_TO_COVERAGE_STATE = Object.freeze({
   active: COVERAGE_STATES.COVERAGE_ACTIVE,
   released: COVERAGE_STATES.COVERAGE_RELEASED,
   payout_due: COVERAGE_STATES.PAYOUT_DUE,
-  compensation_required: COVERAGE_STATES.PAYOUT_DUE,
+  // Not a payout. `compensation_required` is the cleanup state written when
+  // issuance aborts, its outcome is unconfirmed, or the fee never settled, so
+  // the fee may not have been captured and no coverage may exist. Reporting it
+  // as PAYOUT_DUE would tell a buyer money is owed for coverage never issued.
+  compensation_required: COVERAGE_STATES.RECONCILIATION_PENDING,
   paid: COVERAGE_STATES.PAID_OUT,
   expired: COVERAGE_STATES.COVERAGE_EXPIRED,
   // The v0.4 universal reconciler persists these terminal outcomes. They must
@@ -55,6 +60,7 @@ const NEXT_ACTION_BY_STATE = Object.freeze({
   [COVERAGE_STATES.PAID_OUT]: "NONE_PAYOUT_COMPLETE",
   [COVERAGE_STATES.COVERAGE_EXPIRED]: "NONE_COVERAGE_ENDED",
   [COVERAGE_STATES.COVERAGE_CANCELLED]: "NONE_COVERAGE_CANCELLED",
+  [COVERAGE_STATES.RECONCILIATION_PENDING]: "AWAIT_RECONCILIATION",
   [COVERAGE_STATES.COVERAGE_STATE_UNRECOGNISED]: "READ_THE_RECEIPT_DIRECTLY",
   [COVERAGE_STATES.REQUEST_FAILED]: "SEE_ERROR_NEXT_ACTION",
 });
@@ -277,6 +283,13 @@ export function describeFailure(rawCode) {
   return { ...(contract || {}), ...(refinement || {}) };
 }
 
+// Several failure paths reserve a receipt id before any receipt exists, so a
+// bare id is not evidence of issuance. Require the receipt document itself.
+function hasIssuedReceipt(payload) {
+  const receipt = payload?.receipt;
+  return Boolean(receipt && typeof receipt === "object" && !Array.isArray(receipt));
+}
+
 function deriveState(payload) {
   const receiptState = payload?.state ?? payload?.receipt?.state;
   // Any string state at all, including blank, is answered from this branch. A
@@ -295,8 +308,7 @@ function deriveState(payload) {
   }
   if (payload?.ok === false) return COVERAGE_STATES.REQUEST_FAILED;
   if (payload?.eligible === false) return COVERAGE_STATES.NOT_COVERABLE;
-  const hasReceipt = Boolean(payload?.receiptId || payload?.receipt?.receiptId);
-  if (payload?.charged === true || hasReceipt) return COVERAGE_STATES.COVERAGE_ACTIVE;
+  if (payload?.charged === true || hasIssuedReceipt(payload)) return COVERAGE_STATES.COVERAGE_ACTIVE;
   if (payload?.eligible === true) return COVERAGE_STATES.COVERABLE_NOT_PURCHASED;
   return null;
 }
@@ -308,7 +320,7 @@ export function enrichCoverageResponse(payload, options = {}) {
   if (!state) return payload;
 
   const enriched = { ...payload };
-  const hasReceipt = Boolean(payload.receiptId || payload.receipt?.receiptId);
+  const hasReceipt = hasIssuedReceipt(payload);
 
   setIfAbsent(enriched, "coverageState", state);
   setIfAbsent(enriched, "covered", IN_FORCE_STATES.has(state));

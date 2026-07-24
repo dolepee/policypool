@@ -87,6 +87,43 @@ for (const unknown of ["some_future_state", "constructor", "toString", "   "]) {
   assert.notEqual(view.coverageState, COVERAGE_STATES.COVERAGE_ACTIVE, `state "${unknown}" must not be active`);
 }
 
+// `compensation_required` is the cleanup state for aborted, unconfirmed, or
+// unsettled issuance. It must never claim a payout is owed for coverage that
+// may never have existed.
+const compensation = enrich({ ok: true, receiptId: "ppc-compensation", state: "compensation_required" });
+assert.equal(compensation.coverageState, COVERAGE_STATES.RECONCILIATION_PENDING);
+assert.equal(compensation.covered, false, "an unresolved cleanup record is not coverage in force");
+assert.equal(compensation.paymentMade, false, "the fee may never have been captured");
+assert.notEqual(compensation.nextAction, "AWAIT_PAYOUT");
+
+// A reserved receipt id is not an issued receipt. Several failure paths return
+// one before any receipt document exists.
+const reservedId = enrich({
+  ok: false,
+  error: "payment_settled_receipt_pending_reconciliation",
+  receiptId: "ppc-reserved",
+  charged: false,
+});
+assert.equal(reservedId.receiptIssued, false, "a bare receipt id must not report an issued receipt");
+assert.equal(reservedId.covered, false);
+
+// The paid endpoint carries its ledger state, so replays and relay covenants
+// awaiting a clock are not described as coverage in force.
+const relayPending = enrich({ ok: true, state: "pending_start", receipt: { receiptId: "ppc-relay" } });
+assert.equal(relayPending.coverageState, COVERAGE_STATES.PAYMENT_PENDING);
+assert.equal(relayPending.covered, false, "a relay covenant awaiting its clock is not yet in force");
+
+for (const [ledgerState, expected] of [["released", COVERAGE_STATES.COVERAGE_RELEASED], ["paid", COVERAGE_STATES.PAID_OUT]]) {
+  const replay = enrich({ ok: true, state: ledgerState, idempotentReplay: true, receipt: { receiptId: "ppc-replay" } });
+  assert.equal(replay.coverageState, expected, `a replay of a ${ledgerState} record must report ${expected}`);
+  assert.equal(replay.covered, false, `a replayed ${ledgerState} record is terminal, not in force`);
+}
+
+// A genuinely fresh issuance still reports active.
+const freshIssue = enrich({ ok: true, state: "active", receipt: { receiptId: "ppc-fresh" } });
+assert.equal(freshIssue.coverageState, COVERAGE_STATES.COVERAGE_ACTIVE);
+assert.equal(freshIssue.covered, true);
+
 // Invariant: across every state this module can produce from a ledger value,
 // only an active covenant or an unpaid obligation is ever "in force".
 const inForce = new Set();

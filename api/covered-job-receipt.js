@@ -513,6 +513,11 @@ function respondWithRecord(res, record, relayGrantService = null) {
     service: "Covered Job Receipt",
     mode: "api_service",
     idempotentReplay: Boolean(record.replayed),
+    // The durable ledger state travels with the response so the lifecycle
+    // fields describe what this record actually is. Without it, a relay
+    // covenant still awaiting its clock, or a replay of an already released or
+    // paid record, would be reported as coverage currently in force.
+    ...(record.state ? { state: record.state } : {}),
     receipt,
   });
 }
