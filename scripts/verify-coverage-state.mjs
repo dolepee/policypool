@@ -159,6 +159,13 @@ for (const shape of [
   assert.equal(view.covered, false, "a payload without a ledger state must never claim cover");
 }
 
+// The preflight discovery reply is a real lifecycle stage, not an absence of
+// one, so it must carry an explicit state rather than silently omitting it.
+const discovery = enrich({ ok: true, service: "PolicyPool Coverage Preflight", charged: false });
+assert.equal(discovery.coverageState, COVERAGE_STATES.NOT_CHECKED);
+assert.equal(discovery.covered, false);
+assert.equal(discovery.nextAction, "RUN_ELIGIBILITY_CHECK");
+
 // Transient infrastructure and throttling failures must stay retryable even
 // when the specific code is absent from the contract, or an agent will
 // permanently abandon a valid request during a 503 or a 429.
@@ -245,6 +252,11 @@ assert.equal(unknown.retryable, false);
 // Non-object and unrecognised payloads pass through untouched.
 assert.equal(enrich(null), null);
 assert.equal(enrich("string"), "string");
-assert.deepEqual(enrich({ ok: true }), { ok: true }, "payloads with no lifecycle signal are untouched");
+// A bare success carries no eligibility verdict, state, or receipt, so it is
+// the discovery stage rather than an unlabelled response.
+const bareOk = enrich({ ok: true });
+assert.equal(bareOk.ok, true, "the original payload is preserved");
+assert.equal(bareOk.coverageState, COVERAGE_STATES.NOT_CHECKED);
+assert.equal(bareOk.covered, false);
 
 console.log("coverage state contract verified");

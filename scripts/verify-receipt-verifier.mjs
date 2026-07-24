@@ -38,7 +38,7 @@ assert.ok(
 const paid = buildReceiptView(fixtures["ppc-bd38c81112102af0"]);
 assert.equal(paid.state, "paid");
 assert.equal(paid.stateLabel, "PAID OUT");
-assert.match(paid.plain, /paid the buyer 0\.5 USD₮0/, "a paid receipt must state the amount paid");
+assert.match(paid.plain, /was paid 0\.5 USD₮0/, "a paid receipt must state the amount paid");
 assert.ok(
   paid.evidence.some((item) => item.label === "Payout to buyer"),
   "a paid receipt must link the payout transaction",
@@ -170,6 +170,41 @@ assert.ok(
   payableCap.values.some(([label, value]) => label === "Maximum payout" && value === "0.5 USD₮0"),
   "active coverage must still state its maximum payout",
 );
+
+// v0.4 covenants settle from the provider's own first-loss bond, not the shared
+// reserve, so the funding source must be read from the receipt.
+const paidPayout = {
+  amountAtomic: "500000",
+  transaction: `0x${"ab".repeat(32)}`,
+  verifiedAt: "2026-07-20T00:00:00.000Z",
+};
+const providerFundedPayout = buildReceiptView({
+  ok: true,
+  receiptId: "ppc-provider-funded",
+  state: "paid",
+  payout: paidPayout,
+  receipt: {
+    covenant: { coverageCapUSDT: "0.5" },
+    target: {},
+    servicePayment: {},
+    providerBond: { custody: "provider_first_loss_bond_vault", sharedReserveUsed: false },
+  },
+});
+assert.match(providerFundedPayout.plain, /provider's own first-loss bond/i);
+assert.doesNotMatch(
+  providerFundedPayout.plain,
+  /from the PolicyPool reserve/i,
+  "a provider-funded payout must not be attributed to the shared reserve",
+);
+
+const reserveFundedPayout = buildReceiptView({
+  ok: true,
+  receiptId: "ppc-reserve-funded",
+  state: "paid",
+  payout: paidPayout,
+  receipt: { covenant: { coverageCapUSDT: "0.5" }, target: {}, servicePayment: {}, providerBond: null },
+});
+assert.match(reserveFundedPayout.plain, /from the PolicyPool reserve/i);
 
 // A zero-recovery settlement stores a payout object with amountAtomic "0" and
 // its settlement transaction. That is not money paid to the buyer.

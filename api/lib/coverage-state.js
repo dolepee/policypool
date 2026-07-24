@@ -360,7 +360,14 @@ function deriveState(payload) {
   if (hasIssuedReceipt(payload) || payload?.charged === true) {
     return COVERAGE_STATES.COVERAGE_STATE_UNRECOGNISED;
   }
+  // A successful response carrying no eligibility verdict, no ledger state and
+  // no receipt is a discovery or service-description reply. Nothing has been
+  // checked yet, which is a real stage of the lifecycle rather than an absence
+  // of one, so it is reported instead of silently omitted.
+  // Checked before the discovery fallback below, which would otherwise shadow
+  // every "coverable" preflight result and report it as unchecked.
   if (payload?.eligible === true) return COVERAGE_STATES.COVERABLE_NOT_PURCHASED;
+  if (payload?.ok === true) return COVERAGE_STATES.NOT_CHECKED;
   return null;
 }
 

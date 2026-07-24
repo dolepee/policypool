@@ -136,7 +136,15 @@ export function buildReceiptView(payload, options = {}) {
   // may upgrade it to a delivery claim.
   let headline = presentation.headline;
   if (state === "paid" && payoutUSDT) {
-    plain = `The covered job missed its objective deadline, so PolicyPool paid the buyer ${payoutUSDT} USD₮0 from the reserve. The payout transaction below is the proof.`;
+    // v0.4 covenants settle from the provider's own first-loss bond, not the
+    // shared reserve, so the funding source is read from the receipt rather
+    // than assumed.
+    const providerFunded = Boolean(receipt.providerBond)
+      && receipt.providerBond.sharedReserveUsed !== true;
+    const source = providerFunded
+      ? "from the provider's own first-loss bond"
+      : "from the PolicyPool reserve";
+    plain = `The covered job missed its objective deadline, so the buyer was paid ${payoutUSDT} USD₮0 ${source}. The payout transaction below is the proof.`;
   } else if (state === "released") {
     // Released is also reached by expiry of an unstarted relay clock and by
     // recovery without payout, where nothing was delivered. Only the recorded
