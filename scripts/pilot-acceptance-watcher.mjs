@@ -168,12 +168,15 @@ async function watchNext(args) {
   const targetAgent = String(args.targetAgent || "Foreman#4348");
   if (!/^0x[a-f0-9]{40}$/.test(buyer)) throw new Error("--buyer must be an address");
   if (!jobDescription) throw new Error("--job-description is required");
+  if (!/^\d+(\.\d{1,6})?$/.test(cap)) {
+    throw new Error(`--cap must be a USD₮0 amount with at most six decimals, got ${cap}`);
+  }
   if (houseWallets().has(buyer)) {
     throw new Error("--buyer is the PolicyPool owner wallet; this pilot exists to pay someone else");
   }
   const startBlock = args.fromBlock && args.fromBlock !== true
     ? BigInt(String(args.fromBlock))
-    : await headBlock();
+    : (await headBlock()) + 1n;
   if (startBlock < 0n) throw new Error("--from-block must be a nonnegative integer");
 
   console.log(`PRE-ARMED at block ${startBlock}`);

@@ -114,6 +114,18 @@ assert.deepEqual(created, [{
   creationBlock: 17,
   logIndex: 1,
 }]);
+
+const watcherSource = await readFile(new URL("./pilot-acceptance-watcher.mjs", import.meta.url), "utf8");
+assert.match(
+  watcherSource,
+  /: \(await headBlock\(\)\) \+ 1n;/,
+  "watch-next must exclude every task already present at its startup head",
+);
+assert.match(
+  watcherSource,
+  /async function watchNext[\s\S]*?if \(!\/\^\\d\+\(\\\.\\d\{1,6\}\)\?\$\/\.test\(cap\)\)/,
+  "watch-next must reject malformed caps before it announces that it is armed",
+);
 assert.ok(configured.size > 0, "the exclusion set must not be empty, or every buyer looks independent");
 for (const address of configured) {
   assert.match(address, /^0x[a-f0-9]{40}$/, "excluded wallets must be normalised addresses");
