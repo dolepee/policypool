@@ -255,10 +255,55 @@ const legacyPastDeadlineTerminalJob = await fetchStatus({
   targetOrder: { jobId: `0x${"ab".repeat(32)}` },
 }, { jobStatus: 6 });
 assert.equal(legacyPastDeadlineTerminalJob.reconciliation.clockMode, "verified_acceptance");
+// observeOkxA2AClock separates a terminal job that resolved after the deadline
+// (payout due) from one that resolved before it (released) using the job's own
+// resolution timestamp, which this endpoint does not read. Reporting false here
+// would deny a claim the reconciler is about to allow, so it must report that
+// it cannot tell rather than guessing.
 assert.equal(
   legacyPastDeadlineTerminalJob.reconciliation.payoutDueCandidate,
-  false,
-  "a verified-acceptance covenant still requires an accepted job",
+  null,
+  "a terminal job's candidacy turns on a resolution timestamp this endpoint has no access to",
+);
+
+for (const jobStatus of [2, 3, 4, 5, 6, 7, 8, 9]) {
+  const terminal = await fetchStatus({
+    receiptId: `ppc-terminal-${jobStatus}`,
+    state: "active",
+    liabilityAtomic: "500000",
+    receipt: {
+      version: "0.4.0",
+      covenant: { deadline: PAST_DEADLINE },
+      target: { clockMode: "verified_acceptance" },
+    },
+    targetOrder: { jobId: `0x${"ab".repeat(32)}` },
+  }, { jobStatus });
+  assert.equal(
+    terminal.reconciliation.payoutDueCandidate,
+    null,
+    `status ${jobStatus} is terminal, so candidacy cannot be decided from status alone`,
+  );
+}
+
+// A job that was never accepted is not a candidate, and that is knowable.
+const neverAccepted = await fetchStatus({
+  receiptId: "ppc-never-accepted",
+  state: "active",
+  liabilityAtomic: "500000",
+  receipt: {
+    version: "0.4.0",
+    covenant: { deadline: PAST_DEADLINE },
+    target: { clockMode: "verified_acceptance" },
+  },
+  targetOrder: { jobId: `0x${"ab".repeat(32)}` },
+}, { jobStatus: 0 });
+assert.equal(neverAccepted.reconciliation.payoutDueCandidate, false);
+
+// The indeterminate case must be explained rather than left as a bare null.
+assert.match(
+  legacyPastDeadlineTerminalJob.reconciliation.note,
+  /null payoutDueCandidate/,
+  "a null candidacy must be documented in the response itself",
 );
 
 // A record whose history genuinely never recorded a deadline must report none

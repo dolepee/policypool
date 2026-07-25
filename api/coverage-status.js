@@ -28,6 +28,28 @@ function reconciledDeadline(record) {
   return null;
 }
 
+// Statuses that end a marketplace job. observeOkxA2AClock decides between
+// release and payout-due for these by comparing the job's own resolution
+// timestamp against the covenant deadline, which this endpoint does not read.
+const TERMINAL_JOB_STATUSES = new Set([2, 3, 4, 5, 6, 7, 8, 9]);
+
+// A hint, never a verdict: the reconciler decides. Its one obligation is to
+// avoid asserting "not a candidate" where it cannot actually tell.
+function candidacy({ record, clockMode, deadlinePassed, jobStatus }) {
+  if (record.state !== "active") return false;
+  // A relay covenant is clocked by PolicyPool's own provider relay, and
+  // observeRelayClock marks it payout due purely on non-delivery by that
+  // deadline without ever reading marketplace job status.
+  if (clockMode === "policypool_relay") return deadlinePassed;
+  if (jobStatus === 1) return deadlinePassed;
+  // A terminal job resolved after the deadline is payout due, and one resolved
+  // before it is released. Only the marketplace's resolution timestamp
+  // separates them, so reporting false here would deny a claim the reconciler
+  // is about to allow. Report that it cannot be determined instead.
+  if (TERMINAL_JOB_STATUSES.has(Number(jobStatus))) return null;
+  return false;
+}
+
 export function createCoverageStatusHandler(dependencies = {}) {
   let ledger = dependencies.ledger;
   let chain = dependencies.chain;
@@ -61,9 +83,7 @@ export function createCoverageStatusHandler(dependencies = {}) {
       // legacy accepted-job predicate to it would report a covenant the
       // reconciler is about to pay out as not a candidate.
       const clockMode = record.receipt?.target?.clockMode || "verified_acceptance";
-      const payoutDueCandidate = record.state === "active"
-        && deadlinePassed
-        && (clockMode === "policypool_relay" || jobStatus === 1);
+      const payoutDueCandidate = candidacy({ record, clockMode, deadlinePassed, jobStatus });
       // v0.4 transitions record their reason and evidence in
       // universalReconciliation and never populate record.release, so a
       // universally released covenant would otherwise report release: null and
@@ -95,7 +115,7 @@ export function createCoverageStatusHandler(dependencies = {}) {
           deadlinePassed,
           payoutDueCandidate,
           clockMode,
-          note: "State changes only after the reconciler reads the covenant's own clock and updates the durable ledger.",
+          note: "State changes only after the reconciler reads the covenant's own clock and updates the durable ledger. A null payoutDueCandidate means this endpoint cannot decide: the job is terminal, and whether it resolved before or after the deadline is settled by the marketplace's resolution timestamp, which this endpoint does not read.",
         },
         payout: record.payout || null,
         release,
