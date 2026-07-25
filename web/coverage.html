@@ -60,6 +60,12 @@
         <div class="site-shell desk-layout">
           <form class="coverage-form-card" id="coverage-preflight-form" novalidate>
             <div class="card-heading"><span>01</span><div><p>Coverage request</p><h2>Identify the accepted job.</h2></div></div>
+            <div class="evidence-notice" role="note">
+              <p><b>Since 25 July 2026 this preflight cannot quote from a public task reference, in either form.</b> A task URL and a bare public task ID resolve to the same page, and OKX.AI stopped publishing the acceptance timeline and the on-chain task ID there, with no notice and no API replacement. Those two fields were what bound a task to its on-chain job.</p>
+              <p>Nothing already covered is affected. Every PolicyPool claim is bound to X Layer rather than to a marketplace page, so existing receipts stay independently replayable. This form fails closed and takes no payment.</p>
+              <p>Coverage can still be bought by sending resolved on-chain evidence straight to <code>/api/covered-job-receipt</code>, which never reads the task page and performs the same full verification. That request needs <code>targetAgent</code>, <code>jobDescription</code>, <code>targetJobId</code>, <code>targetCreationTxHash</code>, and <code>targetAcceptanceTxHash</code>; <code>requestedCoverageUSDT</code> is optional and defaults.</p>
+              <p><a href="https://github.com/dolepee/policypool#why-evidence-binds-to-chain">Why PolicyPool binds evidence to chain</a></p>
+            </div>
             <div class="request-guide" aria-label="Required coverage request inputs"><span>Bring</span><b>Accepted order</b><i>+</i><b>Provider policy</b><i>+</i><b>Requested cap</b></div>
             <div class="field-grid">
               <div class="field-block">

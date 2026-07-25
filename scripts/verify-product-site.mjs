@@ -87,6 +87,67 @@ assert.match(
 assert.match(coverage, /Another OKX\.AI service/, "coverage form must accept demand for an unenrolled service");
 assert.match(coverage, /name="targetServiceId"/, "coverage form must bind dynamic policies to a service id");
 
+// A public task URL cannot be quoted since OKX withdrew the fields binding it to
+// an on-chain job. A visitor must not be left thinking the service is broken,
+// and a notice that only says "unavailable" is barely better. It has to name the
+// path that still works, itself, rather than promise one the page never shows.
+// Extract the notice before asserting on it. Searching the whole page would let
+// the notice drop a required field while an unrelated mention elsewhere keeps
+// the gate green, which is the failure mode these checks exist to prevent.
+const evidenceNotice = coverage.match(/<div class="evidence-notice"[\s\S]*?<\/div>/)?.[0] || "";
+assert.ok(evidenceNotice, "coverage form must disclose the withdrawn public task evidence");
+// Every field the paid endpoint actually requires, verified against production:
+// omitting targetAgent returns target_agent_required and omitting jobDescription
+// returns job_description_required, so a notice listing only the three evidence
+// hashes sends a visitor into a rejection.
+for (const field of [
+  "targetAgent",
+  "jobDescription",
+  "targetJobId",
+  "targetCreationTxHash",
+  "targetAcceptanceTxHash",
+]) {
+  assert.match(evidenceNotice, new RegExp(`<code>${field}</code>`), `the notice must name ${field} as a required input`);
+}
+assert.match(evidenceNotice, /covered-job-receipt/, "the notice must name the endpoint that still takes direct evidence");
+// A bare public task ID resolves to the same withdrawn page as a URL, and the
+// form still offers both, so the outage disclosure must cover both forms.
+assert.match(evidenceNotice, /in either form/, "the notice must cover public task IDs as well as URLs");
+
+// The same disclosure lives in three places and has now been narrowed to "URL"
+// twice. parseOkxTaskReference normalises a bare task id and a URL to the same
+// withdrawn page, so any surface that scopes the outage to URLs alone sends a
+// reader into a preflight guaranteed to fail.
+const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+
+// Scope each assertion to the passage it actually governs. A negative on the
+// whole file only rejects one phrasing, and a positive on the whole file is
+// satisfied by the withdrawal record further down, so neither constrains the
+// coverage loop at all.
+const coverageLoopStep = readme.match(/^2\. The free preflight[^\n]*$/m)?.[0] || "";
+assert.ok(coverageLoopStep, "the coverage loop must still document the preflight step");
+assert.match(
+  coverageLoopStep,
+  /entire public-task-reference path[^\n]*unavailable/,
+  "coverage loop step 2 must scope the outage to the whole public-reference path",
+);
+assert.match(
+  coverageLoopStep,
+  /bare task id/,
+  "coverage loop step 2 must say a bare task id is unavailable too, not only a URL",
+);
+
+const withdrawalRecord = readme.match(/^## Why Evidence Binds To Chain$[\s\S]*?(?=^## )/m)?.[0] || "";
+assert.ok(withdrawalRecord, "the withdrawal record must stay in the README");
+assert.match(
+  withdrawalRecord,
+  /public task reference in either form/,
+  "the withdrawal record must state that a bare task id is equally unavailable",
+);
+for (const field of ["targetAgent", "jobDescription", "targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash"]) {
+  assert.match(withdrawalRecord, new RegExp(`\`${field}\``), `the README fallback must name ${field}`);
+}
+
 for (const [file, route] of subordinatePages) {
   const html = await readFile(new URL(`../web/${file}`, import.meta.url), "utf8");
   assert.equal((html.match(/<h1\b/g) || []).length, 1, `${file} must have one h1`);

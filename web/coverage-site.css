@@ -213,6 +213,11 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
 .card-heading > span { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid currentColor; border-radius: 50%; font-family: var(--mono); font-size: 10px; }
 .card-heading p { margin: 0 0 2px; font-family: var(--mono); font-size: 9px; text-transform: uppercase; }
 .card-heading h2 { margin: 0; font-family: var(--serif); font-size: 28px; font-weight: 500; }
+.evidence-notice { padding: 18px 26px; border-bottom: 1px solid var(--line); border-left: 3px solid var(--coral); background: var(--paper-deep); }
+.evidence-notice p { margin: 0 0 9px; color: var(--ink-soft); font-size: 13px; line-height: 1.55; }
+.evidence-notice p:last-child { margin-bottom: 0; }
+.evidence-notice b { color: var(--ink); }
+.evidence-notice a { color: var(--blue); }
 .request-guide { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 10px 26px; border-bottom: 1px solid var(--line); background: var(--paper-deep); }
 .request-guide span { margin-right: 4px; color: var(--ink-soft); font-size: 8px; font-weight: 600; text-transform: uppercase; }
 .request-guide b { font-family: var(--sans); font-size: 11px; }
