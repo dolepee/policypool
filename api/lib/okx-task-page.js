@@ -8,6 +8,13 @@ const DEFAULT_STALE_TTL_MS = 30_000;
 const CIRCUIT_FAILURE_THRESHOLD = 3;
 const CIRCUIT_OPEN_MS = 30_000;
 
+// Codes that describe what the page publishes rather than a failed fetch of it,
+// so they resolve identically on every attempt.
+const WITHDRAWN_EVIDENCE_CODES = new Set([
+  "okx_task_timeline_unavailable",
+  "okx_task_onchain_id_unavailable",
+]);
+
 const memoryCache = new Map();
 const productionCircuit = { failures: 0, openUntil: 0 };
 
@@ -204,8 +211,16 @@ export async function fetchOkxTaskPage(reference, {
       runtimeCircuit.openUntil = 0;
       return structuredClone(value);
     } catch (error) {
-      if (error instanceof OkxTaskPageError) lastError = error;
-      else if (error?.name === "AbortError") lastError = new OkxTaskPageError("okx_task_fetch_timeout");
+      if (error instanceof OkxTaskPageError) {
+        lastError = error;
+        // Re-downloading and re-parsing an identical page cannot turn withdrawn
+        // evidence into present evidence, and counting these toward the circuit
+        // would open the breaker after three requests. Every later caller would
+        // then get okx_task_directory_circuit_open instead of the stable
+        // PUBLIC_TASK_EVIDENCE_UNAVAILABLE contract, which is the whole reason
+        // for classifying them. Fail now and leave the circuit untouched.
+        if (WITHDRAWN_EVIDENCE_CODES.has(error.code)) throw error;
+      } else if (error?.name === "AbortError") lastError = new OkxTaskPageError("okx_task_fetch_timeout");
       else lastError = new OkxTaskPageError(
         "okx_task_fetch_failed",
         error instanceof Error ? error.message : String(error),

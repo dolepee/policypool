@@ -367,6 +367,62 @@ assert.equal(
   "okx_task_onchain_id_missing",
 );
 
+// Withdrawn evidence is a property of the page, so it must fail on the first
+// attempt and leave the circuit breaker alone. Retrying re-parses an identical
+// page, and counting these toward the circuit would open it after three
+// requests, replacing the stable PUBLIC_TASK_EVIDENCE_UNAVAILABLE contract with
+// okx_task_directory_circuit_open for every later caller.
+const withdrawnHtml = taskHtmlWith((detail) => {
+  detail.timeline = null;
+  delete detail.acceptCommands;
+});
+const withdrawnCircuit = { failures: 0, openUntil: 0 };
+let withdrawnAttempts = 0;
+const fetchWithdrawn = () => fetchOkxTaskPage(401277, {
+  attempts: 3,
+  cache: new Map(),
+  circuitState: withdrawnCircuit,
+  fetchImpl: async () => {
+    withdrawnAttempts += 1;
+    return new Response(withdrawnHtml, { status: 200, headers: { "content-type": "text/html" } });
+  },
+});
+
+await assert.rejects(fetchWithdrawn(), (error) => error?.code === "okx_task_timeline_unavailable");
+assert.equal(withdrawnAttempts, 1, "a page whose evidence is withdrawn must not be re-fetched");
+assert.equal(withdrawnCircuit.failures, 0, "withdrawn evidence must not count as a circuit failure");
+assert.equal(withdrawnCircuit.openUntil, 0, "withdrawn evidence must not open the circuit");
+
+// Past the circuit threshold, the caller must still receive the classified
+// failure rather than a circuit-open code that hides why coverage was refused.
+// The module opens its circuit after three consecutive failures.
+for (let attempt = 0; attempt < 4; attempt += 1) {
+  await assert.rejects(
+    fetchWithdrawn(),
+    (error) => error?.code === "okx_task_timeline_unavailable",
+    "the public failure contract must stay stable across repeated requests",
+  );
+}
+assert.equal(withdrawnCircuit.openUntil, 0, "repeated withdrawn-evidence requests must leave the circuit closed");
+
+// A genuinely transient failure must still retry and still trip the circuit.
+const transientCircuit = { failures: 0, openUntil: 0 };
+let transientAttempts = 0;
+await assert.rejects(
+  fetchOkxTaskPage(401277, {
+    attempts: 2,
+    cache: new Map(),
+    circuitState: transientCircuit,
+    fetchImpl: async () => {
+      transientAttempts += 1;
+      return new Response("nope", { status: 503 });
+    },
+  }),
+  (error) => error instanceof OkxTaskPageError,
+);
+assert.equal(transientAttempts, 2, "transient upstream failures must still be retried");
+assert.equal(transientCircuit.failures, 1, "transient upstream failures must still count toward the circuit");
+
 let fetchAttempts = 0;
 const retried = await fetchOkxTaskPage(401277, {
   attempts: 2,
