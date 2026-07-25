@@ -184,16 +184,45 @@ export function paymentRoute(logs, escrow) {
   return touched ? "okx_escrow_mediated" : "direct_endpoint_payment";
 }
 
+// The accepted event carries the listing behind a task: agentId, asset, amount
+// and service hash, in that order, with the provider in topic 2. Decoded by
+// offset rather than through viem to keep this script dependency free; the
+// layout is the same one api/lib/chain.js decodes.
+export function decodeAcceptedTask(log) {
+  const data = String(log?.data || "").replace(/^0x/, "");
+  if (data.length < 256 || !log?.topics?.[2]) return null;
+  const word = (index) => data.slice(index * 64, (index + 1) * 64);
+  return {
+    agentId: BigInt(`0x${word(0)}`).toString(),
+    asset: `0x${word(1).slice(24)}`.toLowerCase(),
+    amountAtomic: BigInt(`0x${word(2)}`).toString(),
+    serviceHash: `0x${word(3)}`,
+    provider: `0x${String(log.topics[2]).slice(26)}`.toLowerCase(),
+  };
+}
+
 // Attribution has to come from evidence the operator supplies and this script
 // verifies, not from inference. Absent that evidence the answer is "unproven",
 // which must refuse: confirming tells the provider to withhold delivery and
 // labels the result a marketplace sale.
-export function marketplaceProblems({ taskId, targetJobId, receiptBuyer, created }) {
+export function marketplaceProblems({
+  taskId, targetJobId, receiptBuyer, created, accepted,
+  expectedAgentId, expectedProvider, expectedFeeAtomic, acceptUnproven = false,
+}) {
   const problems = [];
   if (!taskId) {
+    // PolicyPool's own listing is A2MCP and the one external coverage purchase
+    // to date left no escrow task, so it is not yet established that buying this
+    // service produces one at all. Blocking outright could strand the pilot at
+    // the moment it cannot be restarted. The operator may proceed without the
+    // evidence, but only by saying so, and the result is then labelled unproven
+    // everywhere it is recorded rather than passing quietly as a sale.
+    if (acceptUnproven) return problems;
     problems.push(
       "no --marketplace-task supplied, so nothing shows this purchase used the listed service."
-      + " A payment made straight to /api/covered-job-receipt produces an identical receipt.",
+      + " A payment made straight to /api/covered-job-receipt produces an identical receipt."
+      + " Pass --attribution-unproven to continue without it; the run is then recorded as"
+      + " attribution_unproven and must not be described as an OKX marketplace sale.",
     );
     return problems;
   }
@@ -217,6 +246,27 @@ export function marketplaceProblems({ taskId, targetJobId, receiptBuyer, created
   if (!expected) problems.push("the receipt names no buyer to match the marketplace task against");
   else if (createdBuyer !== expected) {
     problems.push(`marketplace task ${taskId} was created by ${createdBuyer || "nobody"}, not the receipt buyer ${expected}`);
+  }
+  // The buyer matching is not enough on its own. Any escrow task this buyer
+  // happened to create after the covered job would otherwise satisfy every check
+  // above while saying nothing about PolicyPool. Bind the task to the listing:
+  // its accepted event names the agent it was bought from and the wallet that
+  // accepted it, and the escrowed amount is the coverage fee.
+  if (!accepted) {
+    problems.push(
+      `marketplace task ${taskId} has no acceptance on chain, so nothing binds it to PolicyPool's listing.`
+      + " An unaccepted task proves only that this buyer created some task.",
+    );
+    return problems;
+  }
+  if (accepted.agentId !== String(expectedAgentId)) {
+    problems.push(`marketplace task ${taskId} belongs to agent ${accepted.agentId}, not PolicyPool's agent ${expectedAgentId}`);
+  }
+  if (expectedProvider && accepted.provider !== String(expectedProvider).toLowerCase()) {
+    problems.push(`marketplace task ${taskId} was accepted by ${accepted.provider}, not PolicyPool's wallet ${String(expectedProvider).toLowerCase()}`);
+  }
+  if (expectedFeeAtomic && accepted.amountAtomic !== String(expectedFeeAtomic)) {
+    problems.push(`marketplace task ${taskId} escrowed ${accepted.amountAtomic} atomic, not the ${expectedFeeAtomic} coverage fee`);
   }
   return problems;
 }
@@ -498,6 +548,7 @@ async function confirm(args) {
   const targetJobId = receipt.targetJob?.jobId || receipt.target?.jobId || null;
   const marketplaceTask = String(args.marketplaceTask || "");
   let createdTask = null;
+  let acceptedTask = null;
   if (/^0x[a-fA-F0-9]{64}$/.test(marketplaceTask)
     && marketplaceTask.toLowerCase() !== String(targetJobId || "").toLowerCase()) {
     const head = await headBlock();
@@ -505,6 +556,8 @@ async function confirm(args) {
     const created = receipt.targetJob?.creationBlock;
     const start = created && BigInt(created) > floor ? BigInt(created) : floor;
     const logs = await scanEscrow({ jobId: marketplaceTask, fromBlock: start, toBlock: head });
+    const acceptance = logs.find((log) => log.topics[0]?.toLowerCase() === OKX_TASK.acceptedTopic);
+    acceptedTask = acceptance ? decodeAcceptedTask(acceptance) : null;
     const creation = logs.find((log) => log.topics[0]?.toLowerCase() === OKX_TASK.createdTopic);
     if (creation) {
       createdTask = {
@@ -515,12 +568,33 @@ async function confirm(args) {
       };
     }
   }
+  const acceptUnproven = args.attributionUnproven === true || args.attributionUnproven === "true";
   problems.push(...marketplaceProblems({
     taskId: marketplaceTask,
     targetJobId,
     receiptBuyer: buyer,
     created: createdTask,
+    accepted: acceptedTask,
+    expectedAgentId: MARKETPLACE.agentId,
+    expectedProvider: receipt.target?.providerWallet || null,
+    expectedFeeAtomic: PAYMENT.amountAtomic,
+    acceptUnproven,
   }));
+  // Verified means every binding held, not merely that a task was found. The
+  // route is folded in so a direct settlement can never be reported as a
+  // marketplace sale on the strength of an unrelated task the buyer created.
+  const attributionProven = Boolean(createdTask && acceptedTask)
+    && marketplaceProblems({
+      taskId: marketplaceTask,
+      targetJobId,
+      receiptBuyer: buyer,
+      created: createdTask,
+      accepted: acceptedTask,
+      expectedAgentId: MARKETPLACE.agentId,
+      expectedProvider: receipt.target?.providerWallet || null,
+      expectedFeeAtomic: PAYMENT.amountAtomic,
+    }).length === 0;
+  const attribution = attributionProven ? "okx_marketplace_task_verified" : "attribution_unproven";
 
   // Classify how the fee actually settled, so the evidence log records the route
   // rather than leaving it to be reconstructed later.
@@ -538,6 +612,7 @@ async function confirm(args) {
   console.log(`deadline       ${payload.reconciliation?.deadline || "(absent)"}`);
   console.log(`fee settled as ${route}`);
   console.log(`marketplace    ${createdTask ? `task ${createdTask.jobId.slice(0, 10)}… created by ${createdTask.buyer} at block ${createdTask.block}` : "(unproven)"}`);
+  console.log(`attribution    ${attribution}`);
 
   if (problems.length > 0) {
     record("confirm_failed", { receiptId, problems, route, marketplaceTask });
@@ -549,10 +624,15 @@ async function confirm(args) {
   }
 
   record("confirm_passed", {
-    receiptId, buyer, feeAtomic, route, marketplaceTask, createdTask,
+    receiptId, buyer, feeAtomic, route, attribution, marketplaceTask, createdTask, acceptedTask,
     deadline: payload.reconciliation?.deadline,
   });
   console.log(`\nCONFIRMED. An independent buyer paid exactly ${usdt(feeAtomic)} ${PAYMENT.symbol} and coverage is live.`);
+  if (!attributionProven) {
+    console.log("\nAttribution is UNPROVEN. Nothing here shows the purchase went through the listed");
+    console.log("service, so do not describe the result as an OKX marketplace sale. The payout claim");
+    console.log("is unaffected: buyer independence and the settlement are both verified above.");
+  }
   console.log(`Public verifier: ${API_BASE}/proof/receipt?id=${receiptId}`);
   console.log(`\nNow withhold Foreman delivery. After the deadline:`);
   console.log(`  npm run ops:breach:check  -- --receipt-id ${receiptId}`);
@@ -572,7 +652,7 @@ try {
   else {
     console.error("usage: pilot-acceptance-watcher.mjs <watch|confirm> [options]");
     console.error("  watch   --job-id 0x… --from-block N --buyer 0x… --job-description \"…\" [--cap 0.5]");
-    console.error("  confirm --receipt-id ppc-… --marketplace-task 0x… (the OKX task for the coverage purchase)");
+    console.error("  confirm --receipt-id ppc-… --marketplace-task 0x… | --attribution-unproven");
     process.exitCode = 2;
   }
 } catch (error) {

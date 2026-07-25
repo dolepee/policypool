@@ -144,7 +144,7 @@ const ERROR_CONTRACT = Object.freeze({
   },
   requested_coverage_below_minimum: {
     code: "COVERAGE_BELOW_MINIMUM",
-    message: "The requested coverage cap is below the minimum this service will underwrite.",
+    message: "The requested coverage cap is below the minimum this service will cover.",
     retryable: false,
     nextAction: "Request a higher coverage cap, bounded by the target job value.",
   },

@@ -4,7 +4,7 @@
 // makes. This checks the guard can actually reach that conclusion.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { buyerAddress, marketplaceProblems, paymentRoute } from "./pilot-acceptance-watcher.mjs";
+import { buyerAddress, decodeAcceptedTask, marketplaceProblems, paymentRoute } from "./pilot-acceptance-watcher.mjs";
 
 const HOUSE = "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7";
 const KEJI = "0x52e19669d7b199531bf689f7ec943632bd211b75";
@@ -52,6 +52,26 @@ assert.equal(buyerAddress(KEJI.slice(0, -1)), "", "a truncated address must be r
 assert.equal(buyerAddress(KEJI, { address: HOUSE }), KEJI, "the first usable candidate must win");
 assert.equal(buyerAddress(undefined, HOUSE), HOUSE, "an unusable candidate must not stop the search");
 
+// The accepted event is decoded by byte offset, so the layout is pinned against
+// a real log rather than against my reading of it: this is the acceptance of
+// GlassDesk job 0xf8927c52…, which the live receipt independently reports as
+// agent 3465 with a 0.5 USD~T0 value.
+const REAL_ACCEPTED_LOG = {
+  "topics": [
+    "0x49c131ab4997b3c3791e5e208b585c027c75b36373559faece1d17bb38a1cac7",
+    "0xf8927c523c426f87dae6a243ed38cbc0040b8532ef0dab1883fc990dca51d602",
+    "0x0000000000000000000000004abbae03afff90f50d4f6b42b3e362f5228ad4c7"
+  ],
+  "data": "0x0000000000000000000000000000000000000000000000000000000000000d89000000000000000000000000779ded0c9e1022225f8e0630b35a9b54be713736000000000000000000000000000000000000000000000000000000000007a120fae86c32e8e42f693b2aaf96e6637d4db2d1caf5a08607b7cf88c9113fbc06c4"
+};
+const decoded = decodeAcceptedTask(REAL_ACCEPTED_LOG);
+assert.equal(decoded.agentId, "3465", "agentId must decode from the first word");
+assert.equal(decoded.provider, "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7", "the provider is topic 2");
+assert.equal(decoded.asset, "0x779ded0c9e1022225f8e0630b35a9b54be713736", "the asset is right-aligned in the second word");
+assert.equal(decoded.amountAtomic, "500000", "the escrowed amount is the third word");
+assert.equal(decodeAcceptedTask({ data: "0x", topics: [] }), null, "a log with no payload must not decode");
+assert.equal(decodeAcceptedTask(undefined), null, "a missing log must not throw");
+
 // Marketplace attribution. A receipt is identical whether the buyer used the
 // listed service or paid /api/covered-job-receipt directly: same state, fee,
 // buyer, job, policy and cap. Confirming instructs the provider to withhold
@@ -61,6 +81,16 @@ const ESCROW = "0x000000eb79a0c9cbeed4bd63372653e28f6bedbe";
 const TARGET_JOB = `0x${"f8".repeat(32)}`;
 const COVERAGE_TASK = `0x${"a1".repeat(32)}`;
 const createdBy = (buyer, jobId = COVERAGE_TASK) => ({ jobId, buyer, block: 66140000, txHash: `0x${"e".repeat(64)}` });
+const PP_AGENT = "4674";
+const PP_WALLET = "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7";
+const FEE = "100000";
+const acceptedAs = (over = {}) => ({ agentId: PP_AGENT, provider: PP_WALLET, amountAtomic: FEE, asset: "0x779ded0c9e1022225f8e0630b35a9b54be713736", serviceHash: `0x${"b".repeat(64)}`, ...over });
+const bound = (over = {}) => ({
+  taskId: COVERAGE_TASK, targetJobId: TARGET_JOB, receiptBuyer: KEJI,
+  created: createdBy(KEJI), accepted: acceptedAs(),
+  expectedAgentId: PP_AGENT, expectedProvider: PP_WALLET, expectedFeeAtomic: FEE,
+  ...over,
+});
 
 // Verified against real transactions: the one external coverage purchase to date
 // settled as an EIP-3009 transfer straight to the token contract and never
@@ -103,12 +133,12 @@ assert.ok(
 );
 // A task nobody created on chain proves nothing.
 assert.ok(
-  marketplaceProblems({ taskId: COVERAGE_TASK, targetJobId: TARGET_JOB, receiptBuyer: KEJI, created: null }).length > 0,
+  marketplaceProblems(bound({ created: null })).length > 0,
   "an unverifiable task id must refuse",
 );
 // A real task bought by somebody else is not this buyer's purchase.
 assert.ok(
-  marketplaceProblems({ taskId: COVERAGE_TASK, targetJobId: TARGET_JOB, receiptBuyer: KEJI, created: createdBy(HOUSE) }).length > 0,
+  marketplaceProblems(bound({ created: createdBy(HOUSE) })).length > 0,
   "a marketplace task created by another wallet must refuse",
 );
 assert.ok(
@@ -116,25 +146,95 @@ assert.ok(
   "a malformed task id must refuse",
 );
 assert.ok(
-  marketplaceProblems({ taskId: COVERAGE_TASK, targetJobId: TARGET_JOB, receiptBuyer: "", created: createdBy(KEJI) }).length > 0,
+  marketplaceProblems(bound({ receiptBuyer: "" })).length > 0,
   "a receipt with no buyer cannot be matched against a marketplace task",
 );
-// The one shape that passes: a distinct task, created on chain, by this buyer.
-assert.deepEqual(
-  marketplaceProblems({ taskId: COVERAGE_TASK, targetJobId: TARGET_JOB, receiptBuyer: KEJI, created: createdBy(KEJI) }),
-  [],
-  "a distinct task created on chain by the receipt buyer is the evidence this check wants",
+// The one shape that passes: a distinct task, created on chain by this buyer,
+// and accepted by PolicyPool's own listing for the coverage fee.
+assert.deepEqual(marketplaceProblems(bound()), [],
+  "a task bound to PolicyPool's listing is the evidence this check wants");
+
+// Buyer identity alone is not attribution. Any escrow task this buyer happened
+// to create after the covered job would otherwise satisfy every check above
+// while saying nothing about PolicyPool, which is the hole Codex found.
+assert.ok(
+  marketplaceProblems(bound({ accepted: null })).length > 0,
+  "an unaccepted task proves only that this buyer created some task",
+);
+assert.ok(
+  marketplaceProblems(bound({ accepted: acceptedAs({ agentId: "3465" }) })).length > 0,
+  "a task bought from a different agent is not a PolicyPool sale",
+);
+assert.ok(
+  marketplaceProblems(bound({ accepted: acceptedAs({ provider: `0x${"9".repeat(40)}` }) })).length > 0,
+  "a task accepted by another wallet is not PolicyPool's",
+);
+assert.ok(
+  marketplaceProblems(bound({ accepted: acceptedAs({ amountAtomic: "500000" }) })).length > 0,
+  "a task escrowing something other than the coverage fee is not this purchase",
 );
 // Casing must not decide the outcome either way.
 assert.deepEqual(
-  marketplaceProblems({
+  marketplaceProblems(bound({
     taskId: COVERAGE_TASK.toUpperCase().replace("0X", "0x"),
-    targetJobId: TARGET_JOB,
     receiptBuyer: KEJI.toUpperCase().replace("0X", "0x"),
     created: createdBy(KEJI.toUpperCase().replace("0X", "0x")),
-  }),
+    expectedProvider: PP_WALLET.toUpperCase().replace("0X", "0x"),
+  })),
   [],
   "attribution must be case-insensitive",
+);
+
+// The escape exists because PolicyPool's own listing is A2MCP and it is not
+// established that buying it produces an escrow task at all, so a hard block
+// could strand the pilot at the one moment it cannot be restarted. It must stay
+// explicit: silence still refuses, and only the flag proceeds.
+assert.deepEqual(
+  marketplaceProblems({ taskId: "", targetJobId: TARGET_JOB, receiptBuyer: KEJI, created: null, acceptUnproven: true }),
+  [],
+  "an operator who states the attribution is unproven may proceed",
+);
+assert.equal(
+  marketplaceProblems({ taskId: "", targetJobId: TARGET_JOB, receiptBuyer: KEJI, created: null, acceptUnproven: false }).length,
+  1,
+  "the default must still refuse, so proceeding is always a deliberate act",
+);
+// The escape waives the missing evidence. It must not waive evidence that is
+// present and wrong, or it becomes a way to launder a mismatched task.
+assert.ok(
+  marketplaceProblems(bound({ created: createdBy(HOUSE), acceptUnproven: true })).length > 0,
+  "the escape must not suppress a marketplace task created by the wrong wallet",
+);
+assert.ok(
+  marketplaceProblems(bound({ taskId: TARGET_JOB, created: createdBy(KEJI, TARGET_JOB), acceptUnproven: true })).length > 0,
+  "the escape must not let the covered job stand in as its own proof",
+);
+
+// Proceeding unproven must be recorded as unproven wherever the run is written
+// down, or the distinction is lost the moment anyone reads the evidence log.
+const confirmSource = await readFile(new URL("./pilot-acceptance-watcher.mjs", import.meta.url), "utf8");
+assert.match(
+  confirmSource,
+  /const attribution = attributionProven \? "okx_marketplace_task_verified" : "attribution_unproven"/,
+  "the run must carry an explicit attribution verdict",
+);
+// The verdict must come from every binding holding, not from a task merely
+// existing. Deriving it from createdTask alone was the defect: an unrelated
+// task by the same buyer would have been reported as a verified sale.
+assert.match(
+  confirmSource,
+  /attributionProven = Boolean\(createdTask && acceptedTask\)[\s\S]{0,600}?\.length === 0/,
+  "attribution must be proven by the full binding, not by the presence of a task",
+);
+assert.match(
+  confirmSource,
+  /record\("confirm_passed", \{[\s\S]*?attribution,/,
+  "the attribution verdict must reach the append-only evidence log",
+);
+assert.match(
+  confirmSource,
+  /do not describe the result as an OKX marketplace sale/,
+  "an unproven run must say so on the console, where the operator will actually read it",
 );
 
 // The helper above is only worth anything if confirm actually consults it. A
