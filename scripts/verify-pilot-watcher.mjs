@@ -11,12 +11,18 @@ import {
   createdJobsForBuyer,
   decodeAcceptedTask,
   houseWallets,
+  jobDescriptionArg,
   marketplaceProblems,
   paymentRoute,
 } from "./pilot-acceptance-watcher.mjs";
 
 const HOUSE = "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7";
 const KEJI = "0x52e19669d7b199531bf689f7ec943632bd211b75";
+
+assert.equal(jobDescriptionArg("  controlled failure  "), "controlled failure");
+assert.equal(jobDescriptionArg("   "), "");
+assert.equal(jobDescriptionArg(true), "");
+assert.equal(jobDescriptionArg(undefined), "");
 
 // Shape one, seen on all three live receipts: targetJob carries a plain address.
 assert.equal(
@@ -128,8 +134,13 @@ assert.match(
 );
 assert.match(
   watcherSource,
-  /const jobDescription = typeof args\.jobDescription === "string"[\s\S]*?: "";/,
-  "watch-next must reject valueless job-description flags before it announces that it is armed",
+  /async function watchNext[\s\S]*?const jobDescription = jobDescriptionArg\(args\.jobDescription\)/,
+  "watch-next must normalize job descriptions before it announces that it is armed",
+);
+assert.match(
+  watcherSource,
+  /async function watch\(args\)[\s\S]*?const jobDescription = jobDescriptionArg\(args\.jobDescription\)/,
+  "direct watch must normalize job descriptions before it begins polling",
 );
 assert.ok(configured.size > 0, "the exclusion set must not be empty, or every buyer looks independent");
 for (const address of configured) {

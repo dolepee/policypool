@@ -63,6 +63,10 @@ function parseArgs(argv) {
   return args;
 }
 
+export function jobDescriptionArg(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 // Append-only by construction: the log is opened for append and never read back
 // for mutation. A pilot's evidence must not be quietly editable after the fact.
 function record(event, payload) {
@@ -163,9 +167,7 @@ async function headBlock() {
 
 async function watchNext(args) {
   const buyer = String(args.buyer || "").toLowerCase();
-  const jobDescription = typeof args.jobDescription === "string"
-    ? args.jobDescription.trim()
-    : "";
+  const jobDescription = jobDescriptionArg(args.jobDescription);
   const cap = String(args.cap || "0.5");
   const targetAgent = String(args.targetAgent || "Foreman#4348");
   if (!/^0x[a-f0-9]{40}$/.test(buyer)) throw new Error("--buyer must be an address");
@@ -477,7 +479,7 @@ async function watch(args) {
   const jobId = String(args.jobId || "").toLowerCase();
   const buyer = String(args.buyer || "").toLowerCase();
   const fromBlock = args.fromBlock;
-  const jobDescription = String(args.jobDescription || "");
+  const jobDescription = jobDescriptionArg(args.jobDescription);
   const cap = String(args.cap || "0.5");
   if (!/^\d+(\.\d{1,6})?$/.test(cap)) {
     throw new Error(`--cap must be a USD₮0 amount with at most six decimals, got ${cap}`);
