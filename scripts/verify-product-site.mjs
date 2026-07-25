@@ -92,10 +92,23 @@ assert.match(coverage, /name="targetServiceId"/, "coverage form must bind dynami
 // and a notice that only says "unavailable" is barely better. It has to name the
 // path that still works, itself, rather than promise one the page never shows.
 assert.match(coverage, /class="evidence-notice"/, "coverage form must disclose the withdrawn public task evidence");
-for (const field of ["targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash"]) {
-  assert.match(coverage, new RegExp(`<code>${field}</code>`), `the notice must name ${field} as a working input`);
+// Every field the paid endpoint actually requires, verified against production:
+// omitting targetAgent returns target_agent_required and omitting jobDescription
+// returns job_description_required, so a notice listing only the three evidence
+// hashes sends a visitor into a rejection.
+for (const field of [
+  "targetAgent",
+  "jobDescription",
+  "targetJobId",
+  "targetCreationTxHash",
+  "targetAcceptanceTxHash",
+]) {
+  assert.match(coverage, new RegExp(`<code>${field}</code>`), `the notice must name ${field} as a required input`);
 }
 assert.match(coverage, /covered-job-receipt/, "the notice must name the endpoint that still takes direct evidence");
+// A bare public task ID resolves to the same withdrawn page as a URL, and the
+// form still offers both, so the outage disclosure must cover both forms.
+assert.match(coverage, /in either form/, "the notice must cover public task IDs as well as URLs");
 
 for (const [file, route] of subordinatePages) {
   const html = await readFile(new URL(`../web/${file}`, import.meta.url), "utf8");
