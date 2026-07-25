@@ -374,6 +374,201 @@ for (const id of ["ppc-affca246b1cf8c9b", "ppc-d99d7f72895d70ab", "ppc-bd38c8111
   assert.ok(examplesHtml.includes(`data-example="${id}"`), `${id} must be offered as a live example`);
 }
 
+// The active-coverage promise depends on the covenant's recorded payout basis;
+// the pipelines genuinely differ, so one sentence cannot be correct for all.
+function activeView(payoutBasis, providerBonded, clockMode) {
+  return buildReceiptView({
+    ok: true,
+    receiptId: "ppc-active-basis",
+    state: "active",
+    receipt: {
+      version: providerBonded ? "0.4.0" : "0.2.0",
+      covenant: { coverageCapUSDT: "0.5", deadline: "2026-07-26T00:00:00.000Z" },
+      target: { agentName: "Foreman", agentId: "4348", payoutBasis, ...(clockMode ? { clockMode } : {}) },
+      servicePayment: {},
+      ...(providerBonded ? { providerBond: { custody: "provider_first_loss_bond_vault" } } : {}),
+    },
+  });
+}
+
+const bonded = activeView("provider_bonded_sla_credit", true);
+assert.match(bonded.plain, /first-loss bond/i, "a bonded SLA credit pays from the bond");
+assert.match(bonded.plain, /even if the platform later stops, closes, refunds, or expires/i,
+  "a bonded SLA credit is payable despite later platform-terminal outcomes");
+
+const netLoss = activeView("net_loss", true);
+assert.match(netLoss.plain, /marketplace recovery is terminal/i, "net-loss pays only after terminal recovery");
+assert.match(netLoss.plain, /recovered amounts/i, "net-loss is reduced by recoveries");
+// observeOkxA2AClock releases a verified-acceptance covenant outright when a
+// terminal status lands at or before the deadline, so a promise that mentions
+// only the post-deadline recovery path omits the outcome that pays nothing.
+assert.match(
+  netLoss.plain,
+  /released without a payout/i,
+  "a verified-acceptance net-loss covenant must disclose the early-terminal release",
+);
+
+// A relay clock paired with a net-loss basis has no settlement path at all in
+// this release: terminalRecovery() returns
+// relay_net_loss_recovery_finality_unavailable unconditionally for it, and the
+// relay pipeline never reads marketplace recovery. The page must disclose that
+// rather than promising either an early release or a recovery-based payout.
+const netLossRelay = activeView("net_loss", true, "policypool_relay");
+assert.doesNotMatch(
+  netLossRelay.plain,
+  /released without a payout/i,
+  "a relay net-loss covenant must not promise release for a platform-ended job",
+);
+assert.doesNotMatch(
+  netLossRelay.plain,
+  /becomes payable only after marketplace recovery is terminal/i,
+  "a relay net-loss covenant has no marketplace-recovery settlement path to promise",
+);
+assert.match(
+  netLossRelay.plain,
+  /cannot settle that claim automatically/i,
+  "the missing relay net-loss finality path must be disclosed, not implied",
+);
+assert.match(netLossRelay.plain, /recovery-finality path/i);
+assert.match(netLossRelay.plain, /manual reconciliation/i, "the reader must know what actually happens next");
+
+// The disclosure has to survive the transition out of active. The reconciler
+// moves the covenant to payout_due the moment the deadline is missed, which is
+// exactly when the missing settlement path starts to matter, so a generic
+// promise of pending execution there would drop it at the worst moment.
+function payoutDueView(payoutBasis, clockMode) {
+  return buildReceiptView({
+    ok: true,
+    receiptId: "ppc-payout-due-basis",
+    state: "payout_due",
+    receipt: {
+      version: "0.4.0",
+      covenant: { coverageCapUSDT: "0.5", deadline: "2026-07-26T00:00:00.000Z" },
+      target: { agentName: "Foreman", agentId: "4348", payoutBasis, ...(clockMode ? { clockMode } : {}) },
+      servicePayment: {},
+      providerBond: { custody: "provider_first_loss_bond_vault" },
+    },
+  });
+}
+
+const relayNetLossDue = payoutDueView("net_loss", "policypool_relay");
+assert.equal(relayNetLossDue.stateLabel, "PAYOUT DUE");
+assert.match(relayNetLossDue.plain, /0\.5 USD₮0 is owed/, "the amount owed must still be stated");
+assert.doesNotMatch(
+  relayNetLossDue.plain,
+  /pending execution/i,
+  "a claim with no recovery-finality path must not be described as pending execution",
+);
+assert.match(relayNetLossDue.plain, /cannot settle it automatically/i);
+assert.match(relayNetLossDue.plain, /manual reconciliation/i);
+
+// A verified-acceptance net-loss claim does execute, but only after terminal
+// recovery, so it must not read as unconditionally pending either.
+const netLossDue = payoutDueView("net_loss", "verified_acceptance");
+assert.match(netLossDue.plain, /marketplace recovery is terminal/i);
+assert.match(netLossDue.plain, /recovered amounts/i);
+assert.doesNotMatch(netLossDue.plain, /cannot settle it automatically/i);
+
+// Everything else keeps the original unconditional wording.
+const bondedDue = payoutDueView("provider_bonded_sla_credit", "verified_acceptance");
+assert.match(bondedDue.plain, /pending execution/i, "a settleable claim is still pending execution");
+
+// Every wording that promises release on a platform-terminal outcome has to
+// enumerate all four of them. observeOkxA2AClock releases on admin_stopped (5),
+// closed_and_funds_returned (7), expired (8), and arbitration_refunded (9), and
+// the legacy reconciler releases on the same four. Naming only some of them
+// leaves a buyer in the omitted case believing their claim survived.
+for (const [label, view] of [
+  ["bonded verified-acceptance", bonded],
+  ["net-loss verified-acceptance", netLoss],
+  ["legacy reserve", activeView("legacy_reserve_covenant", false)],
+]) {
+  for (const verb of ["stops", "closes", "refunds", "expires"]) {
+    assert.match(
+      view.plain,
+      new RegExp(`\\b${verb}\\b`),
+      `${label} wording must account for a job the platform ${verb}`,
+    );
+  }
+}
+
+const legacy = activeView("legacy_reserve_covenant", false);
+assert.match(legacy.plain, /still accepted/i, "a reserve covenant requires the job to stay accepted");
+assert.match(legacy.plain, /released without a payout/i, "a reserve covenant releases on platform-terminal outcomes");
+
+// The three wordings are genuinely distinct, so no basis is silently misdescribed.
+assert.notEqual(bonded.plain, legacy.plain, "bonded and reserve wording must differ");
+assert.notEqual(netLoss.plain, legacy.plain, "net-loss and reserve wording must differ");
+
+// Payout basis and clock mode are enrolled independently, so a bonded covenant
+// may still run on PolicyPool's relay clock. observeRelayClock never reads
+// marketplace job status, so for a relay covenant the promise that a
+// platform-ended job is released before the deadline is one the reconciler
+// contradicts: absent a verified in-SLA response it still becomes payable.
+const bondedRelay = activeView("provider_bonded_sla_credit", true, "policypool_relay");
+assert.match(bondedRelay.plain, /first-loss bond/i, "a bonded relay covenant still pays from the bond");
+assert.doesNotMatch(
+  bondedRelay.plain,
+  /released without a payout/i,
+  "a relay covenant must not promise release for a platform-ended job",
+);
+assert.doesNotMatch(
+  bondedRelay.plain,
+  /even if the platform later stops, closes, refunds, or expires/i,
+  "a relay covenant's outcome does not turn on platform-terminal events at all",
+);
+assert.match(bondedRelay.plain, /relay clock/i, "a relay covenant must say which clock governs it");
+assert.notEqual(
+  bondedRelay.plain,
+  bonded.plain,
+  "relay and verified-acceptance bonded covenants must not share one promise",
+);
+
+// The recorded basis is surfaced in the fact table for the reader to check.
+assert.ok(
+  bonded.values.some(([label, value]) => label === "Payout basis" && value === "provider_bonded_sla_credit"),
+  "the covenant's payout basis must be shown",
+);
+
+// A relay clock release is timestamp-verified (completedWithinSla), so it may
+// state on-time delivery just as the A2A time-verified reason does.
+const relayReleased = buildReceiptView({
+  ok: true,
+  receiptId: "ppc-relay-released",
+  state: "released",
+  release: { reason: "provider_response_delivered_within_sla" },
+  universalReconciliation: { to: "released", reason: "provider_response_delivered_within_sla" },
+  receipt: { version: "0.4.0", covenant: { coverageCapUSDT: "0.5" }, target: { agentName: "GlassDesk", agentId: "3465" }, servicePayment: {} },
+});
+assert.match(relayReleased.headline, /delivered on time/i, "a relay in-SLA release is an on-time delivery");
+assert.match(relayReleased.plain, /delivered within the agreed deadline/i);
+
+// A universal release evidence object (from the API's unified shape) is read
+// even though it did not arrive under record.release.
+const universalReleaseView = buildReceiptView({
+  ok: true,
+  receiptId: "ppc-universal-view",
+  state: "released",
+  universalReconciliation: { to: "released", reason: "service_delivered_within_sla" },
+  receipt: { version: "0.4.0", covenant: { coverageCapUSDT: "0.5" }, target: { agentName: "GlassDesk", agentId: "3465" }, servicePayment: {} },
+});
+assert.match(universalReleaseView.headline, /delivered on time/i,
+  "a universally released covenant must read its reason from the universal event");
+
+// A started relay covenant with no receipt deadline still shows a deadline when
+// the reconciled value is forwarded on the payload.
+const relayDeadlineView = buildReceiptView({
+  ok: true,
+  receiptId: "ppc-relay-deadline",
+  state: "active",
+  reconciliation: { deadline: "2026-07-26T00:00:00.000Z" },
+  receipt: { version: "0.4.0", covenant: { deadline: null, coverageCapUSDT: "0.5" }, target: { agentName: "Foreman", agentId: "4348", payoutBasis: "provider_bonded_sla_credit", providerBond: {} }, servicePayment: {}, providerBond: {} },
+});
+assert.ok(
+  relayDeadlineView.values.some(([label]) => label === "Objective deadline"),
+  "a reconciled deadline must appear even when the issued receipt lacks one",
+);
+
 // Overlapping lookups must not cross-render. A slow first request that resolves
 // after a second one was started would otherwise paint the wrong receipt's
 // lifecycle beside the newer id still shown in the input.
