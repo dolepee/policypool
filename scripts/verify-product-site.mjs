@@ -87,6 +87,16 @@ assert.match(
 assert.match(coverage, /Another OKX\.AI service/, "coverage form must accept demand for an unenrolled service");
 assert.match(coverage, /name="targetServiceId"/, "coverage form must bind dynamic policies to a service id");
 
+// A public task URL cannot be quoted since OKX withdrew the fields binding it to
+// an on-chain job. A visitor must not be left thinking the service is broken,
+// and a notice that only says "unavailable" is barely better. It has to name the
+// path that still works, itself, rather than promise one the page never shows.
+assert.match(coverage, /class="evidence-notice"/, "coverage form must disclose the withdrawn public task evidence");
+for (const field of ["targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash"]) {
+  assert.match(coverage, new RegExp(`<code>${field}</code>`), `the notice must name ${field} as a working input`);
+}
+assert.match(coverage, /covered-job-receipt/, "the notice must name the endpoint that still takes direct evidence");
+
 for (const [file, route] of subordinatePages) {
   const html = await readFile(new URL(`../web/${file}`, import.meta.url), "utf8");
   assert.equal((html.match(/<h1\b/g) || []).length, 1, `${file} must have one h1`);
