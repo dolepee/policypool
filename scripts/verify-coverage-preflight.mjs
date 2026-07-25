@@ -658,6 +658,46 @@ for (const omit of ["targetJobId", "targetCreationTxHash", "targetAcceptanceTxHa
 }
 assert.equal(directTaskFetches, 0, "an incomplete direct request must not fall back to the public page");
 
+// Descriptive text must not decide which path runs. A public request that also
+// carries a description, or the broad `description` alias some envelopes use,
+// stays on the public path instead of being rerouted into direct mode and
+// refused for hashes it never needed to send.
+for (const descriptionKey of ["jobDescription", "description", "jobSummary"]) {
+  const publicWithDescription = await callHandler(handler, {
+    method: "POST",
+    headers: { host: "policypool.test" },
+    body: {
+      targetAgent: "GlassDesk#3465",
+      taskReference: task.publicUrl,
+      requestedCoverageUSDT: "0.5",
+      [descriptionKey]: "Verify a public token market claim with evidence and source links.",
+    },
+  });
+  assert.equal(
+    publicWithDescription.json().evidenceMode,
+    "public_task_reference",
+    `${descriptionKey} must not reroute a public request into direct mode`,
+  );
+  assert.equal(
+    publicWithDescription.json().eligible,
+    true,
+    `${descriptionKey} alongside a task reference must still quote`,
+  );
+  assert.notEqual(publicWithDescription.json().error, "direct_evidence_incomplete");
+}
+
+// An on-chain identity field is what signals direct mode, and one alone is
+// enough to be held to the full requirement rather than silently half-handled.
+const onlyOneSignal = await callHandler(directHandler, {
+  method: "POST",
+  body: { targetAgent: "GlassDesk#3465", targetJobId: DIRECT_JOB_ID, requestedCoverageUSDT: "0.5" },
+});
+assert.equal(onlyOneSignal.json().error, "direct_evidence_incomplete");
+assert.deepEqual(
+  onlyOneSignal.json().missing,
+  ["targetCreationTxHash", "targetAcceptanceTxHash", "targetBuyer", "jobDescription"],
+);
+
 // Discovery advertises both modes and is honest about which one works.
 const modes = (await callHandler(directHandler, { method: "GET" })).json().modes;
 const publicMode = modes.find((mode) => mode.mode === "public_task_reference");

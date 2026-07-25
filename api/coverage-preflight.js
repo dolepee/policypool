@@ -109,6 +109,7 @@ function readInput(req) {
 // resolved through the marketplace page; direct evidence is supplied by the
 // buyer and verified against X Layer. Both end at the same
 // `chain.verifyTargetOrder`, which is what actually establishes eligibility.
+// What direct evidence requires.
 const DIRECT_EVIDENCE_FIELDS = Object.freeze([
   "targetJobId",
   "targetCreationTxHash",
@@ -117,8 +118,20 @@ const DIRECT_EVIDENCE_FIELDS = Object.freeze([
   "jobDescription",
 ]);
 
+// What signals the caller meant to use it. Deliberately excludes jobDescription:
+// it is descriptive text rather than an on-chain identity, its `description`
+// alias is broad enough to appear in unrelated request envelopes, and a public
+// request that merely carried a description would otherwise be rerouted into
+// direct mode and refused for missing hashes it never needed to send.
+const DIRECT_EVIDENCE_SIGNALS = Object.freeze([
+  "targetJobId",
+  "targetCreationTxHash",
+  "targetAcceptanceTxHash",
+  "targetBuyer",
+]);
+
 function directEvidenceIntent(input) {
-  return DIRECT_EVIDENCE_FIELDS.some((field) => Boolean(input[field]));
+  return DIRECT_EVIDENCE_SIGNALS.some((field) => Boolean(input[field]));
 }
 
 function paidEndpoint(req, quoteToken) {
