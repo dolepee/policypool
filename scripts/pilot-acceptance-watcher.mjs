@@ -81,13 +81,31 @@ async function rpc(method, params) {
 const topicAddress = (topic) => `0x${String(topic).slice(26)}`.toLowerCase();
 const topicUint = (topic) => BigInt(topic);
 
-async function escrowLogs({ jobId, fromBlock }) {
-  return rpc("eth_getLogs", [{
-    address: OKX_TASK.escrow,
-    topics: [null, jobId.toLowerCase()],
-    fromBlock: `0x${BigInt(fromBlock).toString(16)}`,
-    toBlock: "latest",
-  }]);
+// X Layer's public RPC rejects eth_getLogs ranges larger than 100 blocks, which
+// is why api/lib/chain.js scans in chunks. A watcher that asked for
+// creation-to-latest would start failing the moment the head drifted 100 blocks
+// past creation, retry the same oversized query forever, and silently miss the
+// acceptance it exists to catch.
+const MAX_LOG_SCAN_BLOCKS = 100n;
+
+async function scanEscrow({ jobId, fromBlock, toBlock }) {
+  const topic = jobId.toLowerCase();
+  const found = [];
+  for (let start = BigInt(fromBlock); start <= toBlock; start += MAX_LOG_SCAN_BLOCKS) {
+    const end = start + MAX_LOG_SCAN_BLOCKS - 1n < toBlock ? start + MAX_LOG_SCAN_BLOCKS - 1n : toBlock;
+    const chunk = await rpc("eth_getLogs", [{
+      address: OKX_TASK.escrow,
+      topics: [null, topic],
+      fromBlock: `0x${start.toString(16)}`,
+      toBlock: `0x${end.toString(16)}`,
+    }]);
+    found.push(...chunk);
+  }
+  return found;
+}
+
+async function headBlock() {
+  return BigInt(await rpc("eth_blockNumber", []));
 }
 
 // The two events a coverage quote binds to. Both are decoded here rather than
@@ -183,7 +201,11 @@ async function watch(args) {
   for (;;) {
     let events;
     try {
-      events = decode(await escrowLogs({ jobId, fromBlock }), { jobId, buyer });
+      // Rescan from creation every pass rather than advancing a cursor past it:
+      // the creation and acceptance events must both be in hand to build a
+      // quote, and a cursor that had already moved beyond creation could not
+      // produce one. The range is bounded, so the cost is a few chunked calls.
+      events = decode(await scanEscrow({ jobId, fromBlock, toBlock: await headBlock() }), { jobId, buyer });
     } catch (error) {
       // A transient RPC failure must not end a watch that may have one minute
       // of enrollment window left.

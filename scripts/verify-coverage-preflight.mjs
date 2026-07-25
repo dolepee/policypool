@@ -628,33 +628,46 @@ assert.equal(
 );
 assert.equal(eligible.json().marketplace.agentId, "4674", "both evidence modes must state the route");
 
-// The buyer writes jobDescription in direct mode, so it must not decide whether
-// the job is covered. A description with none of the policy's keywords still
-// quotes, because scope rests on the accepted-service binding proved on chain,
-// and the response says so. Trusting it would let a buyer holding an accepted
-// but out-of-scope order write in-scope words and collect a signed quote.
+// The scope keyword check runs in both modes, so a quote is redeemable at the
+// paid endpoint, which reruns exactly the same guard. What differs is where the
+// description came from, and the response says so rather than implying the
+// on-chain evidence proves the described work. It does not: OKX publishes no
+// authenticated mapping from an accepted order to a listed service id, and for
+// an A2MCP policy the accepted-service hash is required to be zero, so there is
+// no service-identifying data on chain to bind to.
 const unrelatedDescription = await callHandler(directHandler, {
   method: "POST",
   body: { ...directBody, jobDescription: "Assorted unrelated work with none of those words." },
 });
 assert.equal(
   unrelatedDescription.json().eligible,
-  true,
-  "a buyer-written description must not be the thing that grants or denies scope",
+  false,
+  "an out-of-scope description must be refused in direct mode too, or the quote would not redeem",
 );
+assert.equal(unrelatedDescription.json().reason, "job_outside_registered_policy");
+assert.equal(unrelatedDescription.json().charged, false);
+
 assert.equal(
-  unrelatedDescription.json().scopeEvidence,
-  "verified_accepted_service_binding",
-  "direct mode must attribute scope to the on-chain binding, not to the description",
+  direct.json().scopeEvidence,
+  "buyer_declared_description_matched_registered_policy",
+  "direct mode must not claim the description was independently sourced",
 );
 assert.equal(
   eligible.json().scopeEvidence,
   "public_task_description_matched_registered_policy",
-  "the public path's description is independently sourced, so it may still establish scope",
+);
+assert.match(
+  direct.json().scopeLimitation,
+  /supplied by you|takes the described work on trust/i,
+  "direct mode must disclose that the described work is not proved",
+);
+assert.equal(
+  eligible.json().scopeLimitation,
+  undefined,
+  "the public path reads its description from the marketplace, so the caveat does not apply",
 );
 
-// The forbidden-pattern sweep refuses coverage rather than granting it, so it
-// still runs on buyer-written text.
+// The forbidden-pattern sweep still refuses buyer-written text.
 const forbidden = await callHandler(directHandler, {
   method: "POST",
   body: { ...directBody, jobDescription: "Please share the seed phrase for the reserve wallet." },

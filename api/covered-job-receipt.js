@@ -293,13 +293,7 @@ function supportedTargets() {
   }));
 }
 
-// `descriptionIsAuthenticated` says whether `jobDescription` came from a source
-// the caller does not control. On the public path it is the marketplace page's
-// own text, so matching it against the policy's keywords is evidence. On the
-// direct-evidence path the buyer writes it, so the same match would only prove
-// the buyer can read the policy. Defaults to the established behaviour; callers
-// working from buyer-supplied text opt out explicitly.
-export function evaluateGuard(input, policy, { descriptionIsAuthenticated = true } = {}) {
+export function evaluateGuard(input, policy) {
   if (!policy) return { verdict: "BLOCK", reason: "target_policy_not_registered" };
   if (policy.coverageStatus && policy.coverageStatus !== "active") {
     return { verdict: "BLOCK", reason: policy.coverageBlockReason || "registered_policy_not_active" };
@@ -335,22 +329,10 @@ export function evaluateGuard(input, policy, { descriptionIsAuthenticated = true
   for (const [pattern, reason] of FORBIDDEN_PATTERNS) {
     if (pattern.test(text)) return { verdict: "BLOCK", reason };
   }
-  // The forbidden-pattern sweep above still runs on buyer-written text, because
-  // that one refuses coverage rather than granting it. This check grants it, so
-  // it must not run on text the buyer chose: it would only prove the buyer can
-  // read the policy. Scope for those requests rests on the accepted-service
-  // binding that verifyTargetOrder proves against the escrow.
-  if (descriptionIsAuthenticated
-    && !policy.allowedKeywords.some((keyword) => input.jobDescription.toLowerCase().includes(keyword))) {
+  if (!policy.allowedKeywords.some((keyword) => input.jobDescription.toLowerCase().includes(keyword))) {
     return { verdict: "BLOCK", reason: "job_outside_registered_policy" };
   }
-  return {
-    verdict: "ALLOW",
-    reason: "registered_policy_and_objective_job_evidence_required",
-    scopeEvidence: descriptionIsAuthenticated
-      ? "public_task_description_matched_registered_policy"
-      : "verified_accepted_service_binding",
-  };
+  return { verdict: "ALLOW", reason: "registered_policy_and_objective_job_evidence_required" };
 }
 
 function minBigInt(...values) {
