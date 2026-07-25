@@ -686,6 +686,52 @@ for (const descriptionKey of ["jobDescription", "description", "jobSummary"]) {
   assert.notEqual(publicWithDescription.json().error, "direct_evidence_incomplete");
 }
 
+// The buyer is the same case as the description, and a sharper one: its aliases
+// include plain `buyer` and `buyerWallet`, which are ordinary request metadata.
+// Naming who is buying says nothing about which evidence path the caller meant,
+// so a public request carrying it must still resolve its taskReference rather
+// than be refused for job hashes it never needed to send.
+for (const buyerKey of ["targetBuyer", "buyer", "buyerWallet", "coverageBuyer"]) {
+  const publicWithBuyer = await callHandler(handler, {
+    method: "POST",
+    headers: { host: "policypool.test" },
+    body: {
+      targetAgent: "GlassDesk#3465",
+      taskReference: task.publicUrl,
+      requestedCoverageUSDT: "0.5",
+      [buyerKey]: "0x52e19669d7b199531bf689f7ec943632bd211b75",
+    },
+  });
+  assert.equal(
+    publicWithBuyer.json().evidenceMode,
+    "public_task_reference",
+    `${buyerKey} must not reroute a public request into direct mode`,
+  );
+  assert.equal(
+    publicWithBuyer.json().eligible,
+    true,
+    `${buyerKey} alongside a task reference must still quote`,
+  );
+  assert.notEqual(publicWithBuyer.json().error, "direct_evidence_incomplete");
+}
+
+// Excluding it from the signals must not make it optional. A direct request is
+// still refused without it, which is the distinction between requiring a field
+// and inferring intent from one.
+const directWithoutBuyer = await callHandler(directHandler, {
+  method: "POST",
+  body: {
+    targetAgent: "GlassDesk#3465",
+    targetJobId: DIRECT_JOB_ID,
+    targetCreationTxHash: DIRECT_CREATION_TX,
+    targetAcceptanceTxHash: DIRECT_ACCEPTANCE_TX,
+    jobDescription: DIRECT_DESCRIPTION,
+    requestedCoverageUSDT: "0.5",
+  },
+});
+assert.equal(directWithoutBuyer.json().error, "direct_evidence_incomplete");
+assert.deepEqual(directWithoutBuyer.json().missing, ["targetBuyer"]);
+
 // An on-chain identity field is what signals direct mode, and one alone is
 // enough to be held to the full requirement rather than silently half-handled.
 const onlyOneSignal = await callHandler(directHandler, {

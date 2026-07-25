@@ -118,16 +118,24 @@ const DIRECT_EVIDENCE_FIELDS = Object.freeze([
   "jobDescription",
 ]);
 
-// What signals the caller meant to use it. Deliberately excludes jobDescription:
-// it is descriptive text rather than an on-chain identity, its `description`
-// alias is broad enough to appear in unrelated request envelopes, and a public
-// request that merely carried a description would otherwise be rerouted into
-// direct mode and refused for missing hashes it never needed to send.
+// What signals the caller meant to use it: on-chain identity only, never a field
+// whose aliases are ordinary request metadata.
+//
+// jobDescription is excluded because it is descriptive text and its
+// `description` alias appears in unrelated envelopes. targetBuyer is excluded
+// for the same reason, and it is the sharper case: its aliases include plain
+// `buyer` and `buyerWallet`, so a perfectly good public-reference request that
+// happened to name its buyer was rerouted into direct mode and refused
+// direct_evidence_incomplete for hashes it never needed to send, with its
+// taskReference sitting unread.
+//
+// Both stay required by DIRECT_EVIDENCE_FIELDS. Requiring a field and inferring
+// intent from it are different jobs, and only the three below name something
+// that exists on chain.
 const DIRECT_EVIDENCE_SIGNALS = Object.freeze([
   "targetJobId",
   "targetCreationTxHash",
   "targetAcceptanceTxHash",
-  "targetBuyer",
 ]);
 
 function directEvidenceIntent(input) {
