@@ -91,7 +91,11 @@ assert.match(coverage, /name="targetServiceId"/, "coverage form must bind dynami
 // an on-chain job. A visitor must not be left thinking the service is broken,
 // and a notice that only says "unavailable" is barely better. It has to name the
 // path that still works, itself, rather than promise one the page never shows.
-assert.match(coverage, /class="evidence-notice"/, "coverage form must disclose the withdrawn public task evidence");
+// Extract the notice before asserting on it. Searching the whole page would let
+// the notice drop a required field while an unrelated mention elsewhere keeps
+// the gate green, which is the failure mode these checks exist to prevent.
+const evidenceNotice = coverage.match(/<div class="evidence-notice"[\s\S]*?<\/div>/)?.[0] || "";
+assert.ok(evidenceNotice, "coverage form must disclose the withdrawn public task evidence");
 // Every field the paid endpoint actually requires, verified against production:
 // omitting targetAgent returns target_agent_required and omitting jobDescription
 // returns job_description_required, so a notice listing only the three evidence
@@ -103,12 +107,12 @@ for (const field of [
   "targetCreationTxHash",
   "targetAcceptanceTxHash",
 ]) {
-  assert.match(coverage, new RegExp(`<code>${field}</code>`), `the notice must name ${field} as a required input`);
+  assert.match(evidenceNotice, new RegExp(`<code>${field}</code>`), `the notice must name ${field} as a required input`);
 }
-assert.match(coverage, /covered-job-receipt/, "the notice must name the endpoint that still takes direct evidence");
+assert.match(evidenceNotice, /covered-job-receipt/, "the notice must name the endpoint that still takes direct evidence");
 // A bare public task ID resolves to the same withdrawn page as a URL, and the
 // form still offers both, so the outage disclosure must cover both forms.
-assert.match(coverage, /in either form/, "the notice must cover public task IDs as well as URLs");
+assert.match(evidenceNotice, /in either form/, "the notice must cover public task IDs as well as URLs");
 
 // The same disclosure lives in three places and has now been narrowed to "URL"
 // twice. parseOkxTaskReference normalises a bare task id and a URL to the same
