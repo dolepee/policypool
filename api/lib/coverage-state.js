@@ -136,6 +136,12 @@ const ERROR_CONTRACT = Object.freeze({
     retryable: false,
     nextAction: "No payment was taken and no task should be recreated. Resolve the target's on-chain evidence yourself and supply targetJobId, targetCreationTxHash, and targetAcceptanceTxHash directly to the paid endpoint, which does not read the public task page.",
   },
+  direct_evidence_unavailable_for_universal_a2a: {
+    code: "DIRECT_EVIDENCE_UNAVAILABLE_FOR_THIS_POLICY",
+    message: "This provider's coverage is reconciled from the public task page, which OKX no longer publishes, so coverage bought with on-chain evidence alone could not be settled.",
+    retryable: false,
+    nextAction: "Coverage for this provider is unavailable until reconciliation no longer depends on the withdrawn page. No payment was taken. Providers whose coverage does not read that page remain available.",
+  },
   requested_coverage_below_minimum: {
     code: "COVERAGE_BELOW_MINIMUM",
     message: "The requested coverage cap is below the minimum this service will underwrite.",

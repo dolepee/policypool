@@ -1,7 +1,7 @@
 import { COVERAGE, MARKETPLACE, PAYMENT, XLAYER } from "./lib/config.js";
 import { createChainService, EvidenceError } from "./lib/chain.js";
 import { createLedger } from "./lib/ledger.js";
-import { fetchOkxTaskPage, OkxTaskPageError, parseOkxTaskReference } from "./lib/okx-task-page.js";
+import { fetchOkxTaskPage, OkxTaskPageError } from "./lib/okx-task-page.js";
 import {
   createQuoteService,
   QuoteConfigurationError,
@@ -216,17 +216,14 @@ export function createCoveragePreflightHandler(dependencies = {}) {
           {
             mode: "verified_onchain_evidence",
             required: ["targetAgent", ...DIRECT_EVIDENCE_FIELDS],
-            // A v0.4 A2A policy still requires the public task reference even
-            // though the page cannot be resolved into evidence. Advertising the
-            // mode as available while omitting this would send every client for
-            // an enrolled A2A provider into
-            // public_task_reference_required_for_universal_a2a.
-            conditionallyRequired: [
+            // Reconciliation for an enrolled v0.4 A2A covenant reads the public
+            // task page, which is withdrawn, so such a covenant could be sold and
+            // then never settle. The mode is refused there rather than quoted.
+            notAvailableFor: [
               {
-                field: "taskReference",
                 whenPolicy: "serviceType is A2A and the policy is enrolled on the v0.4 stack",
-                reason: "public_task_reference_required_for_universal_a2a",
-                note: "Supply the task URL or bare task id alongside the on-chain evidence. It is recorded on the covenant; the withdrawn page is never fetched.",
+                reason: "direct_evidence_unavailable_for_universal_a2a",
+                note: "Reconciliation for these covenants reads the withdrawn public task page, so coverage bought this way could not release or pay out. It is refused rather than sold.",
               },
             ],
             available: true,
@@ -302,6 +299,25 @@ export function createCoveragePreflightHandler(dependencies = {}) {
       });
     }
 
+    // An enrolled v0.4 A2A covenant is reconciled through a2aObservation, which
+    // fetches the public task page whenever the covenant carries a reference and
+    // otherwise falls back to chain. evaluateGuard requires that reference for
+    // these policies, so a direct-evidence purchase would either be refused at
+    // the guard or, if the reference were supplied, store the field that forces
+    // a page fetch which now always throws. The covenant would be paid for and
+    // then never release or advance to payout. Refuse to sell what cannot be
+    // settled, rather than quote it and discover this after the money moves.
+    if (directEvidence && policy.onchainPolicyId && policy.serviceType === "A2A") {
+      return decline(res, "direct_evidence_unavailable_for_universal_a2a", {
+        policy: {
+          agentId: policy.agentId,
+          agentName: policy.agentName,
+          serviceType: policy.serviceType,
+          coverableNow: false,
+        },
+      });
+    }
+
     let task = null;
     if (!directEvidence) {
       try {
@@ -320,23 +336,10 @@ export function createCoveragePreflightHandler(dependencies = {}) {
     // id, asset, amount, service type and accepted-service hash. Nothing the
     // caller asserts is taken on trust: a wrong buyer wallet, a forged hash, a
     // reverted transaction, or a job that is not accepted all fail there.
-    // A v0.4 A2A policy still requires a public task reference, and the page
-    // being unreadable does not mean the buyer has forgotten their task id. Take
-    // it when offered so enrolled A2A providers keep a usable path; without this
-    // every such request declines with public_task_reference_required_for_universal_a2a
-    // while the public mode is advertised unavailable, which is no path at all.
-    let publicTaskReference = task?.publicTaskId || null;
-    if (directEvidence && input.taskReference) {
-      try {
-        publicTaskReference = String(parseOkxTaskReference(input.taskReference));
-      } catch (error) {
-        return sendJson(res, 422, {
-          ok: false,
-          error: error instanceof OkxTaskPageError ? error.code : "okx_task_reference_invalid",
-          charged: false,
-        });
-      }
-    }
+    // Never carried in direct mode. Storing a reference on the covenant is what
+    // makes a2aObservation fetch the withdrawn page instead of falling back to
+    // chain, so a direct covenant deliberately has none.
+    const publicTaskReference = task?.publicTaskId || null;
     const jobId = directEvidence ? input.targetJobId : task.jobId;
     const jobDescription = directEvidence ? input.jobDescription : task.description;
     let evidence;

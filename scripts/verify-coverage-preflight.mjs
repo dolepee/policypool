@@ -539,74 +539,79 @@ assert.deepEqual(
 assert.equal(direct.json().paidRequest.body.targetJobId, DIRECT_JOB_ID);
 assert.equal(direct.json().paidRequest.body.jobDescription, DIRECT_DESCRIPTION);
 
-// A v0.4 A2A policy still requires a public task reference. The page being
-// unreadable does not mean the buyer forgot their task id, and refusing to carry
-// it would leave enrolled A2A providers with no usable preflight at all: the
-// public mode is advertised unavailable and this one would decline every time
-// with public_task_reference_required_for_universal_a2a.
+// An enrolled v0.4 A2A covenant is reconciled through a2aObservation, which
+// reads the public task page whenever the covenant carries a reference. That
+// page is withdrawn, so such a covenant would be paid for and then never release
+// or advance to payout. Refusing to quote it is the point: PolicyPool must not
+// sell coverage it cannot settle.
 const universalDirectHandler = createCoveragePreflightHandler({
   chain: {
     ...universalChain,
     async verifyTargetOrder(args) {
-      return { ...(await chain.verifyTargetOrder(args)), jobId: args.jobId, buyer: args.buyer };
+      throw new Error("a refusal must land before any chain evidence is read");
     },
     async resolveTargetOrderEvidence() {
-      throw new Error("direct evidence must not resolve through the public task index");
+      throw new Error("the public task index must not be consulted");
     },
   },
   ledger,
   policyResolver: { async resolve() { return { policy: universalPolicy, source: "v0.4_provider_enrollment_registry" }; } },
-  taskFetcher: async () => { throw new Error("the public page must not be fetched in direct mode"); },
+  taskFetcher: async () => { throw new Error("the public page must not be fetched"); },
   now: () => Date.parse("2026-07-11T10:02:00.000Z"),
   quoteSecret: QUOTE_SECRET,
 });
 
-const universalDirectWithout = await callHandler(universalDirectHandler, {
+const universalDirect = await callHandler(universalDirectHandler, {
   method: "POST",
   body: { ...directBody, targetAgent: "3465", targetServiceId: "30019" },
 });
-assert.equal(
-  universalDirectWithout.json().reason,
-  "public_task_reference_required_for_universal_a2a",
-  "a v0.4 A2A policy must still insist on a public task reference",
-);
-assert.equal(universalDirectWithout.json().charged, false);
+assert.equal(universalDirect.json().eligible, false, "an unsettleable covenant must not be quoted");
+assert.equal(universalDirect.json().reason, "direct_evidence_unavailable_for_universal_a2a");
+assert.equal(universalDirect.json().charged, false);
+assert.equal(universalDirect.json().policy.coverableNow, false);
 
-const universalDirect = await callHandler(universalDirectHandler, {
+// Supplying a reference must not buy a way around it: storing that reference is
+// precisely what breaks reconciliation.
+const universalDirectWithReference = await callHandler(universalDirectHandler, {
+  method: "POST",
+  body: { ...directBody, targetAgent: "3465", targetServiceId: "30019", taskReference: task.publicUrl },
+});
+assert.equal(
+  universalDirectWithReference.json().reason,
+  "direct_evidence_unavailable_for_universal_a2a",
+  "a task reference must not unlock a covenant that cannot be reconciled",
+);
+
+
+// A direct covenant never records a public task reference, since that field is
+// what makes a2aObservation read the withdrawn page instead of falling back to
+// chain.
+assert.equal(
+  "targetTaskReference" in direct.json().paidRequest.body,
+  false,
+  "a direct covenant must carry no public task reference",
+);
+
+// And must not acquire one just because the caller offered it. Storing that
+// field is what makes a2aObservation read the withdrawn page instead of falling
+// back to chain, so it has to be dropped at the source rather than merely
+// omitted when absent.
+const directWithOfferedReference = await callHandler(directHandler, {
   method: "POST",
   headers: { host: "policypool.test" },
-  body: {
-    ...directBody,
-    targetAgent: "3465",
-    targetServiceId: "30019",
-    taskReference: task.publicUrl,
-  },
+  body: { ...directBody, taskReference: task.publicUrl },
 });
+assert.equal(directWithOfferedReference.json().eligible, true);
 assert.equal(
-  universalDirect.json().eligible,
-  true,
-  "supplying the task reference alongside direct evidence must satisfy the A2A requirement",
-);
-assert.equal(universalDirect.json().evidenceMode, "verified_onchain_evidence");
-assert.equal(
-  universalDirect.json().paidRequest.body.targetTaskReference,
-  task.publicTaskId,
-  "the reference must reach the paid request, normalised from the URL the caller gave",
+  "targetTaskReference" in directWithOfferedReference.json().paidRequest.body,
+  false,
+  "an offered task reference must not be recorded on a direct covenant",
 );
 assert.equal(
-  universalDirect.json().task,
-  null,
-  "accepting a reference must not mean the withdrawn page was read",
+  directWithOfferedReference.json().evidenceMode,
+  "verified_onchain_evidence",
+  "offering a reference must not switch the request back to the withdrawn path",
 );
-
-// A malformed reference is refused rather than passed through as junk.
-const badReference = await callHandler(universalDirectHandler, {
-  method: "POST",
-  body: { ...directBody, targetAgent: "3465", targetServiceId: "30019", taskReference: "https://example.com/tasks/1" },
-});
-assert.equal(badReference.statusCode, 422);
-assert.equal(badReference.json().error, "okx_task_host_not_allowed");
-assert.equal(badReference.json().charged, false);
 assert.equal(
   "targetTaskReference" in direct.json().paidRequest.body,
   false,
@@ -664,14 +669,17 @@ for (const field of ["targetJobId", "targetCreationTxHash", "targetAcceptanceTxH
   assert.ok(onchainMode.required.includes(field), `discovery must list ${field} as required`);
 }
 
-// A v0.4 A2A policy also needs the public task reference. Advertising the mode
-// as available without saying so sends every client for an enrolled A2A provider
-// straight into public_task_reference_required_for_universal_a2a.
-const conditional = (onchainMode.conditionallyRequired || [])
-  .find((entry) => entry.field === "taskReference");
-assert.ok(conditional, "discovery must state that A2A policies also need a task reference");
-assert.equal(conditional.reason, "public_task_reference_required_for_universal_a2a");
-assert.match(conditional.whenPolicy, /A2A/, "the condition must name when it applies");
+// Discovery states where the mode does not apply, rather than advertising it
+// unconditionally and refusing only on submission. An enrolled v0.4 A2A covenant
+// is reconciled from the withdrawn page, so it is refused rather than sold.
+const notAvailable = (onchainMode.notAvailableFor || [])
+  .find((entry) => entry.reason === "direct_evidence_unavailable_for_universal_a2a");
+assert.ok(notAvailable, "discovery must state where direct evidence is refused");
+assert.match(notAvailable.whenPolicy, /A2A/, "the exclusion must name when it applies");
+assert.ok(
+  !(onchainMode.required || []).includes("taskReference"),
+  "a direct covenant must never be asked for a reference it must not store",
+);
 
 // Monetary transparency: each amount is named, the binding bound is stated, and
 // the sentence relates the fee to the maximum payout.
