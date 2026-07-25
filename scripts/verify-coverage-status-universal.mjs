@@ -219,6 +219,48 @@ assert.equal(relayReleased.release.reason, "provider_response_delivered_within_s
 assert.equal(relayReleased.release.source, "universal_reconciliation");
 assert.equal(relayReleased.reconciliation.deadline, PAST_DEADLINE);
 
+// Payout candidacy has to follow the covenant's own clock. observeRelayClock
+// marks a relay covenant payout-due purely on non-delivery by its deadline and
+// never reads marketplace job status, so a terminal job must not suppress
+// candidacy for a relay covenant the reconciler is about to pay out. The legacy
+// accepted-job predicate still governs verified_acceptance covenants.
+const relayPastDeadlineTerminalJob = await fetchStatus({
+  receiptId: "ppc-relay-terminal-job",
+  state: "active",
+  liabilityAtomic: "500000",
+  receipt: {
+    version: "0.4.0",
+    covenant: { deadline: PAST_DEADLINE },
+    target: { clockMode: "policypool_relay" },
+  },
+  targetOrder: { jobId: `0x${"ab".repeat(32)}` },
+}, { jobStatus: 6 });
+assert.equal(relayPastDeadlineTerminalJob.reconciliation.clockMode, "policypool_relay");
+assert.equal(relayPastDeadlineTerminalJob.reconciliation.deadlinePassed, true);
+assert.equal(
+  relayPastDeadlineTerminalJob.reconciliation.payoutDueCandidate,
+  true,
+  "a relay covenant past its deadline stays a candidate even once the job is terminal",
+);
+
+const legacyPastDeadlineTerminalJob = await fetchStatus({
+  receiptId: "ppc-legacy-terminal-job",
+  state: "active",
+  liabilityAtomic: "500000",
+  receipt: {
+    version: "0.4.0",
+    covenant: { deadline: PAST_DEADLINE },
+    target: { clockMode: "verified_acceptance" },
+  },
+  targetOrder: { jobId: `0x${"ab".repeat(32)}` },
+}, { jobStatus: 6 });
+assert.equal(legacyPastDeadlineTerminalJob.reconciliation.clockMode, "verified_acceptance");
+assert.equal(
+  legacyPastDeadlineTerminalJob.reconciliation.payoutDueCandidate,
+  false,
+  "a verified-acceptance covenant still requires an accepted job",
+);
+
 // A record whose history genuinely never recorded a deadline must report none
 // rather than inventing one from an unrelated transition.
 const noDeadlineAnywhere = await fetchStatus({

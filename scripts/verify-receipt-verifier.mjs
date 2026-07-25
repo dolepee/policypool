@@ -376,7 +376,7 @@ for (const id of ["ppc-affca246b1cf8c9b", "ppc-d99d7f72895d70ab", "ppc-bd38c8111
 
 // The active-coverage promise depends on the covenant's recorded payout basis;
 // the pipelines genuinely differ, so one sentence cannot be correct for all.
-function activeView(payoutBasis, providerBonded) {
+function activeView(payoutBasis, providerBonded, clockMode) {
   return buildReceiptView({
     ok: true,
     receiptId: "ppc-active-basis",
@@ -384,7 +384,7 @@ function activeView(payoutBasis, providerBonded) {
     receipt: {
       version: providerBonded ? "0.4.0" : "0.2.0",
       covenant: { coverageCapUSDT: "0.5", deadline: "2026-07-26T00:00:00.000Z" },
-      target: { agentName: "Foreman", agentId: "4348", payoutBasis },
+      target: { agentName: "Foreman", agentId: "4348", payoutBasis, ...(clockMode ? { clockMode } : {}) },
       servicePayment: {},
       ...(providerBonded ? { providerBond: { custody: "provider_first_loss_bond_vault" } } : {}),
     },
@@ -407,6 +407,30 @@ assert.match(legacy.plain, /released without a payout/i, "a reserve covenant rel
 // The three wordings are genuinely distinct, so no basis is silently misdescribed.
 assert.notEqual(bonded.plain, legacy.plain, "bonded and reserve wording must differ");
 assert.notEqual(netLoss.plain, legacy.plain, "net-loss and reserve wording must differ");
+
+// Payout basis and clock mode are enrolled independently, so a bonded covenant
+// may still run on PolicyPool's relay clock. observeRelayClock never reads
+// marketplace job status, so for a relay covenant the promise that a
+// platform-ended job is released before the deadline is one the reconciler
+// contradicts: absent a verified in-SLA response it still becomes payable.
+const bondedRelay = activeView("provider_bonded_sla_credit", true, "policypool_relay");
+assert.match(bondedRelay.plain, /first-loss bond/i, "a bonded relay covenant still pays from the bond");
+assert.doesNotMatch(
+  bondedRelay.plain,
+  /released without a payout/i,
+  "a relay covenant must not promise release for a platform-ended job",
+);
+assert.doesNotMatch(
+  bondedRelay.plain,
+  /even if the platform later stops, closes, refunds, or expires/i,
+  "a relay covenant's outcome does not turn on platform-terminal events at all",
+);
+assert.match(bondedRelay.plain, /relay clock/i, "a relay covenant must say which clock governs it");
+assert.notEqual(
+  bondedRelay.plain,
+  bonded.plain,
+  "relay and verified-acceptance bonded covenants must not share one promise",
+);
 
 // The recorded basis is surfaced in the fact table for the reader to check.
 assert.ok(

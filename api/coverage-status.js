@@ -54,6 +54,16 @@ export function createCoverageStatusHandler(dependencies = {}) {
       const receiptDeadline = record.receipt?.covenant?.deadline || null;
       const effectiveDeadline = receiptDeadline || reconciledDeadline(record);
       const deadlineMs = Date.parse(effectiveDeadline || "");
+      const deadlinePassed = Number.isFinite(deadlineMs) && now() > deadlineMs;
+      // A relay covenant is clocked by PolicyPool's own provider relay, and
+      // observeRelayClock marks it payout due purely on non-delivery by that
+      // deadline without ever reading marketplace job status. Applying the
+      // legacy accepted-job predicate to it would report a covenant the
+      // reconciler is about to pay out as not a candidate.
+      const clockMode = record.receipt?.target?.clockMode || "verified_acceptance";
+      const payoutDueCandidate = record.state === "active"
+        && deadlinePassed
+        && (clockMode === "policypool_relay" || jobStatus === 1);
       // v0.4 transitions record their reason and evidence in
       // universalReconciliation and never populate record.release, so a
       // universally released covenant would otherwise report release: null and
@@ -82,12 +92,10 @@ export function createCoverageStatusHandler(dependencies = {}) {
           deadlineSource: receiptDeadline
             ? "issued_receipt"
             : (effectiveDeadline ? "universal_reconciliation" : null),
-          deadlinePassed: Number.isFinite(deadlineMs) && now() > deadlineMs,
-          payoutDueCandidate: record.state === "active"
-            && jobStatus === 1
-            && Number.isFinite(deadlineMs)
-            && now() > deadlineMs,
-          note: "State changes only after the reconciler reads the public job status and updates the durable ledger.",
+          deadlinePassed,
+          payoutDueCandidate,
+          clockMode,
+          note: "State changes only after the reconciler reads the covenant's own clock and updates the durable ledger.",
         },
         payout: record.payout || null,
         release,
