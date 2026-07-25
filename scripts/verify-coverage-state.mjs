@@ -59,6 +59,13 @@ for (const error of ["okx_task_timeline_unavailable", "okx_task_onchain_id_unava
   assert.equal(withdrawn.receiptIssued, false);
   assert.match(withdrawn.nextAction, /No payment was taken/);
   assert.match(withdrawn.nextAction, /no task should be recreated/);
+  // A dead end would be honest but useless. The paid endpoint accepts resolved
+  // on-chain evidence and never reads the public task page, so that path is
+  // unaffected and is the one a caller should be sent to. Name the exact fields
+  // rather than gesturing at "on-chain evidence".
+  for (const field of ["targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash"]) {
+    assert.match(withdrawn.nextAction, new RegExp(field), `${error} must name ${field}`);
+  }
 }
 
 // Receipt lifecycle states.
