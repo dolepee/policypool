@@ -125,13 +125,18 @@
                 <p id="coverage-buyer-help">Checked against the job's creation event. A wallet that does not own the job is refused here, before any payment, and must be the payer on the paid call.</p>
               </div>
               <div class="field-block field-wide direct-evidence-field">
+                <label for="coverage-direct-task">Public task reference <span class="field-hint">required for v0.4 A2A providers, optional otherwise</span></label>
+                <input id="coverage-direct-task" name="taskReference" type="text" inputmode="url" autocomplete="off" data-optional="true" placeholder="https://www.okx.ai/tasks/401277" aria-describedby="coverage-direct-task-help coverage-form-status" />
+                <p id="coverage-direct-task-help">Recorded on the covenant. The withdrawn page is never fetched, so this is your task id, not a lookup.</p>
+              </div>
+              <div class="field-block field-wide direct-evidence-field">
                 <label for="coverage-job-description">Job description</label>
                 <textarea id="coverage-job-description" name="jobDescription" rows="2" autocomplete="off" placeholder="What the covered job was asked to deliver." required aria-describedby="coverage-job-description-help coverage-form-status"></textarea>
                 <p id="coverage-job-description-help">Checked against the provider's published scope.</p>
               </div>
               <div class="field-block field-wide public-reference-field" hidden>
                 <label for="coverage-task">Accepted OKX.AI task URL or public task ID</label>
-                <input id="coverage-task" name="taskReference" type="text" inputmode="url" autocomplete="off" placeholder="https://www.okx.ai/tasks/401277" disabled aria-describedby="coverage-task-help coverage-form-status" />
+                <input id="coverage-task" type="text" inputmode="url" autocomplete="off" placeholder="https://www.okx.ai/tasks/401277" disabled aria-describedby="coverage-task-help coverage-form-status" />
                 <p id="coverage-task-help">Unavailable while OKX.AI withholds the acceptance timeline and on-chain task ID.</p>
               </div>
             </div>

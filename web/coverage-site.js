@@ -819,7 +819,10 @@ function bindCoveragePreflight() {
     for (const field of form.querySelectorAll(".direct-evidence-field")) {
       field.hidden = !direct;
       for (const control of field.querySelectorAll("input, textarea")) {
-        control.required = direct;
+        // The task reference is only required for enrolled v0.4 A2A policies,
+        // which the browser cannot know before quoting, so it is offered rather
+        // than demanded. The API states the condition in its discovery response.
+        control.required = direct && control.dataset.optional !== "true";
         control.disabled = !direct;
       }
     }
@@ -864,6 +867,11 @@ function bindCoveragePreflight() {
           targetAcceptanceTxHash: (values.get("targetAcceptanceTxHash") || "").trim(),
           targetBuyer: (values.get("targetBuyer") || "").trim(),
           jobDescription: (values.get("jobDescription") || "").trim(),
+          // Sent only when given. An empty string would read as a lookup that
+          // was attempted against the withdrawn page and returned nothing.
+          ...((values.get("taskReference") || "").trim()
+            ? { taskReference: values.get("taskReference").trim() }
+            : {}),
         }),
     };
     setPreflightStatus(mode === "public_task_reference"

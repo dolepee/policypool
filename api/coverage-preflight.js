@@ -212,8 +212,21 @@ export function createCoveragePreflightHandler(dependencies = {}) {
           {
             mode: "verified_onchain_evidence",
             required: ["targetAgent", ...DIRECT_EVIDENCE_FIELDS],
+            // A v0.4 A2A policy still requires the public task reference even
+            // though the page cannot be resolved into evidence. Advertising the
+            // mode as available while omitting this would send every client for
+            // an enrolled A2A provider into
+            // public_task_reference_required_for_universal_a2a.
+            conditionallyRequired: [
+              {
+                field: "taskReference",
+                whenPolicy: "serviceType is A2A and the policy is enrolled on the v0.4 stack",
+                reason: "public_task_reference_required_for_universal_a2a",
+                note: "Supply the task URL or bare task id alongside the on-chain evidence. It is recorded on the covenant; the withdrawn page is never fetched.",
+              },
+            ],
             available: true,
-            note: "You supply the exact X Layer transactions; PolicyPool verifies them against the task escrow rather than trusting them. targetBuyer must be the wallet that created the target job, and must be the payer on the paid call.",
+            note: "You supply the exact X Layer transactions; PolicyPool verifies them against the task escrow rather than trusting them. targetBuyer must be the wallet that created the target job, and must be the payer on the paid call. The job description is checked against the policy's published scope but is not proved on chain.",
           },
         ],
         supportedTargets: supportedTargets(),

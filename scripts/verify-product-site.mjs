@@ -176,6 +176,26 @@ assert.match(
   "the withdrawn mode must be shown disabled rather than offered or hidden",
 );
 
+// An enrolled v0.4 A2A policy still requires the public task reference. Without a
+// field for it the form can never cover one, since its request carries only the
+// advertised direct fields.
+assert.match(
+  coverageForm,
+  /id="coverage-direct-task"[^>]*name="taskReference"/,
+  "the form must let a direct request carry a task reference for A2A policies",
+);
+assert.match(
+  coverageForm,
+  /id="coverage-direct-task"[^>]*data-optional="true"/,
+  "the reference is conditional, so it must not be demanded of every direct request",
+);
+// Exactly one submittable input may own the name, or FormData becomes ambiguous.
+assert.equal(
+  (coverageForm.match(/name="taskReference"/g) || []).length,
+  1,
+  "only one input may carry the taskReference name",
+);
+
 // The same disclosure lives in three places and has now been narrowed to "URL"
 // twice. parseOkxTaskReference normalises a bare task id and a URL to the same
 // withdrawn page, so any surface that scopes the outage to URLs alone sends a

@@ -664,6 +664,15 @@ for (const field of ["targetJobId", "targetCreationTxHash", "targetAcceptanceTxH
   assert.ok(onchainMode.required.includes(field), `discovery must list ${field} as required`);
 }
 
+// A v0.4 A2A policy also needs the public task reference. Advertising the mode
+// as available without saying so sends every client for an enrolled A2A provider
+// straight into public_task_reference_required_for_universal_a2a.
+const conditional = (onchainMode.conditionallyRequired || [])
+  .find((entry) => entry.field === "taskReference");
+assert.ok(conditional, "discovery must state that A2A policies also need a task reference");
+assert.equal(conditional.reason, "public_task_reference_required_for_universal_a2a");
+assert.match(conditional.whenPolicy, /A2A/, "the condition must name when it applies");
+
 // Monetary transparency: each amount is named, the binding bound is stated, and
 // the sentence relates the fee to the maximum payout.
 const economics = direct.json().coverage;
