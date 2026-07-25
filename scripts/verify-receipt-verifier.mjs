@@ -399,6 +399,25 @@ assert.match(bonded.plain, /even if the platform later stops, closes, refunds, o
 const netLoss = activeView("net_loss", true);
 assert.match(netLoss.plain, /marketplace recovery is terminal/i, "net-loss pays only after terminal recovery");
 assert.match(netLoss.plain, /recovered amounts/i, "net-loss is reduced by recoveries");
+// observeOkxA2AClock releases a verified-acceptance covenant outright when a
+// terminal status lands at or before the deadline, so a promise that mentions
+// only the post-deadline recovery path omits the outcome that pays nothing.
+assert.match(
+  netLoss.plain,
+  /released without a payout/i,
+  "a verified-acceptance net-loss covenant must disclose the early-terminal release",
+);
+
+// That early release is a marketplace outcome, so it must not be promised for a
+// covenant clocked by PolicyPool's relay.
+const netLossRelay = activeView("net_loss", true, "policypool_relay");
+assert.match(netLossRelay.plain, /marketplace recovery is terminal/i);
+assert.doesNotMatch(
+  netLossRelay.plain,
+  /released without a payout/i,
+  "a relay net-loss covenant must not promise release for a platform-ended job",
+);
+assert.match(netLossRelay.plain, /relay clock/i, "a relay covenant must say which clock governs it");
 
 const legacy = activeView("legacy_reserve_covenant", false);
 assert.match(legacy.plain, /still accepted/i, "a reserve covenant requires the job to stay accepted");
