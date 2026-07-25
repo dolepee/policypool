@@ -725,6 +725,20 @@ assert.equal(
 assert.equal(unrelatedDescription.json().reason, "job_outside_registered_policy");
 assert.equal(unrelatedDescription.json().charged, false);
 
+// A refusal must say which evidence path evaluated it. Without that a caller
+// debugging a decline cannot tell whether the evidence they supplied was even
+// the evidence that was used.
+assert.equal(
+  unrelatedDescription.json().evidenceMode,
+  "verified_onchain_evidence",
+  "a direct-mode refusal must report the mode that produced it",
+);
+assert.equal(
+  belowMinimum.json().evidenceMode,
+  "public_task_reference",
+  "a public-mode refusal must report its mode too",
+);
+
 assert.equal(
   direct.json().scopeEvidence,
   "buyer_declared_description_matched_registered_policy",

@@ -143,7 +143,7 @@ function evidenceUnavailable(error) {
   ].includes(error?.code);
 }
 
-function decline(res, reason, extra = {}) {
+function declineWith(res, reason, extra = {}) {
   return sendJson(res, 200, {
     ok: true,
     eligible: false,
@@ -195,6 +195,10 @@ export function createCoveragePreflightHandler(dependencies = {}) {
 
     const input = readInput(req);
     const directEvidence = directEvidenceIntent(input);
+    const evidenceMode = directEvidence ? "verified_onchain_evidence" : "public_task_reference";
+    // Declines carry the mode too. A caller debugging a refusal otherwise cannot
+    // tell whether the evidence they supplied was the evidence that was used.
+    const decline = (response, reason, extra = {}) => declineWith(response, reason, { evidenceMode, ...extra });
     if (!input.targetAgent && !input.taskReference && !directEvidence) {
       return sendJson(res, 200, {
         ok: true,
@@ -487,7 +491,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
       // marketplace page in this flow, and inventing one would misrepresent
       // where the evidence came from. `evidenceMode` says which path ran.
       task,
-      evidenceMode: directEvidence ? "verified_onchain_evidence" : "public_task_reference",
+      evidenceMode,
       // Where the description that satisfied the policy's scope keywords came
       // from. On the public path it is the marketplace page's own text. In
       // direct mode the buyer writes it, and the marketplace publishes no

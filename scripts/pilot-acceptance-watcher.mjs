@@ -182,6 +182,9 @@ async function watch(args) {
   const fromBlock = args.fromBlock;
   const jobDescription = String(args.jobDescription || "");
   const cap = String(args.cap || "0.5");
+  if (!/^\d+(\.\d{1,6})?$/.test(cap)) {
+    throw new Error(`--cap must be a USD₮0 amount with at most six decimals, got ${cap}`);
+  }
   const targetAgent = String(args.targetAgent || "Foreman#4348");
 
   if (!/^0x[a-f0-9]{64}$/.test(jobId)) throw new Error("--job-id must be a bytes32 hash");
@@ -285,6 +288,8 @@ async function watch(args) {
         deadline: payload.coverage?.deadline,
         enrollmentClosesAt: payload.coverage?.enrollmentClosesAt,
         body,
+        paidRequestBody: payload.paidRequest?.body || null,
+        quoteId: payload.paidRequest?.body?.quoteId || null,
       });
 
       console.log("=".repeat(72));
@@ -305,7 +310,19 @@ async function watch(args) {
       console.log(`  agent    #${MARKETPLACE.agentId}   ${MARKETPLACE.agentUrl}`);
       console.log(`  service  #${MARKETPLACE.serviceId}`);
       console.log(`  payer    ${payload.paidRequest?.payerMustEqualTargetBuyer || buyer}`);
-      console.log(`\ntask payload:\n${JSON.stringify(body, null, 2)}\n`);
+      // The quote-bound body, not the preflight request. It carries quoteId,
+      // which ties the purchase to this signed quote. Without it the paid
+      // endpoint falls back to recovering the one open quote for the payer, and
+      // a second preflight run leaves two, at which point that recovery refuses
+      // and the enrollment window is gone.
+      if (!payload.paidRequest?.body?.quoteId) {
+        console.error("\nWARNING: the quote did not return a bound paid request. Do not purchase.");
+        record("paid_request_missing_quote", { attemptKey: key, paidRequest: payload.paidRequest || null });
+        process.exitCode = 1;
+        return;
+      }
+      console.log(`\ntask payload (quote-bound, use exactly this):\n${JSON.stringify(payload.paidRequest.body, null, 2)}\n`);
+      console.log(`endpoint the marketplace task must call:\n  ${payload.paidRequest.endpoint}\n`);
       console.log(`A direct payment to /api/covered-job-receipt would settle a valid`);
       console.log(`covenant that OKX never records as a sale for agent #${MARKETPLACE.agentId}.\n`);
       console.log(`once purchased:  node scripts/pilot-acceptance-watcher.mjs confirm --receipt-id ppc-…`);
@@ -336,7 +353,16 @@ async function confirm(args) {
   // Confirming any active receipt paid by some non-house wallet would green-light
   // withholding delivery on a job this pilot never watched. The prepared attempt
   // is the authority on which job, buyer and agent are in scope.
-  const prepared = readEvidence().filter((entry) => entry.event === "purchase_prepared").pop();
+  // Several attempts can sit in the log across restarts or aborted runs. Taking
+  // the last one would compare this receipt against whichever attempt happened
+  // to be prepared most recently, which is not necessarily the one it belongs to.
+  const preparedAttempts = readEvidence().filter((entry) => entry.event === "purchase_prepared");
+  const receiptJobForMatch = String(
+    payload.receipt?.targetJob?.jobId || payload.receipt?.target?.jobId || "",
+  ).toLowerCase();
+  const prepared = preparedAttempts.find(
+    (entry) => String(entry.body?.targetJobId || "").toLowerCase() === receiptJobForMatch,
+  ) || preparedAttempts.at(-1);
   if (!prepared) {
     problems.push("no watched attempt found in the evidence log; run `watch` first");
   } else {
