@@ -127,7 +127,12 @@ export function buildReceiptView(payload, options = {}) {
   const covenant = receipt.covenant || {};
   const servicePayment = receipt.servicePayment || {};
   const payout = payload.payout || null;
-  const release = payload.release || null;
+  // v0.4 transitions record their outcome in universalReconciliation and never
+  // populate release. The API unifies the two, and the view keeps the same
+  // fallback so an older cached API response cannot lose the recorded reason.
+  const universal = payload.universalReconciliation || null;
+  const release = payload.release
+    || (state === "released" && universal?.to === "released" ? universal : null);
 
   const capUSDT = covenant.coverageCapUSDT || usdt(covenant.coverageCapAtomic);
   const feeUSDT = servicePayment.amountUSDT || usdt(servicePayment.amountAtomic);
@@ -137,7 +142,14 @@ export function buildReceiptView(payload, options = {}) {
   const payoutAtomic = payout ? Number(payout.amountAtomic) : 0;
   const payoutIsPositive = Number.isFinite(payoutAtomic) && payoutAtomic > 0;
   const payoutUSDT = payoutIsPositive ? usdt(payout.amountAtomic) : null;
-  const deadline = instant(covenant.deadline);
+  // A started relay covenant's authoritative deadline is computed by the
+  // reconciler and travels beside the hash-committed receipt, never inside it,
+  // so the issued document alone under-reports it.
+  const effectiveDeadline = covenant.deadline
+    || payload.reconciliation?.deadline
+    || universal?.deadline
+    || null;
+  const deadline = instant(effectiveDeadline);
   const providerName = target.agentName || `agent ${target.agentId || "unknown"}`;
 
   let plain;
@@ -163,7 +175,13 @@ export function buildReceiptView(payload, options = {}) {
     // it from job status alone, with no completion timestamp and no comparison
     // against the deadline, so a job that finished late still earns it. Only a
     // reason that verified timing may claim delivery was within the SLA.
-    const timeVerifiedDelivery = new Set(["service_delivered_within_sla"]);
+    // Both reasons are timestamp-verified: the A2A clock compares the recorded
+    // delivery time against the deadline, and the relay clock releases only on
+    // completedWithinSla. Status-only reasons stay excluded.
+    const timeVerifiedDelivery = new Set([
+      "service_delivered_within_sla",
+      "provider_response_delivered_within_sla",
+    ]);
     if (timeVerifiedDelivery.has(release?.reason)) {
       headline = "Delivered on time. Liability released.";
       plain = `${providerName} delivered within the agreed deadline, so no payout was owed and the reserved liability was released. This is the normal outcome for coverage that is never claimed.`;
@@ -179,11 +197,25 @@ export function buildReceiptView(payload, options = {}) {
     // so this record may represent coverage that was never issued at all.
     plain = "This record is awaiting reconciliation. Coverage issuance or its fee settlement is unconfirmed, so no payout is owed on the strength of this receipt. The reconciler will resolve it to a released, cancelled, or payable outcome.";
   } else if (state === "active") {
-    // The payout condition is that the job is still accepted and undelivered at
-    // the deadline. Other non-delivery endings, such as the platform stopping,
-    // closing, or expiring the job, release the covenant instead of paying, so
-    // promising payment for any non-delivery would overstate the protection.
-    plain = `Coverage is in force until ${deadline || "the stored deadline"}. If the job is still accepted and ${providerName} has not delivered by then, the buyer is owed up to ${capUSDT || "the cap"} USD₮0. If the platform instead stops, closes, or expires the job, the covenant is released without a payout.`;
+    // What the deadline pays depends on the covenant's recorded payout basis,
+    // and the pipelines genuinely differ: the reserve reconciler releases any
+    // platform-terminal job observed while active, while a provider-bonded SLA
+    // credit treats a deadline breach as payable even if the platform later
+    // stops, closes, refunds, or expires the job. The wording is selected from
+    // the receipt's own recorded basis rather than asserted for all of them.
+    const basis = target.payoutBasis
+      || (receipt.providerBond ? null : "legacy_reserve_covenant");
+    const until = deadline || "the stored deadline";
+    const cap = capUSDT || "the cap";
+    if (basis === "provider_bonded_sla_credit") {
+      plain = `Coverage is in force until ${until}. If ${providerName} has not delivered by then, the buyer is owed up to ${cap} USD₮0 from the provider's first-loss bond, even if the platform later stops, closes, refunds, or expires the job. A job the platform ends before the deadline is released without a payout.`;
+    } else if (basis === "net_loss") {
+      plain = `Coverage is in force until ${until}. If ${providerName} has not delivered by then, up to ${cap} USD₮0 becomes payable only after marketplace recovery is terminal, reduced by any verified recovered amounts.`;
+    } else if (basis === "legacy_reserve_covenant") {
+      plain = `Coverage is in force until ${until}. If the job is still accepted and ${providerName} has not delivered by then, the buyer is owed up to ${cap} USD₮0. A job the platform stops, closes, or expires while coverage is active is released without a payout.`;
+    } else {
+      plain = `Coverage is in force until ${until}. The outcome at the deadline follows the covenant's recorded payout basis shown below; nothing beyond it is promised here.`;
+    }
   } else if (state === "pending_start") {
     // Paid and issued, but the relay clock has not started. Not terminal.
     plain = `The coverage fee has settled and this receipt is issued. Its deadline starts when the funded request reaches ${providerName}, so cover is not counting down yet.`;
@@ -211,6 +243,7 @@ export function buildReceiptView(payload, options = {}) {
     ["Covered provider", target.agentName ? `${target.agentName} #${target.agentId}` : null],
     ["Covered service", target.serviceName ? `${target.serviceName} (${target.serviceType || "?"})` : null],
     ["Breach rule", (covenant.objectiveBreachRules || [])[0] || null],
+    ["Payout basis", target.payoutBasis || null],
     ["Target job value", usdt(targetJob.amountAtomic) ? `${usdt(targetJob.amountAtomic)} USD₮0` : null],
     ["Job accepted at", instant(targetJob.acceptedAt)],
     ["Receipt hash", receipt.receiptHash ? shortHash(receipt.receiptHash) : null],

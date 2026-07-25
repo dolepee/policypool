@@ -26,7 +26,33 @@ export function createCoverageStatusHandler(dependencies = {}) {
       const jobStatus = record.targetOrder?.jobId
         ? await chain.getJobStatus(record.targetOrder.jobId)
         : null;
-      const deadlineMs = Date.parse(record.receipt?.covenant?.deadline || "");
+      // A started v0.4 relay covenant has its authoritative deadline computed
+      // by the universal reconciler, not in the originally issued receipt, so
+      // the receipt document alone under-reports it. Same precedence as the
+      // reconciler's own covenantDeadline helper. The issued receipt is never
+      // edited here: it is hash-committed, so the computed deadline travels
+      // beside it rather than inside it.
+      const receiptDeadline = record.receipt?.covenant?.deadline || null;
+      const effectiveDeadline = receiptDeadline
+        || record.universalReconciliation?.deadline
+        || null;
+      const deadlineMs = Date.parse(effectiveDeadline || "");
+      // v0.4 transitions record their reason and evidence in
+      // universalReconciliation and never populate record.release, so a
+      // universally released covenant would otherwise report release: null and
+      // lose its verified reason. Present one release shape regardless of
+      // which pipeline produced it.
+      const universal = record.universalReconciliation || null;
+      const release = record.release
+        || (record.state === "released" && universal?.to === "released"
+          ? {
+            from: universal.from,
+            to: universal.to,
+            reason: universal.reason,
+            observedAt: universal.observedAt,
+            source: "universal_reconciliation",
+          }
+          : null);
       return sendJson(res, 200, {
         ok: true,
         receiptId,
@@ -35,6 +61,10 @@ export function createCoverageStatusHandler(dependencies = {}) {
         liabilityAtomic: record.liabilityAtomic,
         targetJobStatus: jobStatus,
         reconciliation: {
+          deadline: effectiveDeadline,
+          deadlineSource: receiptDeadline
+            ? "issued_receipt"
+            : (effectiveDeadline ? "universal_reconciliation" : null),
           deadlinePassed: Number.isFinite(deadlineMs) && now() > deadlineMs,
           payoutDueCandidate: record.state === "active"
             && jobStatus === 1
@@ -43,7 +73,8 @@ export function createCoverageStatusHandler(dependencies = {}) {
           note: "State changes only after the reconciler reads the public job status and updates the durable ledger.",
         },
         payout: record.payout || null,
-        release: record.release || null,
+        release,
+        universalReconciliation: universal,
       });
     } catch (error) {
       return sendJson(res, 503, {
