@@ -27,6 +27,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { MARKETPLACE, OKX_TASK, PAYMENT, XLAYER } from "../api/lib/config.js";
 import { sha256 } from "../api/lib/utils.js";
 
@@ -146,6 +147,21 @@ function decode(logs, { jobId, buyer }) {
     result.onChainBuyer && buyer && result.onChainBuyer === buyer.toLowerCase(),
   );
   return result;
+}
+
+// A receipt reports the buyer in two shapes: `targetJob.buyer` is a plain
+// address, `receipt.buyer` is `{ address }`. The fallback between them cannot be
+// a bare String(): an unverified target job falls back to a literal that carries
+// no buyer at all, and stringifying the object then yields "[object Object]",
+// which is truthy. That would satisfy both the presence check and the
+// house-wallet check below — the one assertion this pilot exists to make. Return
+// an address or nothing, never a shape.
+export function buyerAddress(...candidates) {
+  for (const candidate of candidates) {
+    const value = typeof candidate === "string" ? candidate : candidate?.address;
+    if (typeof value === "string" && /^0x[a-fA-F0-9]{40}$/.test(value)) return value.toLowerCase();
+  }
+  return "";
 }
 
 // The attempt key the plan asks for: buyer, target job, policy hash, cap. A
@@ -346,7 +362,7 @@ async function confirm(args) {
 
   const receipt = payload.receipt || {};
   const fee = receipt.servicePayment || {};
-  const buyer = String(receipt.targetJob?.buyer || receipt.buyer || "").toLowerCase();
+  const buyer = buyerAddress(receipt.targetJob?.buyer, receipt.buyer);
   const feeAtomic = String(fee.amountAtomic ?? "");
   const problems = [];
 
@@ -363,7 +379,7 @@ async function confirm(args) {
     payload.receipt?.targetJob?.jobId || payload.receipt?.target?.jobId || "",
   ).toLowerCase();
   const receiptAttemptKey = attemptKey({
-    buyer: String(payload.receipt?.targetJob?.buyer || payload.receipt?.buyer || "").toLowerCase(),
+    buyer: buyerAddress(payload.receipt?.targetJob?.buyer, payload.receipt?.buyer),
     jobId: receiptJobForMatch,
     policyHash: payload.receipt?.target?.policyHash,
     capAtomic: payload.receipt?.covenant?.coverageCapAtomic,
@@ -445,7 +461,10 @@ async function confirm(args) {
   console.log(`not ${HOUSE_WALLET}.`);
 }
 
+// Guarded so a test can import the guards above without running the CLI.
+const invokedDirectly = import.meta.url === pathToFileURL(process.argv[1] || "").href;
 const [command, ...rest] = process.argv.slice(2);
+if (invokedDirectly) {
 const args = parseArgs(rest);
 try {
   if (command === "watch") await watch(args);
@@ -460,4 +479,5 @@ try {
   record("fatal", { command, message: error instanceof Error ? error.message : String(error) });
   console.error(`\n${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
+}
 }
