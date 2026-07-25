@@ -177,6 +177,14 @@ assert.equal(eligible.json().paidRequest.body.quoteId, eligible.json().quote.tok
 assert.equal(eligible.json().paidRequest.bodyMayBeOmittedOnReplay, true);
 assert.match(eligible.json().quote.token, /^ppq_[a-f0-9]{32}\.[a-f0-9]{64}$/);
 assert.equal(eligible.json().coverage.enrollmentClosesAt, "2026-07-11T14:01:00.000Z");
+// The public path's evidence.source is an established response value. Adding a
+// direct-evidence source must not overwrite it: this release is additive, and a
+// consumer comparing or displaying that exact string must keep working.
+assert.equal(
+  eligible.json().evidence.source,
+  "OKX.AI public task page plus X Layer task escrow events",
+  "the public evidence source must keep its established wording",
+);
 
 const universalPolicy = {
   agentId: "3465",

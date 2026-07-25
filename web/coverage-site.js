@@ -776,6 +776,31 @@ function bindCoveragePreflight() {
   targetSelect.addEventListener("change", setTargetMode);
   customService.addEventListener("input", () => { targetService.value = customService.value.trim(); });
   setTargetMode();
+
+  // Only the chosen mode's fields are shown and required, so form validation
+  // cannot block on an input the request will not carry. The public-reference
+  // radio ships disabled because OKX withdrew the fields it depends on; if they
+  // return, enabling that radio is the whole change and this already works.
+  const modeInputs = [...form.querySelectorAll('input[name="evidenceMode"]')];
+  const setEvidenceMode = () => {
+    const direct = form.querySelector('input[name="evidenceMode"]:checked')?.value
+      !== "public_task_reference";
+    for (const field of form.querySelectorAll(".direct-evidence-field")) {
+      field.hidden = !direct;
+      for (const control of field.querySelectorAll("input, textarea")) {
+        control.required = direct;
+        control.disabled = !direct;
+      }
+    }
+    for (const field of form.querySelectorAll(".public-reference-field")) {
+      field.hidden = direct;
+      // The task input stays disabled in both modes while the upstream fields
+      // are withdrawn; the mode radio is the switch, not this.
+      taskInput.required = false;
+    }
+  };
+  for (const input of modeInputs) input.addEventListener("change", setEvidenceMode);
+  setEvidenceMode();
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     taskInput.removeAttribute("aria-invalid");
@@ -790,17 +815,34 @@ function bindCoveragePreflight() {
     form.setAttribute("aria-busy", "true");
     submit.disabled = true;
     submit.textContent = "Verifying…";
-    setPreflightStatus("Reading the OKX task and verifying its X Layer events.");
+    // Only the fields the chosen mode actually uses are sent. Posting an empty
+    // taskReference alongside on-chain evidence would read as a public lookup
+    // that was attempted and returned nothing.
+    const mode = values.get("evidenceMode") === "public_task_reference"
+      ? "public_task_reference"
+      : "verified_onchain_evidence";
+    const requestBody = {
+      targetAgent: targetSelect.value === "custom" ? customAgent.value.trim() : values.get("targetAgent"),
+      targetServiceId: targetSelect.value === "custom" ? customService.value.trim() : values.get("targetServiceId"),
+      requestedCoverageUSDT: values.get("requestedCoverageUSDT"),
+      ...(mode === "public_task_reference"
+        ? { taskReference: values.get("taskReference") }
+        : {
+          targetJobId: (values.get("targetJobId") || "").trim(),
+          targetCreationTxHash: (values.get("targetCreationTxHash") || "").trim(),
+          targetAcceptanceTxHash: (values.get("targetAcceptanceTxHash") || "").trim(),
+          targetBuyer: (values.get("targetBuyer") || "").trim(),
+          jobDescription: (values.get("jobDescription") || "").trim(),
+        }),
+    };
+    setPreflightStatus(mode === "public_task_reference"
+      ? "Reading the OKX task and verifying its X Layer events."
+      : "Verifying your transactions against the X Layer task escrow.");
     try {
       const response = await fetch("/api/coverage-preflight", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          targetAgent: targetSelect.value === "custom" ? customAgent.value.trim() : values.get("targetAgent"),
-          targetServiceId: targetSelect.value === "custom" ? customService.value.trim() : values.get("targetServiceId"),
-          taskReference: values.get("taskReference"),
-          requestedCoverageUSDT: values.get("requestedCoverageUSDT"),
-        }),
+        body: JSON.stringify(requestBody),
       });
       const data = await response.json();
       if (!response.ok || !data.ok) {

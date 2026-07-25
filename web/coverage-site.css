@@ -218,6 +218,20 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
 .evidence-notice p:last-child { margin-bottom: 0; }
 .evidence-notice b { color: var(--ink); }
 .evidence-notice a { color: var(--blue); }
+.mode-switch { display: grid; grid-template-columns: 1fr 1fr; margin: 0; padding: 0; border: 0; border-bottom: 1px solid var(--line); }
+.mode-switch legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.mode-option { display: flex; align-items: flex-start; gap: 10px; padding: 15px 26px; cursor: pointer; }
+.mode-option + .mode-option { border-left: 1px solid var(--line); }
+.mode-option input { margin-top: 3px; accent-color: var(--blue); }
+.mode-option b { display: block; font-family: var(--sans); font-size: 13px; }
+.mode-option small { display: block; margin-top: 3px; color: var(--ink-soft); font-size: 11px; line-height: 1.4; }
+.mode-option:has(input:checked) { background: var(--mint-bright); }
+.mode-option.is-unavailable { cursor: not-allowed; opacity: 0.55; }
+.field-hint { color: var(--ink-soft); font-weight: 400; font-size: 11px; }
+.field-block textarea { width: 100%; min-height: 72px; border: 1px solid var(--line-strong); border-radius: 0; padding: 13px 14px; background: var(--paper); color: var(--ink); resize: vertical; }
+.field-block textarea:focus { border-color: var(--blue); outline: 2px solid var(--blue); outline-offset: 0; }
+.field-block input[spellcheck="false"] { font-family: var(--mono); font-size: 12px; }
+@media (max-width: 720px) { .mode-switch { grid-template-columns: 1fr; } .mode-option + .mode-option { border-left: 0; border-top: 1px solid var(--line); } }
 .request-guide { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 10px 26px; border-bottom: 1px solid var(--line); background: var(--paper-deep); }
 .request-guide span { margin-right: 4px; color: var(--ink-soft); font-size: 8px; font-weight: 600; text-transform: uppercase; }
 .request-guide b { font-family: var(--sans); font-size: 11px; }

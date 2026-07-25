@@ -315,14 +315,15 @@ export function createCoveragePreflightHandler(dependencies = {}) {
           acceptanceTxHash: input.targetAcceptanceTxHash,
           buyer: input.targetBuyer,
         }
-        : {
-          source: "okx_public_task_page_plus_x_layer_task_escrow_events",
-          ...(await getChain().resolveTargetOrderEvidence({
-            jobId,
-            createdAt: task.openedAt,
-            acceptedAt: task.acceptedAt,
-          })),
-        };
+        // No `source` here on purpose. The response below already sets a
+        // human-readable one before spreading this object, so adding a key would
+        // overwrite an established field value rather than add to it. Only
+        // direct mode needs to say something different.
+        : await getChain().resolveTargetOrderEvidence({
+          jobId,
+          createdAt: task.openedAt,
+          acceptedAt: task.acceptedAt,
+        });
       targetOrder = await getChain().verifyTargetOrder({
         jobId,
         creationTxHash: evidence.creationTxHash,

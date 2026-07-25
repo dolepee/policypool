@@ -109,10 +109,51 @@ for (const field of [
 ]) {
   assert.match(evidenceNotice, new RegExp(`<code>${field}</code>`), `the notice must name ${field} as a required input`);
 }
-assert.match(evidenceNotice, /covered-job-receipt/, "the notice must name the endpoint that still takes direct evidence");
-// A bare public task ID resolves to the same withdrawn page as a URL, and the
-// form still offers both, so the outage disclosure must cover both forms.
+// A bare public task ID resolves to the same withdrawn page as a URL, so the
+// disclosure must cover both forms.
 assert.match(evidenceNotice, /in either form/, "the notice must cover public task IDs as well as URLs");
+// The notice must not read as an obituary. Coverage is still purchasable on this
+// page, and a visitor has to be told so rather than left to infer the product is
+// down.
+assert.match(
+  evidenceNotice,
+  /still fully available|still available/i,
+  "the notice must say coverage can still be bought here, not merely that a path is gone",
+);
+
+// The working path has to be the form itself, not a URL a visitor is told to
+// construct by hand. Assert the inputs exist and are named exactly as the API
+// reads them, so a rename on either side breaks the gate rather than the page.
+const coverageForm = coverage.match(/<form class="coverage-form-card"[\s\S]*?<\/form>/)?.[0] || "";
+assert.ok(coverageForm, "the coverage page must still carry the preflight form");
+for (const field of [
+  "targetJobId",
+  "targetCreationTxHash",
+  "targetAcceptanceTxHash",
+  "targetBuyer",
+  "jobDescription",
+]) {
+  assert.match(
+    coverageForm,
+    new RegExp(`name="${field}"`),
+    `the form must collect ${field} so direct evidence is usable without hand-writing a request`,
+  );
+}
+
+// The mode switch must offer the working path selected and the withdrawn one
+// visibly unavailable, rather than silently dropping it.
+const modeSwitch = coverageForm.match(/<fieldset class="mode-switch"[\s\S]*?<\/fieldset>/)?.[0] || "";
+assert.ok(modeSwitch, "the form must let a visitor see which evidence modes exist");
+assert.match(
+  modeSwitch,
+  /value="verified_onchain_evidence"[^>]*checked/,
+  "the working mode must be the default",
+);
+assert.match(
+  modeSwitch,
+  /value="public_task_reference"[^>]*disabled/,
+  "the withdrawn mode must be shown disabled rather than offered or hidden",
+);
 
 // The same disclosure lives in three places and has now been narrowed to "URL"
 // twice. parseOkxTaskReference normalises a bare task id and a URL to the same
