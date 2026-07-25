@@ -473,6 +473,25 @@ assert.doesNotMatch(netLossDue.plain, /cannot settle it automatically/i);
 const bondedDue = payoutDueView("provider_bonded_sla_credit", "verified_acceptance");
 assert.match(bondedDue.plain, /pending execution/i, "a settleable claim is still pending execution");
 
+// Every wording that promises release on a platform-terminal outcome has to
+// enumerate all four of them. observeOkxA2AClock releases on admin_stopped (5),
+// closed_and_funds_returned (7), expired (8), and arbitration_refunded (9), and
+// the legacy reconciler releases on the same four. Naming only some of them
+// leaves a buyer in the omitted case believing their claim survived.
+for (const [label, view] of [
+  ["bonded verified-acceptance", bonded],
+  ["net-loss verified-acceptance", netLoss],
+  ["legacy reserve", activeView("legacy_reserve_covenant", false)],
+]) {
+  for (const verb of ["stops", "closes", "refunds", "expires"]) {
+    assert.match(
+      view.plain,
+      new RegExp(`\\b${verb}\\b`),
+      `${label} wording must account for a job the platform ${verb}`,
+    );
+  }
+}
+
 const legacy = activeView("legacy_reserve_covenant", false);
 assert.match(legacy.plain, /still accepted/i, "a reserve covenant requires the job to stay accepted");
 assert.match(legacy.plain, /released without a payout/i, "a reserve covenant releases on platform-terminal outcomes");

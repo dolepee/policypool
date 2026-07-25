@@ -249,9 +249,9 @@ export function buildReceiptView(payload, options = {}) {
       // exist, so the limitation is disclosed instead of papered over.
       plain = relayClock
         ? `Coverage is in force until ${until}. If ${providerName} has not delivered a verified response by then, up to ${cap} USD₮0 is owed against this covenant. PolicyPool cannot settle that claim automatically in this release, because a relay clock combined with a net-loss basis has no recovery-finality path, so the claim would stay open for manual reconciliation rather than paying out on its own.`
-        : `Coverage is in force until ${until}. If ${providerName} has not delivered by then, up to ${cap} USD₮0 becomes payable only after marketplace recovery is terminal, reduced by any verified recovered amounts. A job the platform stops, refunds, or expires before the deadline is released without a payout.`;
+        : `Coverage is in force until ${until}. If ${providerName} has not delivered by then, up to ${cap} USD₮0 becomes payable only after marketplace recovery is terminal, reduced by any verified recovered amounts. A job the platform stops, closes, refunds, or expires before the deadline is released without a payout.`;
     } else if (basis === "legacy_reserve_covenant") {
-      plain = `Coverage is in force until ${until}. If the job is still accepted and ${providerName} has not delivered by then, the buyer is owed up to ${cap} USD₮0. A job the platform stops, closes, or expires while coverage is active is released without a payout.`;
+      plain = `Coverage is in force until ${until}. If the job is still accepted and ${providerName} has not delivered by then, the buyer is owed up to ${cap} USD₮0. A job the platform stops, closes, refunds, or expires while coverage is active is released without a payout.`;
     } else {
       plain = `Coverage is in force until ${until}. The outcome at the deadline follows the covenant's recorded payout basis shown below; nothing beyond it is promised here.`;
     }
