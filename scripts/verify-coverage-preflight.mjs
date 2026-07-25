@@ -309,6 +309,64 @@ assert.equal(parsed.jobId, JOB_ID);
 assert.equal(parsed.openedAt, "2026-07-11T06:18:26.000Z");
 assert.equal(parsed.acceptedAt, "2026-07-11T06:20:23.000Z");
 
+// In July 2026 OKX stopped publishing `timeline` and `acceptCommands` on the
+// anonymous task page, which removed both the acceptance instant and the
+// on-chain task id a quote is bound to. Withdrawn evidence and a page that is
+// merely still filling in must not collapse into one error code: the caller
+// derives retryability from it, and telling an agent to retry a field that will
+// never return loops it forever.
+const taskHtmlWith = (mutate) => {
+  const mutated = structuredClone(appState);
+  mutate(mutated.appContext.initialProps.TaskDetailData);
+  return `<html><script type="application/json" id="appState">${JSON.stringify(mutated)}</script></html>`;
+};
+const parseCode = (html) => {
+  try {
+    parseOkxTaskPage(html, 401277);
+    return null;
+  } catch (error) {
+    assert.ok(error instanceof OkxTaskPageError, "task page parsing must raise a typed error");
+    return error.code;
+  }
+};
+
+// The live shape: no timeline at all, and the accept commands removed outright.
+assert.equal(
+  parseCode(taskHtmlWith((detail) => {
+    detail.timeline = null;
+    delete detail.acceptCommands;
+  })),
+  "okx_task_timeline_unavailable",
+  "a page publishing no timeline must not read as an indexing lag",
+);
+
+// A timeline that exists but has not reached acceptance is still a real lag.
+assert.equal(
+  parseCode(taskHtmlWith((detail) => {
+    detail.timeline = [{ label: "Open", time: 1783750706000 }];
+  })),
+  "okx_task_acceptance_timestamp_missing",
+  "an indexing lag must stay retryable",
+);
+
+// Timestamps can survive while the on-chain binding is withdrawn.
+assert.equal(
+  parseCode(taskHtmlWith((detail) => {
+    delete detail.acceptCommands;
+  })),
+  "okx_task_onchain_id_unavailable",
+  "a page publishing no accept commands cannot bind a task to its job",
+);
+
+// Accept commands that are published but carry no task id remain readable, so
+// that stays the distinct, non-withdrawn failure.
+assert.equal(
+  parseCode(taskHtmlWith((detail) => {
+    detail.acceptCommands = ["Accept this task in the OKX app."];
+  })),
+  "okx_task_onchain_id_missing",
+);
+
 let fetchAttempts = 0;
 const retried = await fetchOkxTaskPage(401277, {
   attempts: 2,
