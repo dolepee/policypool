@@ -163,7 +163,9 @@ async function headBlock() {
 
 async function watchNext(args) {
   const buyer = String(args.buyer || "").toLowerCase();
-  const jobDescription = String(args.jobDescription || "");
+  const jobDescription = typeof args.jobDescription === "string"
+    ? args.jobDescription.trim()
+    : "";
   const cap = String(args.cap || "0.5");
   const targetAgent = String(args.targetAgent || "Foreman#4348");
   if (!/^0x[a-f0-9]{40}$/.test(buyer)) throw new Error("--buyer must be an address");
