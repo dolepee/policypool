@@ -224,84 +224,114 @@ assert.equal(relayReleased.reconciliation.deadline, PAST_DEADLINE);
 // never reads marketplace job status, so a terminal job must not suppress
 // candidacy for a relay covenant the reconciler is about to pay out. The legacy
 // accepted-job predicate still governs verified_acceptance covenants.
-const relayPastDeadlineTerminalJob = await fetchStatus({
-  receiptId: "ppc-relay-terminal-job",
+const activeRecord = ({ receiptId, universal, clockMode, deadline = PAST_DEADLINE }) => ({
+  receiptId,
   state: "active",
   liabilityAtomic: "500000",
   receipt: {
-    version: "0.4.0",
-    covenant: { deadline: PAST_DEADLINE },
-    target: { clockMode: "policypool_relay" },
+    version: universal ? "0.4.0" : "0.2.0",
+    covenant: { deadline },
+    target: { clockMode },
   },
+  ...(universal ? { universalCovenant: { covenantId: `0x${"cc".repeat(32)}` } } : {}),
   targetOrder: { jobId: `0x${"ab".repeat(32)}` },
-}, { jobStatus: 6 });
-assert.equal(relayPastDeadlineTerminalJob.reconciliation.clockMode, "policypool_relay");
-assert.equal(relayPastDeadlineTerminalJob.reconciliation.deadlinePassed, true);
-assert.equal(
-  relayPastDeadlineTerminalJob.reconciliation.payoutDueCandidate,
-  true,
-  "a relay covenant past its deadline stays a candidate even once the job is terminal",
-);
+});
 
-const legacyPastDeadlineTerminalJob = await fetchStatus({
-  receiptId: "ppc-legacy-terminal-job",
-  state: "active",
-  liabilityAtomic: "500000",
-  receipt: {
-    version: "0.4.0",
-    covenant: { deadline: PAST_DEADLINE },
-    target: { clockMode: "verified_acceptance" },
-  },
-  targetOrder: { jobId: `0x${"ab".repeat(32)}` },
-}, { jobStatus: 6 });
-assert.equal(legacyPastDeadlineTerminalJob.reconciliation.clockMode, "verified_acceptance");
-// observeOkxA2AClock separates a terminal job that resolved after the deadline
-// (payout due) from one that resolved before it (released) using the job's own
-// resolution timestamp, which this endpoint does not read. Reporting false here
-// would deny a claim the reconciler is about to allow, so it must report that
-// it cannot tell rather than guessing.
+// A relay covenant is clocked by the provider relay receipt, which this endpoint
+// never reads. observeRelayClock releases it outright when that receipt shows
+// delivery inside the SLA, so a record still active past its deadline may be
+// awaiting release rather than payout. Claiming a candidate here would be a
+// guess from stale ledger state.
+const relayPastDeadline = await fetchStatus(
+  activeRecord({ receiptId: "ppc-relay-terminal-job", universal: true, clockMode: "policypool_relay" }),
+  { jobStatus: 6 },
+);
+assert.equal(relayPastDeadline.reconciliation.clockMode, "policypool_relay");
+assert.equal(relayPastDeadline.reconciliation.deadlinePassed, true);
 assert.equal(
-  legacyPastDeadlineTerminalJob.reconciliation.payoutDueCandidate,
+  relayPastDeadline.reconciliation.payoutDueCandidate,
   null,
-  "a terminal job's candidacy turns on a resolution timestamp this endpoint has no access to",
+  "a relay covenant's outcome needs the relay receipt, which this endpoint does not read",
 );
 
+const relayBeforeDeadline = await fetchStatus(
+  activeRecord({
+    receiptId: "ppc-relay-in-sla",
+    universal: true,
+    clockMode: "policypool_relay",
+    deadline: FUTURE_DEADLINE,
+  }),
+  { jobStatus: 1 },
+);
+assert.equal(relayBeforeDeadline.reconciliation.payoutDueCandidate, false, "cover still running is not a candidate");
+
+// A v0.4 covenant runs through observeOkxA2AClock, which separates release from
+// payout for every terminal status by comparing the job's own resolution
+// timestamp to the deadline. That timestamp is not read here.
 for (const jobStatus of [2, 3, 4, 5, 6, 7, 8, 9]) {
-  const terminal = await fetchStatus({
-    receiptId: `ppc-terminal-${jobStatus}`,
-    state: "active",
-    liabilityAtomic: "500000",
-    receipt: {
-      version: "0.4.0",
-      covenant: { deadline: PAST_DEADLINE },
-      target: { clockMode: "verified_acceptance" },
-    },
-    targetOrder: { jobId: `0x${"ab".repeat(32)}` },
-  }, { jobStatus });
+  const universalTerminal = await fetchStatus(
+    activeRecord({ receiptId: `ppc-universal-terminal-${jobStatus}`, universal: true, clockMode: "verified_acceptance" }),
+    { jobStatus },
+  );
   assert.equal(
-    terminal.reconciliation.payoutDueCandidate,
+    universalTerminal.reconciliation.payoutDueCandidate,
     null,
-    `status ${jobStatus} is terminal, so candidacy cannot be decided from status alone`,
+    `a universal covenant on terminal status ${jobStatus} needs a resolution timestamp to decide`,
   );
 }
 
+// A v0.3 record does not use that clock at all. reconcile-coverage.js releases
+// statuses 5 through 9 from status alone, so those are knowably not candidates
+// and must not be reported as undecidable.
+for (const jobStatus of [5, 6, 7, 8, 9]) {
+  const legacyTerminal = await fetchStatus(
+    activeRecord({ receiptId: `ppc-legacy-terminal-${jobStatus}`, universal: false, clockMode: "verified_acceptance" }),
+    { jobStatus },
+  );
+  assert.equal(
+    legacyTerminal.reconciliation.payoutDueCandidate,
+    false,
+    `the legacy reconciler can only release status ${jobStatus}, so candidacy is knowable`,
+  );
+}
+
+// A delivered legacy job observed before its deadline is released, which is
+// knowable. Observed after it, the legacy reconciler deliberately declines to
+// guess and leaves it for evidence-based reconciliation, so neither can this.
+const legacyDeliveredInSla = await fetchStatus(
+  activeRecord({ receiptId: "ppc-legacy-delivered-in-sla", universal: false, clockMode: "verified_acceptance", deadline: FUTURE_DEADLINE }),
+  { jobStatus: 2 },
+);
+assert.equal(legacyDeliveredInSla.reconciliation.payoutDueCandidate, false);
+const legacyDeliveredLate = await fetchStatus(
+  activeRecord({ receiptId: "ppc-legacy-delivered-late", universal: false, clockMode: "verified_acceptance" }),
+  { jobStatus: 2 },
+);
+assert.equal(
+  legacyDeliveredLate.reconciliation.payoutDueCandidate,
+  null,
+  "the legacy reconciler calls this ambiguous from status alone, so the endpoint must too",
+);
+
+// An accepted job past its deadline is a candidate under both reconcilers.
+for (const universal of [true, false]) {
+  const accepted = await fetchStatus(
+    activeRecord({ receiptId: `ppc-accepted-${universal}`, universal, clockMode: "verified_acceptance" }),
+    { jobStatus: 1 },
+  );
+  assert.equal(accepted.reconciliation.payoutDueCandidate, true);
+}
+
 // A job that was never accepted is not a candidate, and that is knowable.
-const neverAccepted = await fetchStatus({
-  receiptId: "ppc-never-accepted",
-  state: "active",
-  liabilityAtomic: "500000",
-  receipt: {
-    version: "0.4.0",
-    covenant: { deadline: PAST_DEADLINE },
-    target: { clockMode: "verified_acceptance" },
-  },
-  targetOrder: { jobId: `0x${"ab".repeat(32)}` },
-}, { jobStatus: 0 });
+const neverAccepted = await fetchStatus(
+  activeRecord({ receiptId: "ppc-never-accepted", universal: true, clockMode: "verified_acceptance" }),
+  { jobStatus: 0 },
+);
 assert.equal(neverAccepted.reconciliation.payoutDueCandidate, false);
 
 // The indeterminate case must be explained rather than left as a bare null.
 assert.match(
-  legacyPastDeadlineTerminalJob.reconciliation.note,
+  relayPastDeadline.reconciliation.note,
   /null payoutDueCandidate/,
   "a null candidacy must be documented in the response itself",
 );
