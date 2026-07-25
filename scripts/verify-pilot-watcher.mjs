@@ -85,10 +85,12 @@ const PP_AGENT = "4674";
 const PP_WALLET = "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7";
 const FEE = "100000";
 const acceptedAs = (over = {}) => ({ agentId: PP_AGENT, provider: PP_WALLET, amountAtomic: FEE, asset: "0x779ded0c9e1022225f8e0630b35a9b54be713736", serviceHash: `0x${"b".repeat(64)}`, ...over });
+const USDT = "0x779ded0c9e1022225f8e0630b35a9b54be713736";
 const bound = (over = {}) => ({
   taskId: COVERAGE_TASK, targetJobId: TARGET_JOB, receiptBuyer: KEJI,
   created: createdBy(KEJI), accepted: acceptedAs(),
   expectedAgentId: PP_AGENT, expectedProvider: PP_WALLET, expectedFeeAtomic: FEE,
+  expectedAsset: USDT, route: "okx_escrow_mediated", expectedRoute: "okx_escrow_mediated",
   ...over,
 });
 
@@ -153,6 +155,25 @@ assert.ok(
 // and accepted by PolicyPool's own listing for the coverage fee.
 assert.deepEqual(marketplaceProblems(bound()), [],
   "a task bound to PolicyPool's listing is the evidence this check wants");
+
+// The fee has to have actually flowed through the task. A task can name the
+// right agent, wallet, asset and amount and still be a different purchase; if
+// the fee settled as a direct transfer it did not go through that task. Route
+// was computed and then never consulted, which is exactly how a direct
+// settlement got reported as a verified marketplace sale.
+assert.ok(
+  marketplaceProblems(bound({ route: "direct_endpoint_payment" })).length > 0,
+  "a directly settled fee cannot be attributed to an escrow task",
+);
+assert.ok(
+  marketplaceProblems(bound({ route: "direct_endpoint_payment", acceptUnproven: true })).length > 0,
+  "the waiver must not suppress a settlement route that contradicts the task",
+);
+// An amount without its denomination is not an amount.
+assert.ok(
+  marketplaceProblems(bound({ accepted: acceptedAs({ asset: `0x${"c".repeat(40)}` }) })).length > 0,
+  "100000 units of another token is not the 0.10 USD~T0 coverage fee",
+);
 
 // Buyer identity alone is not attribution. Any escrow task this buyer happened
 // to create after the covered job would otherwise satisfy every check above
@@ -226,6 +247,22 @@ assert.match(
   /attributionProven = Boolean\(createdTask && acceptedTask\)[\s\S]{0,600}?\.length === 0/,
   "attribution must be proven by the full binding, not by the presence of a task",
 );
+// Every binding the helper accepts must actually be supplied by confirm. A guard
+// that is never fed its input is inert, and that is not hypothetical here: route
+// was computed and then left out of the call, so the check existed and did
+// nothing. Deleting any of these lines must fail rather than silently disarm.
+const bindingsBlock = confirmSource.match(/const bindings = \{[\s\S]*?\n  \};/)?.[0] || "";
+assert.ok(bindingsBlock, "confirm must assemble its bindings in one place");
+for (const field of [
+  "expectedAgentId",
+  "expectedProvider",
+  "expectedFeeAtomic",
+  "expectedAsset",
+  "expectedRoute",
+]) {
+  assert.match(bindingsBlock, new RegExp(`${field}:`), `confirm must supply ${field} or that guard is inert`);
+}
+assert.match(bindingsBlock, /^\s*route,$/m, "confirm must supply the observed route, not just the expected one");
 assert.match(
   confirmSource,
   /record\("confirm_passed", \{[\s\S]*?attribution,/,

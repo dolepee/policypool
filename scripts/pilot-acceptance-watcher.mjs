@@ -207,7 +207,8 @@ export function decodeAcceptedTask(log) {
 // labels the result a marketplace sale.
 export function marketplaceProblems({
   taskId, targetJobId, receiptBuyer, created, accepted,
-  expectedAgentId, expectedProvider, expectedFeeAtomic, acceptUnproven = false,
+  expectedAgentId, expectedProvider, expectedFeeAtomic, expectedAsset,
+  route, expectedRoute, acceptUnproven = false,
 }) {
   const problems = [];
   if (!taskId) {
@@ -267,6 +268,22 @@ export function marketplaceProblems({
   }
   if (expectedFeeAtomic && accepted.amountAtomic !== String(expectedFeeAtomic)) {
     problems.push(`marketplace task ${taskId} escrowed ${accepted.amountAtomic} atomic, not the ${expectedFeeAtomic} coverage fee`);
+  }
+  // An amount without its denomination is not an amount. 100000 units of some
+  // other token is not the 0.10 USD~T0 fee, and the escrow records which asset
+  // it held, so there is no reason to infer it.
+  if (expectedAsset && accepted.asset !== String(expectedAsset).toLowerCase()) {
+    problems.push(`marketplace task ${taskId} escrowed ${accepted.asset}, not the coverage asset ${String(expectedAsset).toLowerCase()}`);
+  }
+  // A task can name the right agent, wallet, asset and amount and still not be
+  // how this fee was paid. If the fee settled as a direct transfer then it did
+  // not flow through this task, whatever else the task is. Requiring the escrow
+  // route is what stops a real but unrelated purchase standing in as proof.
+  if (expectedRoute && route && route !== expectedRoute) {
+    problems.push(
+      `the coverage fee settled as ${route}, so it did not flow through task ${taskId}.`
+      + " A task that did not carry the payment cannot attribute it.",
+    );
   }
   return problems;
 }
@@ -569,7 +586,18 @@ async function confirm(args) {
     }
   }
   const acceptUnproven = args.attributionUnproven === true || args.attributionUnproven === "true";
-  problems.push(...marketplaceProblems({
+
+  // Classified before the verdict, not after. Computing the route and then not
+  // consulting it was the whole defect: a fee that settled as a direct transfer
+  // was still reported as a verified marketplace sale whenever the buyer
+  // happened to have some other qualifying task.
+  let route = "unknown";
+  if (fee.transaction) {
+    const settlement = await rpc("eth_getTransactionReceipt", [fee.transaction]);
+    route = paymentRoute(settlement?.logs, OKX_TASK.escrow);
+  }
+
+  const bindings = {
     taskId: marketplaceTask,
     targetJobId,
     receiptBuyer: buyer,
@@ -578,31 +606,16 @@ async function confirm(args) {
     expectedAgentId: MARKETPLACE.agentId,
     expectedProvider: receipt.target?.providerWallet || null,
     expectedFeeAtomic: PAYMENT.amountAtomic,
-    acceptUnproven,
-  }));
-  // Verified means every binding held, not merely that a task was found. The
-  // route is folded in so a direct settlement can never be reported as a
-  // marketplace sale on the strength of an unrelated task the buyer created.
+    expectedAsset: PAYMENT.asset,
+    route,
+    expectedRoute: "okx_escrow_mediated",
+  };
+  // Verified means every binding held with no waiver applied, which is why this
+  // is evaluated separately from what blocks the confirmation below.
   const attributionProven = Boolean(createdTask && acceptedTask)
-    && marketplaceProblems({
-      taskId: marketplaceTask,
-      targetJobId,
-      receiptBuyer: buyer,
-      created: createdTask,
-      accepted: acceptedTask,
-      expectedAgentId: MARKETPLACE.agentId,
-      expectedProvider: receipt.target?.providerWallet || null,
-      expectedFeeAtomic: PAYMENT.amountAtomic,
-    }).length === 0;
+    && marketplaceProblems(bindings).length === 0;
   const attribution = attributionProven ? "okx_marketplace_task_verified" : "attribution_unproven";
-
-  // Classify how the fee actually settled, so the evidence log records the route
-  // rather than leaving it to be reconstructed later.
-  let route = "unknown";
-  if (fee.transaction) {
-    const settlement = await rpc("eth_getTransactionReceipt", [fee.transaction]);
-    route = paymentRoute(settlement?.logs, OKX_TASK.escrow);
-  }
+  problems.push(...marketplaceProblems({ ...bindings, acceptUnproven }));
 
   console.log(`receipt        ${receiptId}`);
   console.log(`state          ${payload.state} / ${payload.coverageState}`);
