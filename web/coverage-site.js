@@ -552,8 +552,12 @@ function preflightReason(reason) {
 // the contract rather than a de-underscored code: that is how a reader learned
 // the OKX public task evidence had been withdrawn, instead of reading
 // "okx task timeline unavailable".
+// A refusal reaches this page two different ways. A failure arrives as `error`
+// on a non-2xx response, but an ordinary no-charge decline arrives as HTTP 200
+// with `ok: true, eligible: false` and its code under `reason`. Both carry the
+// same contract, so both are read here.
 export function preflightMessage(payload) {
-  const reason = String(payload?.error || "");
+  const reason = String(payload?.error || payload?.reason || "");
   const curated = preflightReason(reason);
   if (curated !== reason.replaceAll("_", " ")) return curated;
   const message = String(payload?.message || "").trim();
@@ -706,7 +710,7 @@ function showPreflightResult(data) {
     verdict.textContent = "Not coverable";
     chip.textContent = "Declined free";
     chip.className = "state-stamp state-paid";
-    summary.textContent = preflightReason(data.reason);
+    summary.textContent = preflightMessage(data);
     paid.hidden = true;
     renderPreflightValues([
       ...(data.task ? [{ label: "Task", value: data.task.title, href: data.task.publicUrl }] : []),
@@ -823,7 +827,13 @@ function bindCoveragePreflight() {
         throw new Error(preflightMessage(data));
       }
       showPreflightResult(data);
-      setPreflightStatus(data.eligible ? "Preflight passed. Review the verified paid request." : "Preflight completed without charge.", data.eligible ? "success" : "error");
+      // A decline already states that nothing was charged, so repeating it here
+      // and discarding the contract left a visitor knowing only that they were
+      // refused, never why or what to do instead.
+      setPreflightStatus(
+        data.eligible ? "Preflight passed. Review the verified paid request." : preflightMessage(data),
+        data.eligible ? "success" : "error",
+      );
       revealPreflightResult();
     } catch (error) {
       setPreflightStatus(error instanceof Error ? error.message : "Coverage preflight failed.", "error");

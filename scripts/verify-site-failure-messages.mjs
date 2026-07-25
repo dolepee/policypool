@@ -70,6 +70,46 @@ assert.equal(
   "coverage quote unavailable This is a service-side failure. Retry the same request; do not change the input.",
 );
 
+// An ordinary no-charge decline is the common case and does not arrive as an
+// error at all: preflight answers HTTP 200 with ok true, eligible false, and the
+// code under `reason` rather than `error`. It carries the same contract, so it
+// has to be read the same way.
+const refinedDecline = preflightMessage({
+  ok: true,
+  eligible: false,
+  charged: false,
+  reason: "target_job_not_accepted:6",
+  code: "TARGET_ALREADY_RESOLVED",
+  message: 'The target job already reached "complete", so it can no longer be covered.',
+  retryable: false,
+  targetState: "complete",
+  nextAction: "Purchase coverage while the target job is accepted and before it resolves.",
+});
+assert.match(refinedDecline, /already reached "complete"/, "a decline must explain itself, not print its code");
+assert.match(refinedDecline, /Purchase coverage while the target job is accepted/);
+assert.doesNotMatch(refinedDecline, /target job not accepted:6/, "the raw refined code must not reach a visitor");
+
+assert.match(
+  preflightMessage({
+    ok: true,
+    eligible: false,
+    charged: false,
+    reason: "insufficient_provider_bond_capacity",
+    message: "The provider's first-loss bond cannot currently back this coverage cap.",
+    retryable: true,
+    nextAction: "Retry with a lower coverage cap, or retry later as covenants settle.",
+  }),
+  /first-loss bond cannot currently back this coverage cap.*lower coverage cap/,
+  "a bond-capacity decline must state both the cause and the remedy",
+);
+
+// `error` still wins where both are present: a transport failure is the more
+// specific fact about that particular response.
+assert.match(
+  preflightMessage({ error: "some_unmapped_failure", reason: "target_agent_required" }),
+  /some unmapped failure/,
+);
+
 // An unclassified failure with no API message still degrades to the old
 // behaviour rather than rendering undefined or an empty status line.
 assert.equal(preflightMessage({ ok: false, error: "some_unmapped_failure" }), "some unmapped failure");
