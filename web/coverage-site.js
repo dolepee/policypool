@@ -25,6 +25,11 @@ function short(value, left = 8, right = 6) {
 }
 
 function dateTime(value) {
+  // A missing timestamp is not a timestamp. new Date(null) is epoch 0 rather
+  // than NaN, so the guard below never catches it and an absent value renders
+  // as 01 Jan 1970 — a real-looking date in a panel a buyer reads immediately
+  // before paying.
+  if (value === null || value === undefined || value === "") return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
   return new Intl.DateTimeFormat("en-GB", {
@@ -736,7 +741,16 @@ export function preflightValueRows(data) {
     { label: "Target", value: `${data.policy.agentName} #${data.policy.agentId}` },
     { label: "Coverage cap", value: `${data.coverage.capUSDT} USD₮0` },
     { label: "Service fee", value: `${data.coverage.serviceFeeUSDT} USD₮0` },
-    { label: "Deadline", value: dateTime(data.coverage.deadline) },
+    {
+      label: "Deadline",
+      // A relay-clock covenant has no deadline until the provider starts the
+      // SLA clock, and preflight returns null for exactly that state. Say the
+      // clock has not started yet; a dash here would read as missing data
+      // about a covenant the buyer is about to pay for.
+      value: data.coverage.clockState === "pending_provider_relay_start"
+        ? "Starts when the provider relays"
+        : dateTime(data.coverage.deadline),
+    },
     { label: "Enrollment closes", value: dateTime(data.coverage.enrollmentClosesAt) },
     { label: "Quote expires", value: dateTime(data.quote.expiresAt) },
     {

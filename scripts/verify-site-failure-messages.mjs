@@ -141,6 +141,7 @@ const directQuote = {
     capUSDT: "0.5",
     serviceFeeUSDT: "0.1",
     deadline: "2026-07-25T18:00:00.000Z",
+    clockState: "started_at_verified_acceptance",
     enrollmentClosesAt: "2026-07-25T17:50:00.000Z",
     availableUSDT: "4.6",
     fundingSource: "shared_reserve",
@@ -179,6 +180,39 @@ assert.equal(publicTaskRow.href, "https://www.okx.ai/tasks/401999");
 assert.ok(
   !publicRows.some((row) => row.label === "Job description"),
   "the public path reads its description from the marketplace, so the caveat does not apply",
+);
+
+// An enrolled non-A2A provider gets clockMode "policypool_relay", so the SLA
+// clock has not started at quote time and preflight returns a null deadline.
+// new Date(null) is epoch 0, not NaN, so this rendered "01 Jan 1970" in the
+// panel a buyer reads immediately before paying.
+const relayRows = preflightValueRows({
+  ...directQuote,
+  coverage: { ...directQuote.coverage, deadline: null, clockState: "pending_provider_relay_start" },
+});
+const relayDeadline = relayRows.find((row) => row.label === "Deadline");
+assert.doesNotMatch(relayDeadline.value, /1970/, "a pending relay clock must never render as the epoch");
+assert.match(
+  relayDeadline.value,
+  /provider relays/i,
+  "a pending relay clock must say the clock has not started, not show a date or a bare dash",
+);
+// The verified-acceptance path still shows its real deadline, so the branch
+// above cannot be satisfied by suppressing the row for everyone.
+const startedDeadline = directRows.find((row) => row.label === "Deadline");
+assert.match(startedDeadline.value, /2026/, "a started clock must still show its deadline");
+
+// The epoch guard is asserted independently of the clockState branch above.
+// Otherwise a fix that only special-cased the deadline row would leave every
+// other timestamp free to render 01 Jan 1970, which is how this arrived.
+const missingEnrollment = preflightValueRows({
+  ...directQuote,
+  coverage: { ...directQuote.coverage, enrollmentClosesAt: null },
+});
+assert.equal(
+  missingEnrollment.find((row) => row.label === "Enrollment closes").value,
+  "—",
+  "an absent timestamp must render as absent rather than as the epoch",
 );
 
 console.log("PolicyPool site messaging verified: classified failures and ordinary declines reach the visitor, curated wording wins where it exists, and a quote with no marketplace page still renders its target job.");
