@@ -557,9 +557,15 @@ export function preflightMessage(payload) {
   const curated = preflightReason(reason);
   if (curated !== reason.replaceAll("_", " ")) return curated;
   const message = String(payload?.message || "").trim();
-  if (!message || GENERIC_API_MESSAGE.test(message)) return curated;
+  // The generic placeholder carries no information and must not displace the
+  // local fallback. Its next action is a different matter: on a throttled or
+  // service-side failure the contract pairs that placeholder with the only
+  // useful part, telling the caller to wait and retry the same request. Keeping
+  // the fallback while dropping that would leave a visitor reading nothing but
+  // "rate limit exceeded", so the next action is appended either way.
+  const head = message && !GENERIC_API_MESSAGE.test(message) ? message : curated;
   const nextAction = String(payload?.nextAction || "").trim();
-  return nextAction ? `${message} ${nextAction}` : message;
+  return nextAction ? `${head} ${nextAction}` : head;
 }
 
 function providerCard(policy) {

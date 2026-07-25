@@ -43,6 +43,33 @@ for (const message of ["The request could not be completed.", "The request could
   );
 }
 
+// Dropping the generic message must not drop its next action with it. On a
+// throttled or service-side failure, describeFailure() pairs that placeholder
+// with the only actionable part of the response, so a visitor would otherwise
+// read nothing but the bare code.
+assert.equal(
+  preflightMessage({
+    ok: false,
+    error: "rate_limit_exceeded",
+    message: "The request could not be completed right now.",
+    retryable: true,
+    retryAfterSeconds: 30,
+    nextAction: "This request was throttled. Wait and retry the same request.",
+  }),
+  "rate limit exceeded This request was throttled. Wait and retry the same request.",
+);
+assert.equal(
+  preflightMessage({
+    ok: false,
+    error: "coverage_quote_unavailable",
+    message: "The request could not be completed right now.",
+    retryable: true,
+    retryAfterSeconds: 15,
+    nextAction: "This is a service-side failure. Retry the same request; do not change the input.",
+  }),
+  "coverage quote unavailable This is a service-side failure. Retry the same request; do not change the input.",
+);
+
 // An unclassified failure with no API message still degrades to the old
 // behaviour rather than rendering undefined or an empty status line.
 assert.equal(preflightMessage({ ok: false, error: "some_unmapped_failure" }), "some unmapped failure");
