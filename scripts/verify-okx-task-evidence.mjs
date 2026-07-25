@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { createChainService } from "../api/lib/chain.js";
 import { PAYMENT } from "../api/lib/config.js";
-import { fetchOkxTaskPage } from "../api/lib/okx-task-page.js";
+import { describeFailure } from "../api/lib/coverage-state.js";
+import { fetchOkxTaskPage, OkxTaskPageError } from "../api/lib/okx-task-page.js";
 import { findPublishedPolicy } from "../api/lib/policy-registry.js";
 
 const chain = createChainService();
@@ -43,16 +44,50 @@ await assert.rejects(
   "a different wallet must not obtain coverage for someone else's job",
 );
 
-const publicTask = await fetchOkxTaskPage("https://www.okx.ai/tasks/401277");
+// Public task 401277, as recorded on X Layer. These are chain facts, so they
+// hold whatever the marketplace chooses to render on its own page.
+const PUBLIC_TASK_ID = 401277;
+const PUBLIC_TASK_JOB_ID = "0x567044bcd533567a6d874044accdffd06b8901bc9988e700b29741cd9d1070a1";
+const PUBLIC_TASK_OPENED_AT = "2026-07-11T06:18:26.000Z";
+const PUBLIC_TASK_ACCEPTED_AT = "2026-07-11T06:20:23.000Z";
+
 const resolved = await chain.resolveTargetOrderEvidence({
-  jobId: publicTask.jobId,
-  createdAt: publicTask.openedAt,
-  acceptedAt: publicTask.acceptedAt,
+  jobId: PUBLIC_TASK_JOB_ID,
+  createdAt: PUBLIC_TASK_OPENED_AT,
+  acceptedAt: PUBLIC_TASK_ACCEPTED_AT,
 });
-assert.equal(publicTask.jobId, "0x567044bcd533567a6d874044accdffd06b8901bc9988e700b29741cd9d1070a1");
 assert.equal(resolved.creationTxHash, "0xb09188606430acf7b8ca1c02b9ff8ad335937aef31b3b93c9c41abeadf750214");
 assert.equal(resolved.acceptanceTxHash, "0x9f2970429e0f57b0ba59173e2ca5d5fb6040f47c5937ff35f560a8be8675a213");
 assert.equal(resolved.creationBlock, "64981670");
 assert.equal(resolved.acceptanceBlock, "64981787");
 
-console.log("PolicyPool OKX task proof passed: public task URL resolves exact creation/acceptance evidence and binds buyer, job, provider, agent id, asset, amount, service type/hash, and status.");
+// The public task page is an external dependency we do not control. On
+// 2026-07-25 OKX stopped publishing `timeline` and `acceptCommands` on the
+// anonymous page, which withdrew both the acceptance instant and the on-chain
+// task id a quote binds to. The invariant that has to hold in either world is
+// that a page we cannot fully bind never yields a quote, and that the refusal
+// does not invite a retry that can never succeed.
+let publicTask = null;
+try {
+  publicTask = await fetchOkxTaskPage(`https://www.okx.ai/tasks/${PUBLIC_TASK_ID}`);
+} catch (error) {
+  assert.ok(error instanceof OkxTaskPageError, "public task failures must stay typed");
+  const contract = describeFailure(error.code);
+  assert.equal(
+    contract.code,
+    "PUBLIC_TASK_EVIDENCE_UNAVAILABLE",
+    `unrecognised public task failure ${error.code}: classify it before shipping`,
+  );
+  assert.equal(contract.retryable, false, "withdrawn public evidence must not advertise a retry");
+  console.log(`  note: public task evidence withdrawn upstream (${error.code}); on-chain binding asserted directly.`);
+}
+
+// If the marketplace restores the fields, the page must still agree exactly with
+// the chain rather than quietly drifting from it.
+if (publicTask) {
+  assert.equal(publicTask.jobId, PUBLIC_TASK_JOB_ID);
+  assert.equal(publicTask.openedAt, PUBLIC_TASK_OPENED_AT);
+  assert.equal(publicTask.acceptedAt, PUBLIC_TASK_ACCEPTED_AT);
+}
+
+console.log("PolicyPool OKX task proof passed: on-chain evidence binds buyer, job, provider, agent id, asset, amount, service type/hash, and status; the public task page either agrees with it exactly or refuses without inviting a retry.");

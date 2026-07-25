@@ -309,6 +309,120 @@ assert.equal(parsed.jobId, JOB_ID);
 assert.equal(parsed.openedAt, "2026-07-11T06:18:26.000Z");
 assert.equal(parsed.acceptedAt, "2026-07-11T06:20:23.000Z");
 
+// In July 2026 OKX stopped publishing `timeline` and `acceptCommands` on the
+// anonymous task page, which removed both the acceptance instant and the
+// on-chain task id a quote is bound to. Withdrawn evidence and a page that is
+// merely still filling in must not collapse into one error code: the caller
+// derives retryability from it, and telling an agent to retry a field that will
+// never return loops it forever.
+const taskHtmlWith = (mutate) => {
+  const mutated = structuredClone(appState);
+  mutate(mutated.appContext.initialProps.TaskDetailData);
+  return `<html><script type="application/json" id="appState">${JSON.stringify(mutated)}</script></html>`;
+};
+const parseCode = (html) => {
+  try {
+    parseOkxTaskPage(html, 401277);
+    return null;
+  } catch (error) {
+    assert.ok(error instanceof OkxTaskPageError, "task page parsing must raise a typed error");
+    return error.code;
+  }
+};
+
+// The live shape: no timeline at all, and the accept commands removed outright.
+assert.equal(
+  parseCode(taskHtmlWith((detail) => {
+    detail.timeline = null;
+    delete detail.acceptCommands;
+  })),
+  "okx_task_timeline_unavailable",
+  "a page publishing no timeline must not read as an indexing lag",
+);
+
+// A timeline that exists but has not reached acceptance is still a real lag.
+assert.equal(
+  parseCode(taskHtmlWith((detail) => {
+    detail.timeline = [{ label: "Open", time: 1783750706000 }];
+  })),
+  "okx_task_acceptance_timestamp_missing",
+  "an indexing lag must stay retryable",
+);
+
+// Timestamps can survive while the on-chain binding is withdrawn.
+assert.equal(
+  parseCode(taskHtmlWith((detail) => {
+    delete detail.acceptCommands;
+  })),
+  "okx_task_onchain_id_unavailable",
+  "a page publishing no accept commands cannot bind a task to its job",
+);
+
+// Accept commands that are published but carry no task id remain readable, so
+// that stays the distinct, non-withdrawn failure.
+assert.equal(
+  parseCode(taskHtmlWith((detail) => {
+    detail.acceptCommands = ["Accept this task in the OKX app."];
+  })),
+  "okx_task_onchain_id_missing",
+);
+
+// Withdrawn evidence is a property of the page, so it must fail on the first
+// attempt and leave the circuit breaker alone. Retrying re-parses an identical
+// page, and counting these toward the circuit would open it after three
+// requests, replacing the stable PUBLIC_TASK_EVIDENCE_UNAVAILABLE contract with
+// okx_task_directory_circuit_open for every later caller.
+const withdrawnHtml = taskHtmlWith((detail) => {
+  detail.timeline = null;
+  delete detail.acceptCommands;
+});
+const withdrawnCircuit = { failures: 0, openUntil: 0 };
+let withdrawnAttempts = 0;
+const fetchWithdrawn = () => fetchOkxTaskPage(401277, {
+  attempts: 3,
+  cache: new Map(),
+  circuitState: withdrawnCircuit,
+  fetchImpl: async () => {
+    withdrawnAttempts += 1;
+    return new Response(withdrawnHtml, { status: 200, headers: { "content-type": "text/html" } });
+  },
+});
+
+await assert.rejects(fetchWithdrawn(), (error) => error?.code === "okx_task_timeline_unavailable");
+assert.equal(withdrawnAttempts, 1, "a page whose evidence is withdrawn must not be re-fetched");
+assert.equal(withdrawnCircuit.failures, 0, "withdrawn evidence must not count as a circuit failure");
+assert.equal(withdrawnCircuit.openUntil, 0, "withdrawn evidence must not open the circuit");
+
+// Past the circuit threshold, the caller must still receive the classified
+// failure rather than a circuit-open code that hides why coverage was refused.
+// The module opens its circuit after three consecutive failures.
+for (let attempt = 0; attempt < 4; attempt += 1) {
+  await assert.rejects(
+    fetchWithdrawn(),
+    (error) => error?.code === "okx_task_timeline_unavailable",
+    "the public failure contract must stay stable across repeated requests",
+  );
+}
+assert.equal(withdrawnCircuit.openUntil, 0, "repeated withdrawn-evidence requests must leave the circuit closed");
+
+// A genuinely transient failure must still retry and still trip the circuit.
+const transientCircuit = { failures: 0, openUntil: 0 };
+let transientAttempts = 0;
+await assert.rejects(
+  fetchOkxTaskPage(401277, {
+    attempts: 2,
+    cache: new Map(),
+    circuitState: transientCircuit,
+    fetchImpl: async () => {
+      transientAttempts += 1;
+      return new Response("nope", { status: 503 });
+    },
+  }),
+  (error) => error instanceof OkxTaskPageError,
+);
+assert.equal(transientAttempts, 2, "transient upstream failures must still be retried");
+assert.equal(transientCircuit.failures, 1, "transient upstream failures must still count toward the circuit");
+
 let fetchAttempts = 0;
 const retried = await fetchOkxTaskPage(401277, {
   attempts: 2,

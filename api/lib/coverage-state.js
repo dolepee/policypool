@@ -124,6 +124,18 @@ const ERROR_CONTRACT = Object.freeze({
     retryAfterSeconds: 10,
     nextAction: "Retry the same request. Do not create another marketplace task.",
   },
+  okx_task_timeline_unavailable: {
+    code: "PUBLIC_TASK_EVIDENCE_UNAVAILABLE",
+    message: "The public task page no longer publishes the acceptance timeline this quote is bound to.",
+    retryable: false,
+    nextAction: "No payment was taken and no task should be recreated. Resolve the target's on-chain evidence yourself and supply targetJobId, targetCreationTxHash, and targetAcceptanceTxHash directly to the paid endpoint, which does not read the public task page.",
+  },
+  okx_task_onchain_id_unavailable: {
+    code: "PUBLIC_TASK_EVIDENCE_UNAVAILABLE",
+    message: "The public task page no longer publishes the on-chain task id this quote is bound to.",
+    retryable: false,
+    nextAction: "No payment was taken and no task should be recreated. Resolve the target's on-chain evidence yourself and supply targetJobId, targetCreationTxHash, and targetAcceptanceTxHash directly to the paid endpoint, which does not read the public task page.",
+  },
   requested_coverage_below_minimum: {
     code: "COVERAGE_BELOW_MINIMUM",
     message: "The requested coverage cap is below the minimum this service will underwrite.",

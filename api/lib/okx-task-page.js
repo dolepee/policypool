@@ -8,6 +8,13 @@ const DEFAULT_STALE_TTL_MS = 30_000;
 const CIRCUIT_FAILURE_THRESHOLD = 3;
 const CIRCUIT_OPEN_MS = 30_000;
 
+// Codes that describe what the page publishes rather than a failed fetch of it,
+// so they resolve identically on every attempt.
+const WITHDRAWN_EVIDENCE_CODES = new Set([
+  "okx_task_timeline_unavailable",
+  "okx_task_onchain_id_unavailable",
+]);
+
 const memoryCache = new Map();
 const productionCircuit = { failures: 0, openUntil: 0 };
 
@@ -64,8 +71,16 @@ function extractTaskDetail(html, expectedTaskId) {
   return detail;
 }
 
+// An absent acceptCommands field and a present one that carries no task id are
+// different failures. The first means the public page cannot bind this task to
+// its on-chain job at all, which no amount of retrying fixes; the second is a
+// page we can still read and that may fill in. They must not share an error
+// code, because the caller decides retryability from it.
 function findJobId(commands) {
-  for (const command of Array.isArray(commands) ? commands : []) {
+  if (!Array.isArray(commands)) {
+    throw new OkxTaskPageError("okx_task_onchain_id_unavailable");
+  }
+  for (const command of commands) {
     const match = String(command).match(/\bTask ID:\s*(0x[a-fA-F0-9]{64})\b/i);
     if (match && isBytes32(match[1])) return match[1].toLowerCase();
   }
@@ -89,6 +104,11 @@ function firstTimelineTime(detail, labels) {
 
 export function parseOkxTaskPage(html, expectedTaskId) {
   const detail = extractTaskDetail(html, expectedTaskId);
+  // A timeline array that has not grown its Accepted entry yet is an indexing
+  // lag worth retrying. A page that publishes no timeline at all is a different
+  // condition: the acceptance instant is simply not public, so retrying only
+  // burns the caller's time. Keep the two distinguishable all the way out.
+  const hasTimeline = Array.isArray(detail.timeline);
   const openedAtMs = timelineTime(detail, "Open") || Number(detail.createTime);
   const acceptedAtMs = timelineTime(detail, "Accepted");
   const submittedAtMs = firstTimelineTime(detail, ["Submitted", "Delivered"]);
@@ -97,7 +117,9 @@ export function parseOkxTaskPage(html, expectedTaskId) {
     throw new OkxTaskPageError("okx_task_open_timestamp_missing");
   }
   if (!Number.isFinite(acceptedAtMs) || acceptedAtMs <= 0) {
-    throw new OkxTaskPageError("okx_task_acceptance_timestamp_missing");
+    throw new OkxTaskPageError(
+      hasTimeline ? "okx_task_acceptance_timestamp_missing" : "okx_task_timeline_unavailable",
+    );
   }
 
   const description = String(detail.description || "").trim();
@@ -189,8 +211,16 @@ export async function fetchOkxTaskPage(reference, {
       runtimeCircuit.openUntil = 0;
       return structuredClone(value);
     } catch (error) {
-      if (error instanceof OkxTaskPageError) lastError = error;
-      else if (error?.name === "AbortError") lastError = new OkxTaskPageError("okx_task_fetch_timeout");
+      if (error instanceof OkxTaskPageError) {
+        lastError = error;
+        // Re-downloading and re-parsing an identical page cannot turn withdrawn
+        // evidence into present evidence, and counting these toward the circuit
+        // would open the breaker after three requests. Every later caller would
+        // then get okx_task_directory_circuit_open instead of the stable
+        // PUBLIC_TASK_EVIDENCE_UNAVAILABLE contract, which is the whole reason
+        // for classifying them. Fail now and leave the circuit untouched.
+        if (WITHDRAWN_EVIDENCE_CODES.has(error.code)) throw error;
+      } else if (error?.name === "AbortError") lastError = new OkxTaskPageError("okx_task_fetch_timeout");
       else lastError = new OkxTaskPageError(
         "okx_task_fetch_failed",
         error instanceof Error ? error.message : String(error),
