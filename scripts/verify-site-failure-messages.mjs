@@ -134,7 +134,8 @@ const directQuote = {
   eligible: true,
   task: null,
   evidenceMode: "verified_onchain_evidence",
-  scopeEvidence: "verified_accepted_service_binding",
+  scopeEvidence: "buyer_declared_description_matched_registered_policy",
+  scopeLimitation: "The job description is supplied by you, not read from the marketplace.",
   policy: { agentName: "Foreman", agentId: "4348" },
   coverage: {
     capUSDT: "0.5",
@@ -160,22 +161,24 @@ assert.ok(!labels.includes("Task"), "a quote with no marketplace page must not c
 const targetJobRow = directRows.find((row) => row.label === "Target job");
 assert.ok(targetJobRow, "a direct quote must still identify the covered job");
 assert.match(targetJobRow.value, /^0x7+…7+$/, "the target job row must show the supplied job id, shortened");
-assert.ok(
-  directRows.some((row) => row.label === "Scope proved by"),
-  "a direct quote must say scope came from the accepted-service binding, not a description",
-);
+// A buyer reads this panel immediately before paying. It must repeat the
+// caveat the API returns, not quietly present the description as verified.
+const descriptionRow = directRows.find((row) => row.label === "Job description");
+assert.ok(descriptionRow, "a direct quote must flag that the description is buyer-declared");
+assert.match(descriptionRow.value, /not proved on chain/i);
 // The public path keeps its task row exactly as before.
 const publicRows = preflightValueRows({
   ...directQuote,
   task: { title: "Market evidence job", publicUrl: "https://www.okx.ai/tasks/401999" },
   scopeEvidence: "public_task_description_matched_registered_policy",
+  scopeLimitation: undefined,
 });
 const publicTaskRow = publicRows.find((row) => row.label === "Task");
 assert.equal(publicTaskRow.value, "Market evidence job");
 assert.equal(publicTaskRow.href, "https://www.okx.ai/tasks/401999");
 assert.ok(
-  !publicRows.some((row) => row.label === "Scope proved by"),
-  "the public path's scope note is only shown where scope came from the service binding",
+  !publicRows.some((row) => row.label === "Job description"),
+  "the public path reads its description from the marketplace, so the caveat does not apply",
 );
 
 console.log("PolicyPool site messaging verified: classified failures and ordinary declines reach the visitor, curated wording wins where it exists, and a quote with no marketplace page still renders its target job.");

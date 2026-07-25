@@ -187,6 +187,13 @@ async function watch(args) {
   if (!/^0x[a-f0-9]{64}$/.test(jobId)) throw new Error("--job-id must be a bytes32 hash");
   if (!/^0x[a-f0-9]{40}$/.test(buyer)) throw new Error("--buyer must be an address");
   if (!fromBlock || fromBlock === true) throw new Error("--from-block is required");
+  // Parsed here rather than inside the loop. BigInt("abc") throws, the loop
+  // treats a throw as a transient RPC failure, and the watcher would retry a
+  // permanently broken query until the enrollment window closed.
+  if (!/^\d+$/.test(String(fromBlock))) {
+    throw new Error(`--from-block must be a nonnegative integer, got ${fromBlock}`);
+  }
+  const startBlock = BigInt(fromBlock);
   if (!jobDescription) throw new Error("--job-description is required");
   if (buyer === HOUSE_WALLET) {
     throw new Error("--buyer is the PolicyPool owner wallet; this pilot exists to pay someone else");
@@ -205,7 +212,7 @@ async function watch(args) {
       // the creation and acceptance events must both be in hand to build a
       // quote, and a cursor that had already moved beyond creation could not
       // produce one. The range is bounded, so the cost is a few chunked calls.
-      events = decode(await scanEscrow({ jobId, fromBlock, toBlock: await headBlock() }), { jobId, buyer });
+      events = decode(await scanEscrow({ jobId, fromBlock: startBlock, toBlock: await headBlock() }), { jobId, buyer });
     } catch (error) {
       // A transient RPC failure must not end a watch that may have one minute
       // of enrollment window left.
@@ -325,6 +332,30 @@ async function confirm(args) {
   const buyer = String(receipt.targetJob?.buyer || receipt.buyer || "").toLowerCase();
   const feeAtomic = String(fee.amountAtomic ?? "");
   const problems = [];
+
+  // Confirming any active receipt paid by some non-house wallet would green-light
+  // withholding delivery on a job this pilot never watched. The prepared attempt
+  // is the authority on which job, buyer and agent are in scope.
+  const prepared = readEvidence().filter((entry) => entry.event === "purchase_prepared").pop();
+  if (!prepared) {
+    problems.push("no watched attempt found in the evidence log; run `watch` first");
+  } else {
+    const expectedJob = String(prepared.body?.targetJobId || "").toLowerCase();
+    const expectedBuyer = String(prepared.body?.targetBuyer || "").toLowerCase();
+    const expectedAgent = String(prepared.body?.targetAgent || "");
+    const receiptJob = String(receipt.targetJob?.jobId || receipt.target?.jobId || "").toLowerCase();
+    const receiptAgent = receipt.target?.agentId ? `${receipt.target.agentName}#${receipt.target.agentId}` : "";
+    if (expectedJob && receiptJob && receiptJob !== expectedJob) {
+      problems.push(`receipt covers job ${receiptJob}, the watched attempt was ${expectedJob}`);
+    }
+    if (expectedJob && !receiptJob) problems.push("the receipt does not name a target job to compare");
+    if (expectedBuyer && buyer && buyer !== expectedBuyer) {
+      problems.push(`receipt buyer ${buyer} is not the watched buyer ${expectedBuyer}`);
+    }
+    if (expectedAgent && receiptAgent && receiptAgent !== expectedAgent) {
+      problems.push(`receipt covers ${receiptAgent}, the watched attempt was ${expectedAgent}`);
+    }
+  }
 
   if (payload.state !== "active") problems.push(`state is ${payload.state}, expected active`);
   if (payload.coverageState !== "COVERAGE_ACTIVE") {

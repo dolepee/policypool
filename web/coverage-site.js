@@ -718,8 +718,12 @@ export function preflightValueRows(data) {
           ? `${EXPLORER_TX}${data.paidRequest.body.targetAcceptanceTxHash}`
           : undefined,
       },
-    ...(data.scopeEvidence === "verified_accepted_service_binding"
-      ? [{ label: "Scope proved by", value: "Accepted service binding on X Layer" }]
+    // A buyer reads this panel immediately before paying, so it has to carry the
+    // same caveat the API returns. Showing only the verified rows here while the
+    // response says the described work is taken on trust would be the page
+    // contradicting its own service at the worst possible moment.
+    ...(data.scopeEvidence === "buyer_declared_description_matched_registered_policy"
+      ? [{ label: "Job description", value: "Declared by you, not proved on chain" }]
       : []),
     { label: "Target", value: `${data.policy.agentName} #${data.policy.agentId}` },
     { label: "Coverage cap", value: `${data.coverage.capUSDT} USD₮0` },
@@ -761,9 +765,13 @@ function showPreflightResult(data) {
   chip.textContent = "Verified";
   chip.className = "state-stamp state-released";
   const providerFunded = data.coverage.fundingSource === "provider_first_loss_bond";
-  summary.textContent = providerFunded
+  const passed = providerFunded
     ? "The accepted task, signed provider policy, buyer/provider binding, enrollment window, SLA, and live provider bond all passed."
     : "The accepted task, target policy, buyer/provider binding, enrollment window, SLA, and live reserve capacity all passed.";
+  // The API returns scopeLimitation when the description was written by the
+  // buyer rather than read from the marketplace. Dropping it here would leave a
+  // buyer reading an unqualified pass immediately before paying.
+  summary.textContent = data.scopeLimitation ? `${passed} ${data.scopeLimitation}` : passed;
   paid.hidden = false;
   renderPreflightValues(preflightValueRows(data));
   document.querySelector("#coverage-request-json").textContent = JSON.stringify(data.paidRequest, null, 2);

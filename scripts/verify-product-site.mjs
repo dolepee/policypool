@@ -121,6 +121,27 @@ assert.match(
   "the notice must say coverage can still be bought here, not merely that a path is gone",
 );
 
+// The notice must not present the buyer's own description as something
+// PolicyPool proves. OKX publishes no authenticated mapping from an accepted
+// order to a listed service, so grouping jobDescription with the escrow-verified
+// fields tells a visitor the opposite of what the API returns, moments before
+// they pay.
+assert.match(evidenceNotice, /Proved against the task escrow/, "the notice must separate proved evidence");
+assert.match(evidenceNotice, /Taken on trust/, "the notice must name what it cannot prove");
+const provedClause = evidenceNotice.match(/Proved against the task escrow:[\s\S]*?<\/p>/)?.[0] || "";
+const trustedClause = evidenceNotice.match(/Taken on trust:[\s\S]*?<\/p>/)?.[0] || "";
+assert.ok(provedClause && trustedClause, "both halves of the disclosure must be present");
+assert.doesNotMatch(
+  provedClause,
+  /<code>jobDescription<\/code>/,
+  "jobDescription is buyer-written and must not appear among the proved fields",
+);
+assert.match(
+  trustedClause,
+  /<code>jobDescription<\/code>/,
+  "jobDescription must be named among the fields taken on trust",
+);
+
 // The working path has to be the form itself, not a URL a visitor is told to
 // construct by hand. Assert the inputs exist and are named exactly as the API
 // reads them, so a rename on either side breaks the gate rather than the page.
