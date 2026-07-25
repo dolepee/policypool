@@ -78,6 +78,26 @@ for (const receiptId of ["ppc-6c3d1dbe749cca96", "ppc-136a34aee2022a42", "ppc-5e
 assert.match(coverageScript, /data-copy-link/, "shared product script must support copyable public proof links");
 assert.match(coverageScript, /Provider bond free/, "universal preflight results must identify provider-bond funding");
 
+// An enrolled A2A covenant is reconciled from the withdrawn public task page, so
+// neither evidence mode can cover it. Listing such a provider as selectable
+// walks a buyer through gathering every transaction only to be refused at the
+// end, so the option is disabled and says why.
+assert.match(
+  coverageScript,
+  /serviceType \|\| ""\)\.toUpperCase\(\) === "A2A"/,
+  "enrolled A2A providers must be identified before being offered",
+);
+assert.match(
+  coverageScript,
+  /option\.disabled = unreachable/,
+  "an unreachable provider must not be selectable",
+);
+assert.match(
+  coverageScript,
+  /unavailable while OKX withholds task evidence/,
+  "a disabled provider must say why it is unavailable",
+);
+
 const coverage = await readFile(new URL("../web/coverage.html", import.meta.url), "utf8");
 assert.match(
   coverage,
@@ -109,10 +129,110 @@ for (const field of [
 ]) {
   assert.match(evidenceNotice, new RegExp(`<code>${field}</code>`), `the notice must name ${field} as a required input`);
 }
-assert.match(evidenceNotice, /covered-job-receipt/, "the notice must name the endpoint that still takes direct evidence");
-// A bare public task ID resolves to the same withdrawn page as a URL, and the
-// form still offers both, so the outage disclosure must cover both forms.
+// A bare public task ID resolves to the same withdrawn page as a URL, so the
+// disclosure must cover both forms.
 assert.match(evidenceNotice, /in either form/, "the notice must cover public task IDs as well as URLs");
+// The notice must not read as an obituary. Coverage is still purchasable on this
+// page, and a visitor has to be told so rather than left to infer the product is
+// down.
+assert.match(
+  evidenceNotice,
+  /still available below for most providers/i,
+  "the notice must say coverage can still be bought here, not merely that a path is gone",
+);
+// It must not claim availability without qualification: enrolled v0.4 A2A
+// policies cannot be covered at all while their reconciliation reads the
+// withdrawn page.
+assert.doesNotMatch(
+  evidenceNotice,
+  /fully available/i,
+  "availability must be qualified, since enrolled A2A policies cannot be covered",
+);
+assert.match(evidenceNotice, /A2A service are the exception/i, "the notice must name the exception");
+assert.match(
+  evidenceNotice,
+  /will not sell what it cannot settle/i,
+  "the notice must say why those providers are refused rather than merely that they are",
+);
+
+// The notice must not present the buyer's own description as something
+// PolicyPool proves. OKX publishes no authenticated mapping from an accepted
+// order to a listed service, so grouping jobDescription with the escrow-verified
+// fields tells a visitor the opposite of what the API returns, moments before
+// they pay.
+assert.match(evidenceNotice, /Proved against the task escrow/, "the notice must separate proved evidence");
+assert.match(evidenceNotice, /Taken on trust/, "the notice must name what it cannot prove");
+
+// The public-reference path is dormant, not deleted: OKX may restore the fields
+// it reads, and restoring it is meant to be a matter of enabling the radio. That
+// only holds if the dormant field stays submittable. It did not once already —
+// the input was left disabled with no name, so FormData would have carried no
+// reference and every restored request would have failed okx_task_reference_required
+// on an input the visitor could see themselves filling in.
+const publicField = coverage.match(/<div class="field-block[^"]*public-reference-field"[\s\S]*?<\/div>/)?.[0] || "";
+assert.ok(publicField, "the dormant public-reference field must still exist");
+assert.match(
+  publicField,
+  /name="taskReference"/,
+  "the dormant task input must keep its name, or restoring public mode submits nothing",
+);
+// Its disabled state belongs to the mode toggle, which flips it on selection.
+// A field pinned off in markup alone would survive that toggle and silently
+// break the path it exists to serve. applyEvidenceMode is exercised directly in
+// verify-site-failure-messages.mjs.
+assert.match(
+  coverageScript,
+  /export function applyEvidenceMode/,
+  "the mode toggle must stay exported so the restoration path is testable without a browser",
+);
+const provedClause = evidenceNotice.match(/Proved against the task escrow:[\s\S]*?<\/p>/)?.[0] || "";
+const trustedClause = evidenceNotice.match(/Taken on trust:[\s\S]*?<\/p>/)?.[0] || "";
+assert.ok(provedClause && trustedClause, "both halves of the disclosure must be present");
+assert.doesNotMatch(
+  provedClause,
+  /<code>jobDescription<\/code>/,
+  "jobDescription is buyer-written and must not appear among the proved fields",
+);
+assert.match(
+  trustedClause,
+  /<code>jobDescription<\/code>/,
+  "jobDescription must be named among the fields taken on trust",
+);
+
+// The working path has to be the form itself, not a URL a visitor is told to
+// construct by hand. Assert the inputs exist and are named exactly as the API
+// reads them, so a rename on either side breaks the gate rather than the page.
+const coverageForm = coverage.match(/<form class="coverage-form-card"[\s\S]*?<\/form>/)?.[0] || "";
+assert.ok(coverageForm, "the coverage page must still carry the preflight form");
+for (const field of [
+  "targetJobId",
+  "targetCreationTxHash",
+  "targetAcceptanceTxHash",
+  "targetBuyer",
+  "jobDescription",
+]) {
+  assert.match(
+    coverageForm,
+    new RegExp(`name="${field}"`),
+    `the form must collect ${field} so direct evidence is usable without hand-writing a request`,
+  );
+}
+
+// The mode switch must offer the working path selected and the withdrawn one
+// visibly unavailable, rather than silently dropping it.
+const modeSwitch = coverageForm.match(/<fieldset class="mode-switch"[\s\S]*?<\/fieldset>/)?.[0] || "";
+assert.ok(modeSwitch, "the form must let a visitor see which evidence modes exist");
+assert.match(
+  modeSwitch,
+  /value="verified_onchain_evidence"[^>]*checked/,
+  "the working mode must be the default",
+);
+assert.match(
+  modeSwitch,
+  /value="public_task_reference"[^>]*disabled/,
+  "the withdrawn mode must be shown disabled rather than offered or hidden",
+);
+
 
 // The same disclosure lives in three places and has now been narrowed to "URL"
 // twice. parseOkxTaskReference normalises a bare task id and a URL to the same

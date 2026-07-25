@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   COVERAGE_STATES,
   describeFailure,
@@ -281,5 +282,29 @@ const bareOk = enrich({ ok: true });
 assert.equal(bareOk.ok, true, "the original payload is preserved");
 assert.equal(bareOk.coverageState, COVERAGE_STATES.NOT_CHECKED);
 assert.equal(bareOk.covered, false);
+
+// PolicyPool is a rule based bounded service guarantee, not a regulated
+// insurance product, and the standing terminology rule follows from that. These
+// strings are the ones a buyer actually reads when a request is refused, so the
+// vocabulary is enforced here rather than left to review. It was wrong once: a
+// declined quote told the buyer their cap was below the minimum this service
+// would "underwrite", which is the one thing the positioning denies.
+//
+// Scanned over the source because the catalogues are module private. "policy" is
+// deliberately absent from the list; it is load bearing throughout the registry
+// and means something else here.
+const stateSource = await readFile(new URL("../api/lib/coverage-state.js", import.meta.url), "utf8");
+const catalogues = [...stateSource.matchAll(/(?:ERROR_CONTRACT|NEXT_ACTION_BY_STATE) = Object\.freeze\(\{[\s\S]*?\n\}\);/g)]
+  .map((match) => match[0]);
+assert.equal(catalogues.length, 2, "both buyer-facing catalogues must be found, or this check scans nothing");
+for (const catalogue of catalogues) {
+  for (const banned of ["insurance", "insurer", "insured", "underwrit", "premium", "policyholder", "actuarial"]) {
+    assert.doesNotMatch(
+      catalogue,
+      new RegExp(banned, "i"),
+      `buyer-facing copy must not use "${banned}": this is a bounded service guarantee, not a regulated insurance product`,
+    );
+  }
+}
 
 console.log("coverage state contract verified");

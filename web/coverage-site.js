@@ -25,6 +25,11 @@ function short(value, left = 8, right = 6) {
 }
 
 function dateTime(value) {
+  // A missing timestamp is not a timestamp. new Date(null) is epoch 0 rather
+  // than NaN, so the guard below never catches it and an absent value renders
+  // as 01 Jan 1970 — a real-looking date in a panel a buyer reads immediately
+  // before paying.
+  if (value === null || value === undefined || value === "") return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
   return new Intl.DateTimeFormat("en-GB", {
@@ -661,7 +666,15 @@ async function hydrateUniversalProviders() {
         const option = document.createElement("option");
         option.value = String(policy.agentId);
         option.dataset.serviceId = String(policy.serviceId);
-        option.textContent = `${policy.agentName} #${policy.agentId} · ${policy.serviceName}`;
+        // An enrolled A2A covenant is reconciled from the withdrawn public task
+        // page, so neither evidence mode can cover it. Offering it selectable
+        // would walk a buyer through gathering every transaction only to be
+        // refused at the end.
+        const unreachable = String(policy.serviceType || "").toUpperCase() === "A2A";
+        option.disabled = unreachable;
+        option.textContent = unreachable
+          ? `${policy.agentName} #${policy.agentId} · ${policy.serviceName} — unavailable while OKX withholds task evidence`
+          : `${policy.agentName} #${policy.agentId} · ${policy.serviceName}`;
         target.insertBefore(option, custom || null);
       }
     }
@@ -699,6 +712,56 @@ function renderPreflightValues(entries) {
   }));
 }
 
+// The rows a successful quote renders. Pure and exported so the null-task
+// shape is verified in CI: reading data.task.title unconditionally threw for
+// every direct-evidence quote, and nothing outside a browser could catch it.
+export function preflightValueRows(data) {
+  const providerFunded = data.coverage.fundingSource === "provider_first_loss_bond";
+  return [
+    // Direct-evidence quotes deliberately carry no marketplace page, so the
+    // covered job is identified by the on-chain id the buyer supplied and the
+    // verifier proved. Reading data.task.title unconditionally threw here and
+    // took the whole result panel with it.
+    data.task
+      ? { label: "Task", value: data.task.title, href: data.task.publicUrl }
+      : {
+        label: "Target job",
+        value: short(data.paidRequest?.body?.targetJobId || ""),
+        href: data.paidRequest?.body?.targetAcceptanceTxHash
+          ? `${EXPLORER_TX}${data.paidRequest.body.targetAcceptanceTxHash}`
+          : undefined,
+      },
+    // A buyer reads this panel immediately before paying, so it has to carry the
+    // same caveat the API returns. Showing only the verified rows here while the
+    // response says the described work is taken on trust would be the page
+    // contradicting its own service at the worst possible moment.
+    ...(data.scopeEvidence === "buyer_declared_description_matched_registered_policy"
+      ? [{ label: "Job description", value: "Declared by you, not proved on chain" }]
+      : []),
+    { label: "Target", value: `${data.policy.agentName} #${data.policy.agentId}` },
+    { label: "Coverage cap", value: `${data.coverage.capUSDT} USD₮0` },
+    { label: "Service fee", value: `${data.coverage.serviceFeeUSDT} USD₮0` },
+    {
+      label: "Deadline",
+      // A relay-clock covenant has no deadline until the provider starts the
+      // SLA clock, and preflight returns null for exactly that state. Say the
+      // clock has not started yet; a dash here would read as missing data
+      // about a covenant the buyer is about to pay for.
+      value: data.coverage.clockState === "pending_provider_relay_start"
+        ? "Starts when the provider relays"
+        : dateTime(data.coverage.deadline),
+    },
+    { label: "Enrollment closes", value: dateTime(data.coverage.enrollmentClosesAt) },
+    { label: "Quote expires", value: dateTime(data.quote.expiresAt) },
+    {
+      label: providerFunded ? "Provider bond free" : "Reserve free",
+      value: `${providerFunded ? data.coverage.providerBondAvailableUSDT : data.coverage.availableUSDT} USD₮0`,
+    },
+    { label: "Creation tx", value: short(data.evidence.creationTxHash), href: `${EXPLORER_TX}${data.evidence.creationTxHash}` },
+    { label: "Acceptance tx", value: short(data.evidence.acceptanceTxHash), href: `${EXPLORER_TX}${data.evidence.acceptanceTxHash}` },
+  ];
+}
+
 function showPreflightResult(data) {
   document.querySelector("#preflight-empty").hidden = true;
   document.querySelector("#preflight-output").hidden = false;
@@ -724,25 +787,15 @@ function showPreflightResult(data) {
   chip.textContent = "Verified";
   chip.className = "state-stamp state-released";
   const providerFunded = data.coverage.fundingSource === "provider_first_loss_bond";
-  summary.textContent = providerFunded
+  const passed = providerFunded
     ? "The accepted task, signed provider policy, buyer/provider binding, enrollment window, SLA, and live provider bond all passed."
     : "The accepted task, target policy, buyer/provider binding, enrollment window, SLA, and live reserve capacity all passed.";
+  // The API returns scopeLimitation when the description was written by the
+  // buyer rather than read from the marketplace. Dropping it here would leave a
+  // buyer reading an unqualified pass immediately before paying.
+  summary.textContent = data.scopeLimitation ? `${passed} ${data.scopeLimitation}` : passed;
   paid.hidden = false;
-  renderPreflightValues([
-    { label: "Task", value: data.task.title, href: data.task.publicUrl },
-    { label: "Target", value: `${data.policy.agentName} #${data.policy.agentId}` },
-    { label: "Coverage cap", value: `${data.coverage.capUSDT} USD₮0` },
-    { label: "Service fee", value: `${data.coverage.serviceFeeUSDT} USD₮0` },
-    { label: "Deadline", value: dateTime(data.coverage.deadline) },
-    { label: "Enrollment closes", value: dateTime(data.coverage.enrollmentClosesAt) },
-    { label: "Quote expires", value: dateTime(data.quote.expiresAt) },
-    {
-      label: providerFunded ? "Provider bond free" : "Reserve free",
-      value: `${providerFunded ? data.coverage.providerBondAvailableUSDT : data.coverage.availableUSDT} USD₮0`,
-    },
-    { label: "Creation tx", value: short(data.evidence.creationTxHash), href: `${EXPLORER_TX}${data.evidence.creationTxHash}` },
-    { label: "Acceptance tx", value: short(data.evidence.acceptanceTxHash), href: `${EXPLORER_TX}${data.evidence.acceptanceTxHash}` },
-  ]);
+  renderPreflightValues(preflightValueRows(data));
   document.querySelector("#coverage-request-json").textContent = JSON.stringify(data.paidRequest, null, 2);
 }
 
@@ -753,6 +806,29 @@ function revealPreflightResult() {
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   result.focus({ preventScroll: true });
   result.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+}
+
+// Shows, names and requires exactly the selected mode's inputs, so validation
+// cannot block on a field the request will not carry and FormData carries
+// nothing from the other mode. Exported and pure over the form so the restoration
+// path can be verified without a browser: the public radio ships disabled today,
+// which means that branch is otherwise only reachable by hand.
+export function applyEvidenceMode(form, direct) {
+  for (const field of form.querySelectorAll(".direct-evidence-field")) {
+    field.hidden = !direct;
+    for (const control of field.querySelectorAll("input, textarea")) {
+      control.required = direct && control.dataset.optional !== "true";
+      control.disabled = !direct;
+    }
+  }
+  for (const field of form.querySelectorAll(".public-reference-field")) {
+    field.hidden = direct;
+    for (const control of field.querySelectorAll("input, textarea")) {
+      control.disabled = direct;
+      control.required = !direct;
+    }
+  }
+  return form;
 }
 
 function bindCoveragePreflight() {
@@ -776,6 +852,20 @@ function bindCoveragePreflight() {
   targetSelect.addEventListener("change", setTargetMode);
   customService.addEventListener("input", () => { targetService.value = customService.value.trim(); });
   setTargetMode();
+
+  // Only the chosen mode's fields are shown, named and required, so validation
+  // cannot block on an input the request will not carry and FormData carries
+  // exactly the chosen mode's inputs. The public-reference radio ships disabled
+  // because OKX withdrew the fields it depends on. Restoring that path means
+  // enabling the radio and updating the notice copy; the wiring below already
+  // handles the rest.
+  const modeInputs = [...form.querySelectorAll('input[name="evidenceMode"]')];
+  const setEvidenceMode = () => applyEvidenceMode(
+    form,
+    form.querySelector('input[name="evidenceMode"]:checked')?.value !== "public_task_reference",
+  );
+  for (const input of modeInputs) input.addEventListener("change", setEvidenceMode);
+  setEvidenceMode();
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     taskInput.removeAttribute("aria-invalid");
@@ -790,17 +880,39 @@ function bindCoveragePreflight() {
     form.setAttribute("aria-busy", "true");
     submit.disabled = true;
     submit.textContent = "Verifying…";
-    setPreflightStatus("Reading the OKX task and verifying its X Layer events.");
+    // Only the fields the chosen mode actually uses are sent. Posting an empty
+    // taskReference alongside on-chain evidence would read as a public lookup
+    // that was attempted and returned nothing.
+    const mode = values.get("evidenceMode") === "public_task_reference"
+      ? "public_task_reference"
+      : "verified_onchain_evidence";
+    const requestBody = {
+      targetAgent: targetSelect.value === "custom" ? customAgent.value.trim() : values.get("targetAgent"),
+      targetServiceId: targetSelect.value === "custom" ? customService.value.trim() : values.get("targetServiceId"),
+      requestedCoverageUSDT: values.get("requestedCoverageUSDT"),
+      ...(mode === "public_task_reference"
+        ? { taskReference: values.get("taskReference") }
+        : {
+          targetJobId: (values.get("targetJobId") || "").trim(),
+          targetCreationTxHash: (values.get("targetCreationTxHash") || "").trim(),
+          targetAcceptanceTxHash: (values.get("targetAcceptanceTxHash") || "").trim(),
+          targetBuyer: (values.get("targetBuyer") || "").trim(),
+          jobDescription: (values.get("jobDescription") || "").trim(),
+          // Sent only when given. An empty string would read as a lookup that
+          // was attempted against the withdrawn page and returned nothing.
+          ...((values.get("taskReference") || "").trim()
+            ? { taskReference: values.get("taskReference").trim() }
+            : {}),
+        }),
+    };
+    setPreflightStatus(mode === "public_task_reference"
+      ? "Reading the OKX task and verifying its X Layer events."
+      : "Verifying your transactions against the X Layer task escrow.");
     try {
       const response = await fetch("/api/coverage-preflight", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          targetAgent: targetSelect.value === "custom" ? customAgent.value.trim() : values.get("targetAgent"),
-          targetServiceId: targetSelect.value === "custom" ? customService.value.trim() : values.get("targetServiceId"),
-          taskReference: values.get("taskReference"),
-          requestedCoverageUSDT: values.get("requestedCoverageUSDT"),
-        }),
+        body: JSON.stringify(requestBody),
       });
       const data = await response.json();
       if (!response.ok || !data.ok) {

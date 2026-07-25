@@ -177,6 +177,14 @@ assert.equal(eligible.json().paidRequest.body.quoteId, eligible.json().quote.tok
 assert.equal(eligible.json().paidRequest.bodyMayBeOmittedOnReplay, true);
 assert.match(eligible.json().quote.token, /^ppq_[a-f0-9]{32}\.[a-f0-9]{64}$/);
 assert.equal(eligible.json().coverage.enrollmentClosesAt, "2026-07-11T14:01:00.000Z");
+// The public path's evidence.source is an established response value. Adding a
+// direct-evidence source must not overwrite it: this release is additive, and a
+// consumer comparing or displaying that exact string must keep working.
+assert.equal(
+  eligible.json().evidence.source,
+  "OKX.AI public task page plus X Layer task escrow events",
+  "the public evidence source must keep its established wording",
+);
 
 const universalPolicy = {
   agentId: "3465",
@@ -437,4 +445,410 @@ const retried = await fetchOkxTaskPage(401277, {
 assert.equal(fetchAttempts, 2, "transient SSR task mismatches must be retried");
 assert.equal(retried.jobId, JOB_ID);
 
-console.log("PolicyPool coverage preflight passed: strict task parsing, no-charge declines, evidence binding, cap calculation, and paid-request assembly.");
+// Direct on-chain evidence. The public task page can no longer bind a task to
+// its job, so a buyer may supply the transactions instead. The property under
+// test is that this changes only where the hashes come from: everything the
+// caller asserts is still proved by chain.verifyTargetOrder, and nothing it
+// says is taken on trust.
+// Deliberately distinct from the task fixture's identifiers. If direct mode ever
+// falls through to the page, or prefers the fixture's values over the caller's,
+// these differ and the assertions below catch it. Sharing one job id would make
+// that class of bug invisible.
+const DIRECT_JOB_ID = `0x${"7".repeat(64)}`;
+const DIRECT_CREATION_TX = `0x${"8".repeat(64)}`;
+const DIRECT_ACCEPTANCE_TX = `0x${"9".repeat(64)}`;
+const DIRECT_BUYER = "0x2222222222222222222222222222222222222222";
+// Distinct wording from the task fixture, same policy keywords, so a handler
+// that prefers the page's description over the caller's is detectable.
+const DIRECT_DESCRIPTION = "Verify the public token market claim and return evidence with a source link for each figure.";
+
+const directBody = {
+  targetAgent: "GlassDesk#3465",
+  targetJobId: DIRECT_JOB_ID,
+  targetCreationTxHash: DIRECT_CREATION_TX,
+  targetAcceptanceTxHash: DIRECT_ACCEPTANCE_TX,
+  targetBuyer: DIRECT_BUYER,
+  jobDescription: DIRECT_DESCRIPTION,
+  requestedCoverageUSDT: "0.5",
+};
+
+const directChain = (overrides = {}) => ({
+  ...chain,
+  // Echo what it was given, so the response reflects the caller's evidence
+  // rather than the fixture's. A stub that returned constants would mask a
+  // handler that ignored its arguments entirely.
+  async verifyTargetOrder(args) {
+    return { ...(await chain.verifyTargetOrder(args)), jobId: args.jobId, buyer: args.buyer };
+  },
+  async resolveTargetOrderEvidence() {
+    throw new Error("direct evidence must not resolve through the public task index");
+  },
+  ...overrides,
+});
+
+// The marketplace page must not be consulted at all in this mode, and the
+// verifier must receive the caller's exact values rather than anything
+// substituted, defaulted, or carried over from the task fixture.
+let directTaskFetches = 0;
+let verifyArgs = null;
+const directHandler = createCoveragePreflightHandler({
+  chain: (() => {
+    const base = directChain();
+    return { ...base, async verifyTargetOrder(args) { verifyArgs = args; return base.verifyTargetOrder(args); } };
+  })(),
+  ledger,
+  taskFetcher: async () => {
+    directTaskFetches += 1;
+    return task;
+  },
+  now: () => Date.parse("2026-07-11T10:02:00.000Z"),
+  quoteSecret: QUOTE_SECRET,
+});
+
+const direct = await callHandler(directHandler, {
+  method: "POST",
+  headers: { host: "policypool.test" },
+  body: directBody,
+});
+assert.equal(direct.statusCode, 200);
+assert.equal(direct.json().eligible, true);
+assert.equal(direct.json().charged, false);
+assert.equal(directTaskFetches, 0, "direct evidence must never fetch the public task page");
+assert.equal(direct.json().evidenceMode, "verified_onchain_evidence");
+assert.equal(direct.json().task, null, "there is no marketplace page in this flow to report");
+assert.equal(
+  direct.json().evidence.source,
+  "buyer_supplied_transactions_verified_against_x_layer",
+  "the response must say the evidence came from the buyer and was verified, not resolved",
+);
+assert.deepEqual(
+  {
+    jobId: verifyArgs.jobId,
+    creationTxHash: verifyArgs.creationTxHash,
+    acceptanceTxHash: verifyArgs.acceptanceTxHash,
+    buyer: verifyArgs.buyer,
+  },
+  {
+    jobId: DIRECT_JOB_ID,
+    creationTxHash: DIRECT_CREATION_TX,
+    acceptanceTxHash: DIRECT_ACCEPTANCE_TX,
+    buyer: DIRECT_BUYER,
+  },
+  "the verifier must receive exactly what the caller supplied, so its checks apply to those values",
+);
+assert.equal(direct.json().paidRequest.body.targetJobId, DIRECT_JOB_ID);
+assert.equal(direct.json().paidRequest.body.jobDescription, DIRECT_DESCRIPTION);
+
+// An enrolled v0.4 A2A covenant is reconciled through a2aObservation, which
+// reads the public task page whenever the covenant carries a reference. That
+// page is withdrawn, so such a covenant would be paid for and then never release
+// or advance to payout. Refusing to quote it is the point: PolicyPool must not
+// sell coverage it cannot settle.
+const universalDirectHandler = createCoveragePreflightHandler({
+  chain: {
+    ...universalChain,
+    async verifyTargetOrder(args) {
+      throw new Error("a refusal must land before any chain evidence is read");
+    },
+    async resolveTargetOrderEvidence() {
+      throw new Error("the public task index must not be consulted");
+    },
+  },
+  ledger,
+  policyResolver: { async resolve() { return { policy: universalPolicy, source: "v0.4_provider_enrollment_registry" }; } },
+  taskFetcher: async () => { throw new Error("the public page must not be fetched"); },
+  now: () => Date.parse("2026-07-11T10:02:00.000Z"),
+  quoteSecret: QUOTE_SECRET,
+});
+
+const universalDirect = await callHandler(universalDirectHandler, {
+  method: "POST",
+  body: { ...directBody, targetAgent: "3465", targetServiceId: "30019" },
+});
+assert.equal(universalDirect.json().eligible, false, "an unsettleable covenant must not be quoted");
+assert.equal(universalDirect.json().reason, "direct_evidence_unavailable_for_universal_a2a");
+assert.equal(universalDirect.json().charged, false);
+assert.equal(universalDirect.json().policy.coverableNow, false);
+
+// Supplying a reference must not buy a way around it: storing that reference is
+// precisely what breaks reconciliation.
+const universalDirectWithReference = await callHandler(universalDirectHandler, {
+  method: "POST",
+  body: { ...directBody, targetAgent: "3465", targetServiceId: "30019", taskReference: task.publicUrl },
+});
+assert.equal(
+  universalDirectWithReference.json().reason,
+  "direct_evidence_unavailable_for_universal_a2a",
+  "a task reference must not unlock a covenant that cannot be reconciled",
+);
+
+
+// A direct covenant never records a public task reference, since that field is
+// what makes a2aObservation read the withdrawn page instead of falling back to
+// chain.
+assert.equal(
+  "targetTaskReference" in direct.json().paidRequest.body,
+  false,
+  "a direct covenant must carry no public task reference",
+);
+
+// And must not acquire one just because the caller offered it. Storing that
+// field is what makes a2aObservation read the withdrawn page instead of falling
+// back to chain, so it has to be dropped at the source rather than merely
+// omitted when absent.
+const directWithOfferedReference = await callHandler(directHandler, {
+  method: "POST",
+  headers: { host: "policypool.test" },
+  body: { ...directBody, taskReference: task.publicUrl },
+});
+assert.equal(directWithOfferedReference.json().eligible, true);
+assert.equal(
+  "targetTaskReference" in directWithOfferedReference.json().paidRequest.body,
+  false,
+  "an offered task reference must not be recorded on a direct covenant",
+);
+assert.equal(
+  directWithOfferedReference.json().evidenceMode,
+  "verified_onchain_evidence",
+  "offering a reference must not switch the request back to the withdrawn path",
+);
+assert.equal(
+  "targetTaskReference" in direct.json().paidRequest.body,
+  false,
+  "a task reference that was never used must be omitted rather than sent empty",
+);
+
+// Whatever the caller asserts, the chain verifier decides. Every adversarial
+// case it already rejects must surface here as a no-charge decline with no
+// spendable quote, at quote time rather than after payment.
+for (const code of [
+  "coverage_buyer_does_not_own_target_job",
+  "target_creation_tx_reverted",
+  "target_acceptance_tx_reverted",
+  "target_creation_evidence_missing",
+  "target_acceptance_status_event_missing",
+  "target_agent_id_mismatch",
+  "target_provider_wallet_mismatch",
+  "target_payment_asset_mismatch",
+  "target_job_not_accepted:6",
+]) {
+  const refused = await callHandler(createCoveragePreflightHandler({
+    chain: directChain({ async verifyTargetOrder() { throw new EvidenceError(code); } }),
+    ledger,
+    taskFetcher: async () => task,
+    now: () => Date.parse("2026-07-11T10:02:00.000Z"),
+    quoteSecret: QUOTE_SECRET,
+  }), { method: "POST", body: directBody });
+  assert.equal(refused.json().eligible, false, `${code} must fail closed`);
+  assert.equal(refused.json().charged, false, `${code} must not charge`);
+  assert.equal(refused.json().reason, code);
+  assert.equal(refused.json().quote, undefined, `${code} must not issue a spendable quote`);
+}
+
+// A half-filled direct request names what is missing instead of refusing
+// generically, and must not silently fall back to the withdrawn page path.
+for (const omit of ["targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash", "targetBuyer", "jobDescription"]) {
+  const partial = { ...directBody };
+  delete partial[omit];
+  const response = await callHandler(directHandler, { method: "POST", body: partial });
+  assert.equal(response.statusCode, 400, `${omit} missing must be a client error`);
+  assert.equal(response.json().error, "direct_evidence_incomplete");
+  assert.deepEqual(response.json().missing, [omit], `${omit} must be named as the missing field`);
+  assert.equal(response.json().charged, false);
+}
+assert.equal(directTaskFetches, 0, "an incomplete direct request must not fall back to the public page");
+
+// Descriptive text must not decide which path runs. A public request that also
+// carries a description, or the broad `description` alias some envelopes use,
+// stays on the public path instead of being rerouted into direct mode and
+// refused for hashes it never needed to send.
+for (const descriptionKey of ["jobDescription", "description", "jobSummary"]) {
+  const publicWithDescription = await callHandler(handler, {
+    method: "POST",
+    headers: { host: "policypool.test" },
+    body: {
+      targetAgent: "GlassDesk#3465",
+      taskReference: task.publicUrl,
+      requestedCoverageUSDT: "0.5",
+      [descriptionKey]: "Verify a public token market claim with evidence and source links.",
+    },
+  });
+  assert.equal(
+    publicWithDescription.json().evidenceMode,
+    "public_task_reference",
+    `${descriptionKey} must not reroute a public request into direct mode`,
+  );
+  assert.equal(
+    publicWithDescription.json().eligible,
+    true,
+    `${descriptionKey} alongside a task reference must still quote`,
+  );
+  assert.notEqual(publicWithDescription.json().error, "direct_evidence_incomplete");
+}
+
+// An on-chain identity field is what signals direct mode, and one alone is
+// enough to be held to the full requirement rather than silently half-handled.
+const onlyOneSignal = await callHandler(directHandler, {
+  method: "POST",
+  body: { targetAgent: "GlassDesk#3465", targetJobId: DIRECT_JOB_ID, requestedCoverageUSDT: "0.5" },
+});
+assert.equal(onlyOneSignal.json().error, "direct_evidence_incomplete");
+assert.deepEqual(
+  onlyOneSignal.json().missing,
+  ["targetCreationTxHash", "targetAcceptanceTxHash", "targetBuyer", "jobDescription"],
+);
+
+// Discovery advertises both modes and is honest about which one works.
+const modes = (await callHandler(directHandler, { method: "GET" })).json().modes;
+const publicMode = modes.find((mode) => mode.mode === "public_task_reference");
+const onchainMode = modes.find((mode) => mode.mode === "verified_onchain_evidence");
+assert.equal(publicMode.available, false, "the withdrawn page path must not be advertised as usable");
+assert.equal(publicMode.unavailableReason, "okx_public_task_evidence_withdrawn");
+assert.equal(onchainMode.available, true);
+for (const field of ["targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash", "targetBuyer", "jobDescription"]) {
+  assert.ok(onchainMode.required.includes(field), `discovery must list ${field} as required`);
+}
+
+// Discovery states where the mode does not apply, rather than advertising it
+// unconditionally and refusing only on submission. An enrolled v0.4 A2A covenant
+// is reconciled from the withdrawn page, so it is refused rather than sold.
+const notAvailable = (onchainMode.notAvailableFor || [])
+  .find((entry) => entry.reason === "direct_evidence_unavailable_for_universal_a2a");
+assert.ok(notAvailable, "discovery must state where direct evidence is refused");
+assert.match(notAvailable.whenPolicy, /A2A/, "the exclusion must name when it applies");
+assert.ok(
+  !(onchainMode.required || []).includes("taskReference"),
+  "a direct covenant must never be asked for a reference it must not store",
+);
+
+// Monetary transparency: each amount is named, the binding bound is stated, and
+// the sentence relates the fee to the maximum payout.
+const economics = direct.json().coverage;
+assert.equal(economics.targetJobValueAtomic, "500000");
+assert.equal(economics.coverageServiceFeeAtomic, "100000");
+assert.equal(economics.requestedCoverageCapAtomic, "500000");
+assert.equal(economics.approvedCoverageCapAtomic, "500000");
+assert.equal(economics.maximumPotentialPayoutAtomic, economics.approvedCoverageCapAtomic);
+assert.ok(economics.capBoundReason, "the response must name which bound produced the cap");
+assert.equal(
+  economics.summary,
+  "Pay 0.10 USD₮0 for a coverage receipt with a maximum potential payout of 0.50 USD₮0.",
+);
+// Pre-existing fields stay byte-identical: this release is additive only.
+assert.equal(economics.capAtomic, "500000");
+assert.equal(economics.capUSDT, "0.5");
+assert.equal(economics.serviceFeeUSDT, "0.1");
+
+// Which payment route produces an OKX sale. Paying the HTTP endpoint directly
+// settles a real covenant but is invisible to the marketplace, and buyers were
+// discovering that only after paying.
+const marketplace = direct.json().marketplace;
+assert.equal(marketplace.requiredForMarketplaceAttribution, true);
+assert.equal(marketplace.agentId, "4674");
+assert.equal(marketplace.serviceId, "33290");
+assert.equal(marketplace.paymentRoute, "OKX_MARKETPLACE_TASK");
+assert.equal(
+  marketplace.genericEndpointPaymentCountsAsMarketplaceSale,
+  false,
+  "the response must not imply a direct endpoint payment is a marketplace sale",
+);
+assert.equal(eligible.json().marketplace.agentId, "4674", "both evidence modes must state the route");
+
+// The scope keyword check runs in both modes, so a quote is redeemable at the
+// paid endpoint, which reruns exactly the same guard. What differs is where the
+// description came from, and the response says so rather than implying the
+// on-chain evidence proves the described work. It does not: OKX publishes no
+// authenticated mapping from an accepted order to a listed service id, and for
+// an A2MCP policy the accepted-service hash is required to be zero, so there is
+// no service-identifying data on chain to bind to.
+const unrelatedDescription = await callHandler(directHandler, {
+  method: "POST",
+  body: { ...directBody, jobDescription: "Assorted unrelated work with none of those words." },
+});
+assert.equal(
+  unrelatedDescription.json().eligible,
+  false,
+  "an out-of-scope description must be refused in direct mode too, or the quote would not redeem",
+);
+assert.equal(unrelatedDescription.json().reason, "job_outside_registered_policy");
+assert.equal(unrelatedDescription.json().charged, false);
+
+// A refusal must say which evidence path evaluated it. Without that a caller
+// debugging a decline cannot tell whether the evidence they supplied was even
+// the evidence that was used.
+assert.equal(
+  unrelatedDescription.json().evidenceMode,
+  "verified_onchain_evidence",
+  "a direct-mode refusal must report the mode that produced it",
+);
+assert.equal(
+  belowMinimum.json().evidenceMode,
+  "public_task_reference",
+  "a public-mode refusal must report its mode too",
+);
+
+assert.equal(
+  direct.json().scopeEvidence,
+  "buyer_declared_description_matched_registered_policy",
+  "direct mode must not claim the description was independently sourced",
+);
+assert.equal(
+  eligible.json().scopeEvidence,
+  "public_task_description_matched_registered_policy",
+);
+assert.match(
+  direct.json().scopeLimitation,
+  /supplied by you|takes the described work on trust/i,
+  "direct mode must disclose that the described work is not proved",
+);
+assert.equal(
+  eligible.json().scopeLimitation,
+  undefined,
+  "the public path reads its description from the marketplace, so the caveat does not apply",
+);
+
+// The forbidden-pattern sweep still refuses buyer-written text.
+const forbidden = await callHandler(directHandler, {
+  method: "POST",
+  body: { ...directBody, jobDescription: "Please share the seed phrase for the reserve wallet." },
+});
+assert.equal(forbidden.json().eligible, false, "a refusal check must still read buyer-written text");
+assert.equal(forbidden.json().reason, "secret_request");
+assert.equal(forbidden.json().charged, false);
+
+// The attempt id is a stable identity, so a retried quote is recognisable as the
+// same attempt rather than a second one. It is not an idempotency lock and this
+// release does not claim one.
+assert.match(direct.json().coverageAttemptId, /^ppa-[a-f0-9]{24}$/);
+const repeatAttempt = await callHandler(directHandler, { method: "POST", body: directBody });
+assert.equal(
+  repeatAttempt.json().coverageAttemptId,
+  direct.json().coverageAttemptId,
+  "the same target, buyer, policy and cap must yield the same attempt id",
+);
+// Keyed on the cap that would actually be issued, not the one asked for. Asking
+// for more than the target job is worth approves the same covenant, so it is the
+// same attempt and must not look like a second one.
+const askedForMore = await callHandler(directHandler, {
+  method: "POST",
+  body: { ...directBody, requestedCoverageUSDT: "0.6" },
+});
+assert.equal(askedForMore.json().coverage.approvedCoverageCapAtomic, "500000");
+assert.equal(
+  askedForMore.json().coverageAttemptId,
+  direct.json().coverageAttemptId,
+  "a request bounded back to the same approved cap is the same attempt",
+);
+
+// A different target job is a different attempt.
+const otherJob = await callHandler(directHandler, {
+  method: "POST",
+  body: { ...directBody, targetJobId: `0x${"a".repeat(64)}` },
+});
+assert.notEqual(
+  otherJob.json().coverageAttemptId,
+  direct.json().coverageAttemptId,
+  "covering a different job must not reuse an attempt id",
+);
+
+console.log("PolicyPool coverage preflight passed: strict task parsing, no-charge declines, evidence binding, cap calculation, paid-request assembly, direct on-chain evidence verified rather than trusted, and named coverage economics.");

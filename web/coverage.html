@@ -61,11 +61,23 @@
           <form class="coverage-form-card" id="coverage-preflight-form" novalidate>
             <div class="card-heading"><span>01</span><div><p>Coverage request</p><h2>Identify the accepted job.</h2></div></div>
             <div class="evidence-notice" role="note">
-              <p><b>Since 25 July 2026 this preflight cannot quote from a public task reference, in either form.</b> A task URL and a bare public task ID resolve to the same page, and OKX.AI stopped publishing the acceptance timeline and the on-chain task ID there, with no notice and no API replacement. Those two fields were what bound a task to its on-chain job.</p>
-              <p>Nothing already covered is affected. Every PolicyPool claim is bound to X Layer rather than to a marketplace page, so existing receipts stay independently replayable. This form fails closed and takes no payment.</p>
-              <p>Coverage can still be bought by sending resolved on-chain evidence straight to <code>/api/covered-job-receipt</code>, which never reads the task page and performs the same full verification. That request needs <code>targetAgent</code>, <code>jobDescription</code>, <code>targetJobId</code>, <code>targetCreationTxHash</code>, and <code>targetAcceptanceTxHash</code>; <code>requestedCoverageUSDT</code> is optional and defaults.</p>
+              <p><b>Since 25 July 2026, quoting from a public task reference is unavailable, in either form.</b> A task URL and a bare public task ID resolve to the same page, and OKX.AI stopped publishing the acceptance timeline and the on-chain task ID there, with no notice and no API replacement. Those two fields were what bound a task to its on-chain job.</p>
+              <p>Nothing already covered is affected. Every PolicyPool claim is bound to X Layer rather than to a marketplace page, so existing receipts stay independently replayable. <b>Coverage is still available below for most providers</b> by supplying the X Layer evidence yourself. Providers enrolled on the v0.4 stack with an A2A service are the exception and are shown unavailable: their covenants are reconciled from the same withdrawn page, so coverage bought for them could not be settled, and PolicyPool will not sell what it cannot settle.</p>
+              <p><b>Proved against the task escrow:</b> <code>targetJobId</code>, <code>targetCreationTxHash</code>, <code>targetAcceptanceTxHash</code> and <code>targetBuyer</code>, along with the provider wallet, agent id, asset and amount read from the accepted order. A wallet that does not own the job is refused before any payment.</p>
+              <p><b>Taken on trust:</b> your <code>jobDescription</code>, and which <code>targetAgent</code> policy you select. These are checked against the policy's published scope, but OKX publishes no authenticated mapping from an accepted order to a listed service, so PolicyPool cannot prove the covered work is the work the policy describes.</p>
               <p><a href="https://github.com/dolepee/policypool#why-evidence-binds-to-chain">Why PolicyPool binds evidence to chain</a></p>
             </div>
+            <fieldset class="mode-switch" id="coverage-mode">
+              <legend>How will you identify the accepted job?</legend>
+              <label class="mode-option">
+                <input type="radio" name="evidenceMode" value="verified_onchain_evidence" checked />
+                <span><b>Verified X Layer evidence</b><small>You supply the transactions. PolicyPool proves them on chain.</small></span>
+              </label>
+              <label class="mode-option is-unavailable">
+                <input type="radio" name="evidenceMode" value="public_task_reference" disabled />
+                <span><b>Public task reference</b><small>Unavailable: OKX.AI no longer publishes the binding fields.</small></span>
+              </label>
+            </fieldset>
             <div class="request-guide" aria-label="Required coverage request inputs"><span>Bring</span><b>Accepted order</b><i>+</i><b>Provider policy</b><i>+</i><b>Requested cap</b></div>
             <div class="field-grid">
               <div class="field-block">
@@ -92,10 +104,35 @@
                 <label for="coverage-custom-service">OKX.AI service ID</label>
                 <input id="coverage-custom-service" inputmode="numeric" autocomplete="off" placeholder="33461" />
               </div>
-              <div class="field-block field-wide">
+              <div class="field-block field-wide direct-evidence-field">
+                <label for="coverage-job-id">Target job ID <span class="field-hint">on-chain, from the OKX task escrow</span></label>
+                <input id="coverage-job-id" name="targetJobId" type="text" autocomplete="off" spellcheck="false" placeholder="0x…64 hex characters" required aria-describedby="coverage-job-id-help coverage-form-status" />
+                <p id="coverage-job-id-help">The <code>bytes32</code> job identifier the escrow emitted, not the public task number.</p>
+              </div>
+              <div class="field-block direct-evidence-field">
+                <label for="coverage-creation-tx">Job creation transaction</label>
+                <input id="coverage-creation-tx" name="targetCreationTxHash" type="text" autocomplete="off" spellcheck="false" placeholder="0x…" required aria-describedby="coverage-creation-tx-help coverage-form-status" />
+                <p id="coverage-creation-tx-help">Must contain the escrow's job-created event for this job.</p>
+              </div>
+              <div class="field-block direct-evidence-field">
+                <label for="coverage-acceptance-tx">Job acceptance transaction</label>
+                <input id="coverage-acceptance-tx" name="targetAcceptanceTxHash" type="text" autocomplete="off" spellcheck="false" placeholder="0x…" required aria-describedby="coverage-acceptance-tx-help coverage-form-status" />
+                <p id="coverage-acceptance-tx-help">Must move the job from created to accepted and name the provider.</p>
+              </div>
+              <div class="field-block field-wide direct-evidence-field">
+                <label for="coverage-buyer">Your wallet <span class="field-hint">must own the target job</span></label>
+                <input id="coverage-buyer" name="targetBuyer" type="text" autocomplete="off" spellcheck="false" placeholder="0x…" required aria-describedby="coverage-buyer-help coverage-form-status" />
+                <p id="coverage-buyer-help">Checked against the job's creation event. A wallet that does not own the job is refused here, before any payment, and must be the payer on the paid call.</p>
+              </div>
+              <div class="field-block field-wide direct-evidence-field">
+                <label for="coverage-job-description">Job description</label>
+                <textarea id="coverage-job-description" name="jobDescription" rows="2" autocomplete="off" placeholder="What the covered job was asked to deliver." required aria-describedby="coverage-job-description-help coverage-form-status"></textarea>
+                <p id="coverage-job-description-help">Checked against the provider's published scope.</p>
+              </div>
+              <div class="field-block field-wide public-reference-field" hidden>
                 <label for="coverage-task">Accepted OKX.AI task URL or public task ID</label>
-                <input id="coverage-task" name="taskReference" type="text" inputmode="url" autocomplete="off" placeholder="https://www.okx.ai/tasks/401277" required aria-describedby="coverage-task-help coverage-form-status" />
-                <p id="coverage-task-help">PolicyPool recovers the task ID and verifies creation and acceptance on X Layer.</p>
+                <input id="coverage-task" name="taskReference" type="text" inputmode="url" autocomplete="off" placeholder="https://www.okx.ai/tasks/401277" disabled aria-describedby="coverage-task-help coverage-form-status" />
+                <p id="coverage-task-help">Unavailable while OKX.AI withholds the acceptance timeline and on-chain task ID.</p>
               </div>
             </div>
             <div class="form-actions"><button class="button button-ink" type="submit" id="coverage-submit">Run free preflight</button><span>No signature · no reserve committed</span></div>

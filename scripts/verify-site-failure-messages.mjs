@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { preflightMessage } from "../web/coverage-site.js";
+import { applyEvidenceMode, preflightMessage, preflightValueRows } from "../web/coverage-site.js";
 
 // The product site refused with a de-underscored error code for anything its
 // local map had not seen. When OKX withdrew the public task evidence, a visitor
@@ -123,4 +123,157 @@ assert.equal(
   "Something specific went wrong.",
 );
 
-console.log("PolicyPool site failure messaging verified: classified API failures reach the visitor, curated wording wins where it exists, and unclassified failures still degrade safely.");
+
+// A direct-evidence quote carries no marketplace page, so `task` is null by
+// design. The renderer read `data.task.title` unconditionally, which threw and
+// took the whole result panel with it, leaving a buyer who had just quoted
+// successfully with nothing to copy. Nothing outside a browser could catch that,
+// so the row builder is pure and exported and the null shape is asserted here.
+const directQuote = {
+  ok: true,
+  eligible: true,
+  task: null,
+  evidenceMode: "verified_onchain_evidence",
+  scopeEvidence: "buyer_declared_description_matched_registered_policy",
+  scopeLimitation: "The job description is supplied by you, not read from the marketplace.",
+  policy: { agentName: "Foreman", agentId: "4348" },
+  coverage: {
+    capUSDT: "0.5",
+    serviceFeeUSDT: "0.1",
+    deadline: "2026-07-25T18:00:00.000Z",
+    clockState: "started_at_verified_acceptance",
+    enrollmentClosesAt: "2026-07-25T17:50:00.000Z",
+    availableUSDT: "4.6",
+    fundingSource: "shared_reserve",
+  },
+  quote: { expiresAt: "2026-07-25T17:50:00.000Z" },
+  evidence: { creationTxHash: `0x${"c".repeat(64)}`, acceptanceTxHash: `0x${"d".repeat(64)}` },
+  paidRequest: {
+    body: {
+      targetJobId: `0x${"7".repeat(64)}`,
+      targetAcceptanceTxHash: `0x${"d".repeat(64)}`,
+    },
+  },
+};
+
+const directRows = preflightValueRows(directQuote);
+const labels = directRows.map((row) => row.label);
+assert.ok(!labels.includes("Task"), "a quote with no marketplace page must not claim a task row");
+const targetJobRow = directRows.find((row) => row.label === "Target job");
+assert.ok(targetJobRow, "a direct quote must still identify the covered job");
+assert.match(targetJobRow.value, /^0x7+…7+$/, "the target job row must show the supplied job id, shortened");
+// A buyer reads this panel immediately before paying. It must repeat the
+// caveat the API returns, not quietly present the description as verified.
+const descriptionRow = directRows.find((row) => row.label === "Job description");
+assert.ok(descriptionRow, "a direct quote must flag that the description is buyer-declared");
+assert.match(descriptionRow.value, /not proved on chain/i);
+// The public path keeps its task row exactly as before.
+const publicRows = preflightValueRows({
+  ...directQuote,
+  task: { title: "Market evidence job", publicUrl: "https://www.okx.ai/tasks/401999" },
+  scopeEvidence: "public_task_description_matched_registered_policy",
+  scopeLimitation: undefined,
+});
+const publicTaskRow = publicRows.find((row) => row.label === "Task");
+assert.equal(publicTaskRow.value, "Market evidence job");
+assert.equal(publicTaskRow.href, "https://www.okx.ai/tasks/401999");
+assert.ok(
+  !publicRows.some((row) => row.label === "Job description"),
+  "the public path reads its description from the marketplace, so the caveat does not apply",
+);
+
+// An enrolled non-A2A provider gets clockMode "policypool_relay", so the SLA
+// clock has not started at quote time and preflight returns a null deadline.
+// new Date(null) is epoch 0, not NaN, so this rendered "01 Jan 1970" in the
+// panel a buyer reads immediately before paying.
+const relayRows = preflightValueRows({
+  ...directQuote,
+  coverage: { ...directQuote.coverage, deadline: null, clockState: "pending_provider_relay_start" },
+});
+const relayDeadline = relayRows.find((row) => row.label === "Deadline");
+assert.doesNotMatch(relayDeadline.value, /1970/, "a pending relay clock must never render as the epoch");
+assert.match(
+  relayDeadline.value,
+  /provider relays/i,
+  "a pending relay clock must say the clock has not started, not show a date or a bare dash",
+);
+// The verified-acceptance path still shows its real deadline, so the branch
+// above cannot be satisfied by suppressing the row for everyone.
+const startedDeadline = directRows.find((row) => row.label === "Deadline");
+assert.match(startedDeadline.value, /2026/, "a started clock must still show its deadline");
+
+// The epoch guard is asserted independently of the clockState branch above.
+// Otherwise a fix that only special-cased the deadline row would leave every
+// other timestamp free to render 01 Jan 1970, which is how this arrived.
+const missingEnrollment = preflightValueRows({
+  ...directQuote,
+  coverage: { ...directQuote.coverage, enrollmentClosesAt: null },
+});
+assert.equal(
+  missingEnrollment.find((row) => row.label === "Enrollment closes").value,
+  "—",
+  "an absent timestamp must render as absent rather than as the epoch",
+);
+
+console.log("PolicyPool site messaging verified: classified failures and ordinary declines reach the visitor, curated wording wins where it exists, and a quote with no marketplace page still renders its target job.");
+
+// The public-reference path is switched off today because OKX withdrew the
+// fields it reads. Restoring it must be a matter of enabling the radio, not a
+// scavenger hunt through the form, so the mode toggle is verified here rather
+// than asserted in a comment. It was wrong once already: the input had been left
+// disabled with no name, so FormData would have sent nothing and every restored
+// request would have failed okx_task_reference_required.
+const control = (name, extra = {}) => ({ name, disabled: null, required: null, dataset: {}, ...extra });
+const field = (className, controls) => ({
+  className,
+  hidden: null,
+  controls,
+  querySelectorAll: () => controls,
+});
+const buildForm = () => {
+  const directControls = [
+    control("targetJobId"),
+    control("targetCreationTxHash"),
+    control("targetAcceptanceTxHash"),
+    control("targetBuyer"),
+    control("jobDescription"),
+  ];
+  const publicControls = [control("taskReference")];
+  const fields = [
+    field("direct-evidence-field", directControls),
+    field("public-reference-field", publicControls),
+  ];
+  return {
+    directControls,
+    publicControls,
+    fields,
+    querySelectorAll(selector) {
+      return fields.filter((entry) => `.${entry.className}` === selector);
+    },
+  };
+};
+
+const directForm = buildForm();
+applyEvidenceMode(directForm, true);
+assert.ok(directForm.publicControls.every((c) => c.disabled === true),
+  "the public field must be disabled in direct mode so FormData cannot carry it");
+assert.ok(directForm.publicControls.every((c) => c.required === false),
+  "a hidden field must not be required, or validation blocks on an invisible input");
+assert.ok(directForm.directControls.every((c) => c.disabled === false));
+assert.equal(directForm.fields.find((f) => f.className === "public-reference-field").hidden, true);
+
+const publicForm = buildForm();
+applyEvidenceMode(publicForm, false);
+assert.ok(publicForm.publicControls.every((c) => c.disabled === false),
+  "restoring public mode must enable the task field, or the request carries no reference");
+assert.ok(publicForm.publicControls.every((c) => c.required === true),
+  "the task reference is the whole input of the public path, so it must be required there");
+assert.ok(publicForm.directControls.every((c) => c.disabled === true),
+  "direct fields must not be submitted alongside a public reference");
+assert.equal(publicForm.fields.find((f) => f.className === "direct-evidence-field").hidden, true);
+
+// An input marked optional stays optional in its own mode.
+const optionalForm = buildForm();
+optionalForm.directControls[0].dataset.optional = "true";
+applyEvidenceMode(optionalForm, true);
+assert.equal(optionalForm.directControls[0].required, false, "an optional field must never be demanded");
