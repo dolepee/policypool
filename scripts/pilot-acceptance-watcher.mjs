@@ -30,6 +30,7 @@ import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { MARKETPLACE, OKX_TASK, PAYMENT, XLAYER } from "../api/lib/config.js";
 import { sha256 } from "../api/lib/utils.js";
+import { validateServiceBinding } from "../api/lib/chain.js";
 
 const API_BASE = process.env.POLICYPOOL_API_BASE || "https://policypool.vercel.app";
 const RPC_URL = process.env.XLAYER_RPC_URL || XLAYER.rpcUrl;
@@ -219,7 +220,7 @@ export function decodeAcceptedTask(log) {
 // labels the result a marketplace sale.
 export function marketplaceProblems({
   taskId, targetJobId, receiptBuyer, created, accepted,
-  expectedAgentId, expectedProvider, expectedFeeAtomic, expectedAsset,
+  expectedAgentId, expectedProvider, expectedFeeAtomic, expectedAsset, expectedServiceType,
   route, expectedRoute, acceptUnproven = false,
 }) {
   const problems = [];
@@ -286,6 +287,24 @@ export function marketplaceProblems({
   // it held, so there is no reason to infer it.
   if (expectedAsset && accepted.asset !== String(expectedAsset).toLowerCase()) {
     problems.push(`marketplace task ${taskId} escrowed ${accepted.asset}, not the coverage asset ${String(expectedAsset).toLowerCase()}`);
+  }
+  // Agent, wallet, asset and amount can all match on a task of the wrong kind.
+  // The escrow records a service hash, and the listing type determines what it
+  // must be: zero for A2MCP, non-zero for A2A. Without this, an A2A task sold by
+  // the same agent through the same wallet for the same fee satisfies every
+  // check above and is recorded as the A2MCP coverage listing.
+  //
+  // The rule is not restated here. validateServiceBinding is the definition
+  // used when a covenant is actually issued, so calling it is what keeps this
+  // from drifting away from the thing it is supposed to mirror.
+  if (expectedServiceType) {
+    try {
+      validateServiceBinding({ serviceType: expectedServiceType }, accepted.serviceHash);
+    } catch (error) {
+      problems.push(
+        `marketplace task ${taskId} is not a ${expectedServiceType} listing (${error?.code || error?.message || "service binding failed"})`,
+      );
+    }
   }
   // A task can name the right agent, wallet, asset and amount and still not be
   // how this fee was paid. If the fee settled as a direct transfer then it did
@@ -619,6 +638,7 @@ async function confirm(args) {
     expectedProvider: receipt.target?.providerWallet || null,
     expectedFeeAtomic: PAYMENT.amountAtomic,
     expectedAsset: PAYMENT.asset,
+    expectedServiceType: "A2MCP",
     route,
     expectedRoute: "okx_escrow_mediated",
   };

@@ -84,13 +84,17 @@ const createdBy = (buyer, jobId = COVERAGE_TASK) => ({ jobId, buyer, block: 6614
 const PP_AGENT = "4674";
 const PP_WALLET = "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7";
 const FEE = "100000";
-const acceptedAs = (over = {}) => ({ agentId: PP_AGENT, provider: PP_WALLET, amountAtomic: FEE, asset: "0x779ded0c9e1022225f8e0630b35a9b54be713736", serviceHash: `0x${"b".repeat(64)}`, ...over });
+const ZERO_HASH = `0x${"0".repeat(64)}`;
+// PolicyPool's coverage listing is A2MCP, and the escrow records a zero service
+// hash for that type. A non-zero hash here would be an A2A task.
+const acceptedAs = (over = {}) => ({ agentId: PP_AGENT, provider: PP_WALLET, amountAtomic: FEE, asset: "0x779ded0c9e1022225f8e0630b35a9b54be713736", serviceHash: ZERO_HASH, ...over });
 const USDT = "0x779ded0c9e1022225f8e0630b35a9b54be713736";
 const bound = (over = {}) => ({
   taskId: COVERAGE_TASK, targetJobId: TARGET_JOB, receiptBuyer: KEJI,
   created: createdBy(KEJI), accepted: acceptedAs(),
   expectedAgentId: PP_AGENT, expectedProvider: PP_WALLET, expectedFeeAtomic: FEE,
-  expectedAsset: USDT, route: "okx_escrow_mediated", expectedRoute: "okx_escrow_mediated",
+  expectedAsset: USDT, expectedServiceType: "A2MCP",
+  route: "okx_escrow_mediated", expectedRoute: "okx_escrow_mediated",
   ...over,
 });
 
@@ -181,6 +185,31 @@ assert.ok(
 // and accepted by PolicyPool's own listing for the coverage fee.
 assert.deepEqual(marketplaceProblems(bound()), [],
   "a task bound to PolicyPool's listing is the evidence this check wants");
+
+// Agent, wallet, asset and amount can all match on a task of the wrong kind.
+// An A2A task sold by agent 4674 through the same wallet for the same 0.10 fee
+// would otherwise be recorded as the A2MCP coverage listing. The escrow's
+// service hash is what separates them, and the rule comes from
+// validateServiceBinding rather than being restated here.
+assert.ok(
+  marketplaceProblems(bound({ accepted: acceptedAs({ serviceHash: `0x${"b".repeat(64)}` }) })).length > 0,
+  "an A2A task must not pass as the A2MCP coverage listing",
+);
+// And the rule runs in the right direction: the same hash is required for A2A.
+assert.ok(
+  marketplaceProblems(bound({ expectedServiceType: "A2A" })).length > 0,
+  "a zero service hash must not pass as an A2A listing",
+);
+assert.deepEqual(
+  marketplaceProblems(bound({ expectedServiceType: "A2A", accepted: acceptedAs({ serviceHash: `0x${"b".repeat(64)}` }) })),
+  [],
+  "a non-zero hash is exactly what an A2A listing requires",
+);
+// An unsupported type must refuse rather than silently skip the check.
+assert.ok(
+  marketplaceProblems(bound({ expectedServiceType: "A2Z" })).length > 0,
+  "an unrecognised listing type must refuse",
+);
 
 // The fee has to have actually flowed through the task. A task can name the
 // right agent, wallet, asset and amount and still be a different purchase; if
@@ -284,11 +313,21 @@ for (const field of [
   "expectedProvider",
   "expectedFeeAtomic",
   "expectedAsset",
+  "expectedServiceType",
   "expectedRoute",
 ]) {
   assert.match(bindingsBlock, new RegExp(`${field}:`), `confirm must supply ${field} or that guard is inert`);
 }
 assert.match(bindingsBlock, /^\s*route,$/m, "confirm must supply the observed route, not just the expected one");
+// Supplying the field is not enough; it has to name the right listing. Declaring
+// A2A here would invert the guard: A2A tasks would pass and genuine A2MCP
+// coverage purchases would be refused. PolicyPool's listed coverage service is
+// A2MCP, which is why the escrow records a zero service hash for it.
+assert.match(
+  bindingsBlock,
+  /expectedServiceType:\s*"A2MCP"/,
+  "confirm must declare PolicyPool's actual listing type, not merely some type",
+);
 // And the route must be classified against the task it is meant to attribute.
 // Calling paymentRoute without the task id makes every escrow log look like
 // this purchase, which is the guard failing open rather than closed.
