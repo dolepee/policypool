@@ -115,19 +115,33 @@ assert.match(coverage, /in either form/, "the notice must cover public task IDs 
 // withdrawn page, so any surface that scopes the outage to URLs alone sends a
 // reader into a preflight guaranteed to fail.
 const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
-assert.doesNotMatch(
-  readme,
-  /public-task-URL half/,
-  "the coverage loop must not scope the outage to URLs alone",
-);
-assert.match(readme, /## Why Evidence Binds To Chain/, "the withdrawal record must stay in the README");
+
+// Scope each assertion to the passage it actually governs. A negative on the
+// whole file only rejects one phrasing, and a positive on the whole file is
+// satisfied by the withdrawal record further down, so neither constrains the
+// coverage loop at all.
+const coverageLoopStep = readme.match(/^2\. The free preflight[^\n]*$/m)?.[0] || "";
+assert.ok(coverageLoopStep, "the coverage loop must still document the preflight step");
 assert.match(
-  readme,
+  coverageLoopStep,
+  /entire public-task-reference path[^\n]*unavailable/,
+  "coverage loop step 2 must scope the outage to the whole public-reference path",
+);
+assert.match(
+  coverageLoopStep,
+  /bare task id/,
+  "coverage loop step 2 must say a bare task id is unavailable too, not only a URL",
+);
+
+const withdrawalRecord = readme.match(/^## Why Evidence Binds To Chain$[\s\S]*?(?=^## )/m)?.[0] || "";
+assert.ok(withdrawalRecord, "the withdrawal record must stay in the README");
+assert.match(
+  withdrawalRecord,
   /public task reference in either form/,
   "the withdrawal record must state that a bare task id is equally unavailable",
 );
 for (const field of ["targetAgent", "jobDescription", "targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash"]) {
-  assert.match(readme, new RegExp(`\`${field}\``), `the README fallback must name ${field}`);
+  assert.match(withdrawalRecord, new RegExp(`\`${field}\``), `the README fallback must name ${field}`);
 }
 
 for (const [file, route] of subordinatePages) {
