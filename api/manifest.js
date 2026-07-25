@@ -1,4 +1,4 @@
-import { COVERAGE, PAYMENT, XLAYER } from "./lib/config.js";
+import { COVERAGE, MARKETPLACE, PAYMENT, XLAYER } from "./lib/config.js";
 import { listPublishedPolicies, policyCoverageCapAtomic } from "./lib/policy-registry.js";
 import { formatUsdtAtomic, sendJson } from "./lib/utils.js";
 import { createUniversalManifestHandler } from "./universal-manifest.js";
@@ -36,12 +36,12 @@ export function createManifestHandler({
       version: "0.3.0",
       generatedAt: new Date(now()).toISOString(),
       agent: {
-        id: "4674",
+        id: MARKETPLACE.agentId,
         name: "PolicyPool",
-        marketplaceUrl: "https://www.okx.ai/agents/4674",
+        marketplaceUrl: MARKETPLACE.agentUrl,
       },
       service: {
-        id: "33290",
+        id: MARKETPLACE.serviceId,
         name: "Covered Job Receipt",
         type: "A2MCP",
         priceAtomic: PAYMENT.amountAtomic,

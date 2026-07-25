@@ -25,6 +25,17 @@ export const COVERAGE = {
   publicUrl: process.env.POLICYPOOL_RESERVE_URL || "https://policypool.vercel.app/ledger#reserve",
 };
 
+// PolicyPool's own listing. A coverage fee paid straight to the generic HTTP
+// endpoint settles correctly but is invisible to OKX, so it never becomes a
+// marketplace sale for the listed agent. Buyers kept discovering that only after
+// paying, so the identifiers live here and every surface that states the payment
+// route reads them from one place.
+export const MARKETPLACE = {
+  agentId: process.env.POLICYPOOL_OKX_AGENT_ID || "4674",
+  serviceId: process.env.POLICYPOOL_OKX_SERVICE_ID || "33290",
+  agentUrl: process.env.POLICYPOOL_OKX_AGENT_URL || "https://www.okx.ai/agents/4674",
+};
+
 export const OKX_TASK = {
   escrow: getAddress(process.env.POLICYPOOL_OKX_TASK_ESCROW || "0x000000eb79a0c9cbeed4bd63372653e28f6bedbe"),
   statusChangedTopic: "0x4d7781468081641aba2c04c3349fcf5830b9fedac1b7aaffabc1f1dc6b8883fb",

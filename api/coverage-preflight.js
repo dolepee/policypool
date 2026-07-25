@@ -1,4 +1,4 @@
-import { COVERAGE, PAYMENT, XLAYER } from "./lib/config.js";
+import { COVERAGE, MARKETPLACE, PAYMENT, XLAYER } from "./lib/config.js";
 import { createChainService, EvidenceError } from "./lib/chain.js";
 import { createLedger } from "./lib/ledger.js";
 import { fetchOkxTaskPage, OkxTaskPageError } from "./lib/okx-task-page.js";
@@ -11,11 +11,12 @@ import {
   listPublishedPolicies,
   policyCoverageCapAtomic,
 } from "./lib/policy-registry.js";
+import { coverageEconomics, resolveCoverageCap } from "./lib/coverage-economics.js";
 import { createCoveragePolicyResolver } from "./lib/policy-resolution.js";
 import { UniversalPolicyError } from "./lib/universal-policy.js";
 import { createRateLimiter, enforceRateLimit } from "./lib/rate-limit.js";
 import { evaluateGuard } from "./covered-job-receipt.js";
-import { clean, formatUsdtAtomic, header, parseUsdtAtomic, sendJson as rawSendJson } from "./lib/utils.js";
+import { clean, formatUsdtAtomic, header, parseUsdtAtomic, sendJson as rawSendJson, sha256 } from "./lib/utils.js";
 import { enrichCoverageResponse } from "./lib/coverage-state.js";
 
 // Every response from this endpoint carries an explicit lifecycle state and
@@ -29,6 +30,15 @@ const INPUT_ALIASES = {
   targetServiceId: ["targetServiceId", "listedServiceId"],
   taskReference: ["taskReference", "taskUrl", "okxTask", "publicTaskId", "jobUrl"],
   requestedCoverageUSDT: ["requestedCoverageUSDT", "coverageCapUSDT", "capUSDT", "coverageAmountUSDT"],
+  // Direct on-chain evidence. The buyer supplies the exact transactions instead
+  // of a public task reference; PolicyPool verifies them rather than trusting
+  // them. Same alias names the paid endpoint already accepts, so a quote and a
+  // purchase are written the same way.
+  targetJobId: ["targetJobId", "jobId", "taskId"],
+  targetCreationTxHash: ["targetCreationTxHash", "creationTxHash", "jobCreationTxHash"],
+  targetAcceptanceTxHash: ["targetAcceptanceTxHash", "acceptanceTxHash", "jobAcceptanceTxHash"],
+  targetBuyer: ["targetBuyer", "buyer", "buyerWallet", "coverageBuyer"],
+  jobDescription: ["jobDescription", "description", "jobSummary"],
 };
 const CONTAINER_KEYS = new Set(["input", "data", "payload", "request", "parameters", "arguments", "context", "body"]);
 
@@ -87,7 +97,28 @@ function readInput(req) {
     targetServiceId: readAlias(INPUT_ALIASES.targetServiceId, 40),
     taskReference: readAlias(INPUT_ALIASES.taskReference, 300),
     requestedCoverageAtomic: parseUsdtAtomic(requested, PAYMENT.decimals),
+    targetJobId: readAlias(INPUT_ALIASES.targetJobId, 80),
+    targetCreationTxHash: readAlias(INPUT_ALIASES.targetCreationTxHash, 80),
+    targetAcceptanceTxHash: readAlias(INPUT_ALIASES.targetAcceptanceTxHash, 80),
+    targetBuyer: readAlias(INPUT_ALIASES.targetBuyer, 80),
+    jobDescription: readAlias(INPUT_ALIASES.jobDescription),
   };
+}
+
+// The two ways a caller can identify a target job. Public task references are
+// resolved through the marketplace page; direct evidence is supplied by the
+// buyer and verified against X Layer. Both end at the same
+// `chain.verifyTargetOrder`, which is what actually establishes eligibility.
+const DIRECT_EVIDENCE_FIELDS = Object.freeze([
+  "targetJobId",
+  "targetCreationTxHash",
+  "targetAcceptanceTxHash",
+  "targetBuyer",
+  "jobDescription",
+]);
+
+function directEvidenceIntent(input) {
+  return DIRECT_EVIDENCE_FIELDS.some((field) => Boolean(input[field]));
 }
 
 function paidEndpoint(req, quoteToken) {
@@ -163,13 +194,28 @@ export function createCoveragePreflightHandler(dependencies = {}) {
     if (limited) return sendJson(res, 429, limited);
 
     const input = readInput(req);
-    if (!input.targetAgent && !input.taskReference) {
+    const directEvidence = directEvidenceIntent(input);
+    if (!input.targetAgent && !input.taskReference && !directEvidence) {
       return sendJson(res, 200, {
         ok: true,
         service: "PolicyPool Coverage Preflight",
         charged: false,
-        description: "Resolve an OKX.AI task URL into a verified, coverage-ready paid request.",
-        required: ["targetAgent", "taskReference"],
+        description: "Resolve an accepted OKX.AI job into a verified, coverage-ready paid request, from a public task reference or from on-chain evidence you supply.",
+        modes: [
+          {
+            mode: "public_task_reference",
+            required: ["targetAgent", "taskReference"],
+            available: false,
+            unavailableReason: "okx_public_task_evidence_withdrawn",
+            note: "OKX.AI stopped publishing the acceptance timeline and on-chain task id on the public task page, so a task URL or bare task id can no longer be bound to its job.",
+          },
+          {
+            mode: "verified_onchain_evidence",
+            required: ["targetAgent", ...DIRECT_EVIDENCE_FIELDS],
+            available: true,
+            note: "You supply the exact X Layer transactions; PolicyPool verifies them against the task escrow rather than trusting them. targetBuyer must be the wallet that created the target job, and must be the payer on the paid call.",
+          },
+        ],
         supportedTargets: supportedTargets(),
       });
     }
@@ -181,8 +227,22 @@ export function createCoveragePreflightHandler(dependencies = {}) {
         supportedTargets: supportedTargets(),
       });
     }
-    if (!input.taskReference) {
+    if (!input.taskReference && !directEvidence) {
       return sendJson(res, 400, { ok: false, error: "okx_task_reference_required", charged: false });
+    }
+    // A partially filled direct request must say which field is missing rather
+    // than fall through to a generic refusal the caller cannot act on.
+    if (directEvidence) {
+      const missing = DIRECT_EVIDENCE_FIELDS.filter((field) => !input[field]);
+      if (missing.length > 0) {
+        return sendJson(res, 400, {
+          ok: false,
+          error: "direct_evidence_incomplete",
+          charged: false,
+          missing,
+          required: ["targetAgent", ...DIRECT_EVIDENCE_FIELDS],
+        });
+      }
     }
     if (input.requestedCoverageAtomic < BigInt(COVERAGE.minAtomic)) {
       return decline(res, "requested_coverage_below_minimum");
@@ -225,26 +285,46 @@ export function createCoveragePreflightHandler(dependencies = {}) {
       });
     }
 
-    let task;
-    try {
-      task = await taskFetcher(input.taskReference);
-    } catch (error) {
-      if (error instanceof OkxTaskPageError) {
-        return sendJson(res, 422, { ok: false, error: error.code, charged: false });
+    let task = null;
+    if (!directEvidence) {
+      try {
+        task = await taskFetcher(input.taskReference);
+      } catch (error) {
+        if (error instanceof OkxTaskPageError) {
+          return sendJson(res, 422, { ok: false, error: error.code, charged: false });
+        }
+        return sendJson(res, 502, { ok: false, error: "okx_task_fetch_failed", charged: false });
       }
-      return sendJson(res, 502, { ok: false, error: "okx_task_fetch_failed", charged: false });
     }
 
+    // Direct evidence changes only where the transaction hashes come from, never
+    // what is done with them. Both modes end at the same verifyTargetOrder,
+    // which reads the escrow logs and binds buyer, job, provider wallet, agent
+    // id, asset, amount, service type and accepted-service hash. Nothing the
+    // caller asserts is taken on trust: a wrong buyer wallet, a forged hash, a
+    // reverted transaction, or a job that is not accepted all fail there.
+    const jobId = directEvidence ? input.targetJobId : task.jobId;
+    const jobDescription = directEvidence ? input.jobDescription : task.description;
     let evidence;
     let targetOrder;
     try {
-      evidence = await getChain().resolveTargetOrderEvidence({
-        jobId: task.jobId,
-        createdAt: task.openedAt,
-        acceptedAt: task.acceptedAt,
-      });
+      evidence = directEvidence
+        ? {
+          source: "buyer_supplied_transactions_verified_against_x_layer",
+          creationTxHash: input.targetCreationTxHash,
+          acceptanceTxHash: input.targetAcceptanceTxHash,
+          buyer: input.targetBuyer,
+        }
+        : {
+          source: "okx_public_task_page_plus_x_layer_task_escrow_events",
+          ...(await getChain().resolveTargetOrderEvidence({
+            jobId,
+            createdAt: task.openedAt,
+            acceptedAt: task.acceptedAt,
+          })),
+        };
       targetOrder = await getChain().verifyTargetOrder({
-        jobId: task.jobId,
+        jobId,
         creationTxHash: evidence.creationTxHash,
         acceptanceTxHash: evidence.acceptanceTxHash,
         buyer: evidence.buyer,
@@ -262,13 +342,13 @@ export function createCoveragePreflightHandler(dependencies = {}) {
 
     const guardInput = {
       targetAgent: `${policy.agentName}#${policy.agentId}`,
-      targetJobId: task.jobId,
+      targetJobId: jobId,
       targetCreationTxHash: evidence.creationTxHash,
       targetAcceptanceTxHash: evidence.acceptanceTxHash,
-      jobDescription: task.description,
+      jobDescription,
       requestedCoverageAtomic: input.requestedCoverageAtomic,
       targetServiceId: input.targetServiceId,
-      targetTaskReference: task.publicTaskId,
+      targetTaskReference: task?.publicTaskId,
     };
     const guard = evaluateGuard(guardInput, policy);
     if (guard.verdict !== "ALLOW") return decline(res, guard.reason, { task, targetOrder });
@@ -295,13 +375,17 @@ export function createCoveragePreflightHandler(dependencies = {}) {
     const policyCapacityAtomic = providerFunded
       ? BigInt(policy.providerAvailableBondAtomic || 0)
       : availableAtomic;
-    const coverageCapAtomic = minBigInt(
-      input.requestedCoverageAtomic,
-      BigInt(targetOrder.amountAtomic),
-      policyCoverageCapAtomic(policy, COVERAGE.maxAtomic),
-      BigInt(COVERAGE.maxAtomic),
-      policyCapacityAtomic,
-    );
+    // Same five bounds and the same minimum as before; the resolver additionally
+    // reports which of them produced the number, which is what a buyer needs to
+    // understand why their requested cap was or was not honoured.
+    const { approvedCapAtomic: coverageCapAtomic, capBoundReason } = resolveCoverageCap({
+      requestedAtomic: input.requestedCoverageAtomic,
+      targetJobValueAtomic: targetOrder.amountAtomic,
+      policyCapAtomic: policyCoverageCapAtomic(policy, COVERAGE.maxAtomic),
+      capacityAtomic: policyCapacityAtomic,
+      globalMaxAtomic: COVERAGE.maxAtomic,
+      providerFunded,
+    });
     if (coverageCapAtomic < BigInt(COVERAGE.minAtomic)) {
       return decline(res, policy.providerAvailableBondAtomic
         ? "insufficient_provider_bond_capacity"
@@ -330,11 +414,14 @@ export function createCoveragePreflightHandler(dependencies = {}) {
     const requestBody = {
       targetAgent: `${policy.agentName}#${policy.agentId}`,
       targetServiceId: policy.serviceIds[0],
-      targetJobId: task.jobId,
+      targetJobId: jobId,
       targetCreationTxHash: evidence.creationTxHash,
       targetAcceptanceTxHash: evidence.acceptanceTxHash,
-      targetTaskReference: task.publicTaskId,
-      jobDescription: task.description,
+      // Omitted entirely in direct mode rather than sent empty: there is no
+      // public task reference to record, and a blank one would read as a lookup
+      // that was attempted and returned nothing.
+      ...(task?.publicTaskId ? { targetTaskReference: task.publicTaskId } : {}),
+      jobDescription,
       requestedCoverageUSDT: formatUsdtAtomic(coverageCapAtomic, PAYMENT.decimals),
     };
 
@@ -365,7 +452,33 @@ export function createCoveragePreflightHandler(dependencies = {}) {
       eligible: true,
       charged: false,
       generatedAt: new Date(now()).toISOString(),
+      // Null in direct mode rather than a synthesised stand-in: there was no
+      // marketplace page in this flow, and inventing one would misrepresent
+      // where the evidence came from. `evidenceMode` says which path ran.
       task,
+      evidenceMode: directEvidence ? "verified_onchain_evidence" : "public_task_reference",
+      // Same target, buyer, policy and cap always produce the same id, so a
+      // client that retries after a timeout can tell it is looking at one
+      // attempt rather than two. An identity, not a lock: idempotent settlement
+      // is a separate change and is not claimed here.
+      coverageAttemptId: `ppa-${sha256([
+        String(targetOrder.buyer).toLowerCase(),
+        String(jobId).toLowerCase(),
+        String(policy.policyHash),
+        coverageCapAtomic.toString(),
+      ].join("|")).slice(0, 24)}`,
+      // Paying this fee straight to the HTTP endpoint settles correctly but is
+      // invisible to OKX, so it never becomes a sale for the listed agent.
+      // Buyers were finding that out only after paying.
+      marketplace: {
+        requiredForMarketplaceAttribution: true,
+        agentId: MARKETPLACE.agentId,
+        serviceId: MARKETPLACE.serviceId,
+        agentUrl: MARKETPLACE.agentUrl,
+        paymentRoute: "OKX_MARKETPLACE_TASK",
+        genericEndpointPaymentCountsAsMarketplaceSale: false,
+        note: "Coverage bought directly from this endpoint is a valid covenant but is not recorded as an OKX marketplace sale. Buy through the listed service to attribute it.",
+      },
       policy: {
         agentId: policy.agentId,
         agentName: policy.agentName,
@@ -393,6 +506,19 @@ export function createCoveragePreflightHandler(dependencies = {}) {
         capAtomic: coverageCapAtomic.toString(),
         capUSDT: formatUsdtAtomic(coverageCapAtomic, PAYMENT.decimals),
         serviceFeeUSDT: formatUsdtAtomic(PAYMENT.amountAtomic, PAYMENT.decimals),
+        // Three different amounts appear in this response and testers read them
+        // as interchangeable. These name each one's role, say which bound
+        // produced the cap, and state the fee against the maximum payout in a
+        // sentence. Existing fields above are unchanged.
+        ...coverageEconomics({
+          requestedAtomic: input.requestedCoverageAtomic,
+          targetJobValueAtomic: targetOrder.amountAtomic,
+          approvedCapAtomic: coverageCapAtomic,
+          capBoundReason,
+          serviceFeeAtomic: PAYMENT.amountAtomic,
+          decimals: PAYMENT.decimals,
+          symbol: PAYMENT.symbol,
+        }),
         fundingSource: providerFunded ? "provider_first_loss_bond" : "shared_reserve",
         providerBondAvailableUSDT: providerFunded
           ? formatUsdtAtomic(policyCapacityAtomic, PAYMENT.decimals)

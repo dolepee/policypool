@@ -437,4 +437,222 @@ const retried = await fetchOkxTaskPage(401277, {
 assert.equal(fetchAttempts, 2, "transient SSR task mismatches must be retried");
 assert.equal(retried.jobId, JOB_ID);
 
-console.log("PolicyPool coverage preflight passed: strict task parsing, no-charge declines, evidence binding, cap calculation, and paid-request assembly.");
+// Direct on-chain evidence. The public task page can no longer bind a task to
+// its job, so a buyer may supply the transactions instead. The property under
+// test is that this changes only where the hashes come from: everything the
+// caller asserts is still proved by chain.verifyTargetOrder, and nothing it
+// says is taken on trust.
+// Deliberately distinct from the task fixture's identifiers. If direct mode ever
+// falls through to the page, or prefers the fixture's values over the caller's,
+// these differ and the assertions below catch it. Sharing one job id would make
+// that class of bug invisible.
+const DIRECT_JOB_ID = `0x${"7".repeat(64)}`;
+const DIRECT_CREATION_TX = `0x${"8".repeat(64)}`;
+const DIRECT_ACCEPTANCE_TX = `0x${"9".repeat(64)}`;
+const DIRECT_BUYER = "0x2222222222222222222222222222222222222222";
+// Distinct wording from the task fixture, same policy keywords, so a handler
+// that prefers the page's description over the caller's is detectable.
+const DIRECT_DESCRIPTION = "Verify the public token market claim and return evidence with a source link for each figure.";
+
+const directBody = {
+  targetAgent: "GlassDesk#3465",
+  targetJobId: DIRECT_JOB_ID,
+  targetCreationTxHash: DIRECT_CREATION_TX,
+  targetAcceptanceTxHash: DIRECT_ACCEPTANCE_TX,
+  targetBuyer: DIRECT_BUYER,
+  jobDescription: DIRECT_DESCRIPTION,
+  requestedCoverageUSDT: "0.5",
+};
+
+const directChain = (overrides = {}) => ({
+  ...chain,
+  // Echo what it was given, so the response reflects the caller's evidence
+  // rather than the fixture's. A stub that returned constants would mask a
+  // handler that ignored its arguments entirely.
+  async verifyTargetOrder(args) {
+    return { ...(await chain.verifyTargetOrder(args)), jobId: args.jobId, buyer: args.buyer };
+  },
+  async resolveTargetOrderEvidence() {
+    throw new Error("direct evidence must not resolve through the public task index");
+  },
+  ...overrides,
+});
+
+// The marketplace page must not be consulted at all in this mode, and the
+// verifier must receive the caller's exact values rather than anything
+// substituted, defaulted, or carried over from the task fixture.
+let directTaskFetches = 0;
+let verifyArgs = null;
+const directHandler = createCoveragePreflightHandler({
+  chain: (() => {
+    const base = directChain();
+    return { ...base, async verifyTargetOrder(args) { verifyArgs = args; return base.verifyTargetOrder(args); } };
+  })(),
+  ledger,
+  taskFetcher: async () => {
+    directTaskFetches += 1;
+    return task;
+  },
+  now: () => Date.parse("2026-07-11T10:02:00.000Z"),
+  quoteSecret: QUOTE_SECRET,
+});
+
+const direct = await callHandler(directHandler, {
+  method: "POST",
+  headers: { host: "policypool.test" },
+  body: directBody,
+});
+assert.equal(direct.statusCode, 200);
+assert.equal(direct.json().eligible, true);
+assert.equal(direct.json().charged, false);
+assert.equal(directTaskFetches, 0, "direct evidence must never fetch the public task page");
+assert.equal(direct.json().evidenceMode, "verified_onchain_evidence");
+assert.equal(direct.json().task, null, "there is no marketplace page in this flow to report");
+assert.equal(
+  direct.json().evidence.source,
+  "buyer_supplied_transactions_verified_against_x_layer",
+  "the response must say the evidence came from the buyer and was verified, not resolved",
+);
+assert.deepEqual(
+  {
+    jobId: verifyArgs.jobId,
+    creationTxHash: verifyArgs.creationTxHash,
+    acceptanceTxHash: verifyArgs.acceptanceTxHash,
+    buyer: verifyArgs.buyer,
+  },
+  {
+    jobId: DIRECT_JOB_ID,
+    creationTxHash: DIRECT_CREATION_TX,
+    acceptanceTxHash: DIRECT_ACCEPTANCE_TX,
+    buyer: DIRECT_BUYER,
+  },
+  "the verifier must receive exactly what the caller supplied, so its checks apply to those values",
+);
+assert.equal(direct.json().paidRequest.body.targetJobId, DIRECT_JOB_ID);
+assert.equal(direct.json().paidRequest.body.jobDescription, DIRECT_DESCRIPTION);
+assert.equal(
+  "targetTaskReference" in direct.json().paidRequest.body,
+  false,
+  "a task reference that was never used must be omitted rather than sent empty",
+);
+
+// Whatever the caller asserts, the chain verifier decides. Every adversarial
+// case it already rejects must surface here as a no-charge decline with no
+// spendable quote, at quote time rather than after payment.
+for (const code of [
+  "coverage_buyer_does_not_own_target_job",
+  "target_creation_tx_reverted",
+  "target_acceptance_tx_reverted",
+  "target_creation_evidence_missing",
+  "target_acceptance_status_event_missing",
+  "target_agent_id_mismatch",
+  "target_provider_wallet_mismatch",
+  "target_payment_asset_mismatch",
+  "target_job_not_accepted:6",
+]) {
+  const refused = await callHandler(createCoveragePreflightHandler({
+    chain: directChain({ async verifyTargetOrder() { throw new EvidenceError(code); } }),
+    ledger,
+    taskFetcher: async () => task,
+    now: () => Date.parse("2026-07-11T10:02:00.000Z"),
+    quoteSecret: QUOTE_SECRET,
+  }), { method: "POST", body: directBody });
+  assert.equal(refused.json().eligible, false, `${code} must fail closed`);
+  assert.equal(refused.json().charged, false, `${code} must not charge`);
+  assert.equal(refused.json().reason, code);
+  assert.equal(refused.json().quote, undefined, `${code} must not issue a spendable quote`);
+}
+
+// A half-filled direct request names what is missing instead of refusing
+// generically, and must not silently fall back to the withdrawn page path.
+for (const omit of ["targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash", "targetBuyer", "jobDescription"]) {
+  const partial = { ...directBody };
+  delete partial[omit];
+  const response = await callHandler(directHandler, { method: "POST", body: partial });
+  assert.equal(response.statusCode, 400, `${omit} missing must be a client error`);
+  assert.equal(response.json().error, "direct_evidence_incomplete");
+  assert.deepEqual(response.json().missing, [omit], `${omit} must be named as the missing field`);
+  assert.equal(response.json().charged, false);
+}
+assert.equal(directTaskFetches, 0, "an incomplete direct request must not fall back to the public page");
+
+// Discovery advertises both modes and is honest about which one works.
+const modes = (await callHandler(directHandler, { method: "GET" })).json().modes;
+const publicMode = modes.find((mode) => mode.mode === "public_task_reference");
+const onchainMode = modes.find((mode) => mode.mode === "verified_onchain_evidence");
+assert.equal(publicMode.available, false, "the withdrawn page path must not be advertised as usable");
+assert.equal(publicMode.unavailableReason, "okx_public_task_evidence_withdrawn");
+assert.equal(onchainMode.available, true);
+for (const field of ["targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash", "targetBuyer", "jobDescription"]) {
+  assert.ok(onchainMode.required.includes(field), `discovery must list ${field} as required`);
+}
+
+// Monetary transparency: each amount is named, the binding bound is stated, and
+// the sentence relates the fee to the maximum payout.
+const economics = direct.json().coverage;
+assert.equal(economics.targetJobValueAtomic, "500000");
+assert.equal(economics.coverageServiceFeeAtomic, "100000");
+assert.equal(economics.requestedCoverageCapAtomic, "500000");
+assert.equal(economics.approvedCoverageCapAtomic, "500000");
+assert.equal(economics.maximumPotentialPayoutAtomic, economics.approvedCoverageCapAtomic);
+assert.ok(economics.capBoundReason, "the response must name which bound produced the cap");
+assert.equal(
+  economics.summary,
+  "Pay 0.10 USD₮0 for a coverage receipt with a maximum potential payout of 0.50 USD₮0.",
+);
+// Pre-existing fields stay byte-identical: this release is additive only.
+assert.equal(economics.capAtomic, "500000");
+assert.equal(economics.capUSDT, "0.5");
+assert.equal(economics.serviceFeeUSDT, "0.1");
+
+// Which payment route produces an OKX sale. Paying the HTTP endpoint directly
+// settles a real covenant but is invisible to the marketplace, and buyers were
+// discovering that only after paying.
+const marketplace = direct.json().marketplace;
+assert.equal(marketplace.requiredForMarketplaceAttribution, true);
+assert.equal(marketplace.agentId, "4674");
+assert.equal(marketplace.serviceId, "33290");
+assert.equal(marketplace.paymentRoute, "OKX_MARKETPLACE_TASK");
+assert.equal(
+  marketplace.genericEndpointPaymentCountsAsMarketplaceSale,
+  false,
+  "the response must not imply a direct endpoint payment is a marketplace sale",
+);
+assert.equal(eligible.json().marketplace.agentId, "4674", "both evidence modes must state the route");
+
+// The attempt id is a stable identity, so a retried quote is recognisable as the
+// same attempt rather than a second one. It is not an idempotency lock and this
+// release does not claim one.
+assert.match(direct.json().coverageAttemptId, /^ppa-[a-f0-9]{24}$/);
+const repeatAttempt = await callHandler(directHandler, { method: "POST", body: directBody });
+assert.equal(
+  repeatAttempt.json().coverageAttemptId,
+  direct.json().coverageAttemptId,
+  "the same target, buyer, policy and cap must yield the same attempt id",
+);
+// Keyed on the cap that would actually be issued, not the one asked for. Asking
+// for more than the target job is worth approves the same covenant, so it is the
+// same attempt and must not look like a second one.
+const askedForMore = await callHandler(directHandler, {
+  method: "POST",
+  body: { ...directBody, requestedCoverageUSDT: "0.6" },
+});
+assert.equal(askedForMore.json().coverage.approvedCoverageCapAtomic, "500000");
+assert.equal(
+  askedForMore.json().coverageAttemptId,
+  direct.json().coverageAttemptId,
+  "a request bounded back to the same approved cap is the same attempt",
+);
+
+// A different target job is a different attempt.
+const otherJob = await callHandler(directHandler, {
+  method: "POST",
+  body: { ...directBody, targetJobId: `0x${"a".repeat(64)}` },
+});
+assert.notEqual(
+  otherJob.json().coverageAttemptId,
+  direct.json().coverageAttemptId,
+  "covering a different job must not reuse an attempt id",
+);
+
+console.log("PolicyPool coverage preflight passed: strict task parsing, no-charge declines, evidence binding, cap calculation, paid-request assembly, direct on-chain evidence verified rather than trusted, and named coverage economics.");
