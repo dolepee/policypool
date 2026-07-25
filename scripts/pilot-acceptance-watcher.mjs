@@ -626,10 +626,18 @@ async function confirm(args) {
   // consulting it was the whole defect: a fee that settled as a direct transfer
   // was still reported as a verified marketplace sale whenever the buyer
   // happened to have some other qualifying task.
+  // A lagging or pruned RPC returns null for a receipt it cannot find, and an
+  // absent log set is not an empty one. Classifying that as a direct transfer
+  // would append a conclusion to an append-only evidence log that nothing
+  // supports, so an unreadable receipt stays unknown.
   let route = "unknown";
   if (fee.transaction) {
     const settlement = await rpc("eth_getTransactionReceipt", [fee.transaction]);
-    route = paymentRoute(settlement?.logs, OKX_TASK.escrow, marketplaceTask);
+    if (Array.isArray(settlement?.logs)) {
+      route = paymentRoute(settlement.logs, OKX_TASK.escrow, marketplaceTask);
+    } else {
+      route = "settlement_receipt_unavailable";
+    }
   }
 
   const bindings = {
@@ -644,11 +652,20 @@ async function confirm(args) {
     expectedAsset: PAYMENT.asset,
     expectedServiceType: "A2MCP",
   };
-  // Verified means every binding held with no waiver applied, which is why this
-  // is evaluated separately from what blocks the confirmation below.
-  const attributionProven = Boolean(createdTask && acceptedTask)
+  // Attribution is never reported as proven, and this is not conservatism, it is
+  // what the available evidence supports. OKX publishes no authenticated mapping
+  // from an accepted order to a listed service id: validateServiceBinding
+  // returns listedServiceIdMapping "manual_external_evidence_required" and
+  // establishes only that an A2MCP event carries a zero service hash. Nothing
+  // here authenticates the task payload or ties it to this receipt's quote. So
+  // another task accepted by the same agent through the same wallet for the same
+  // fee satisfies every binding below while being a different purchase.
+  //
+  // What the bindings do is refuse a task that is demonstrably not this listing.
+  // That is corroboration, not attribution, and it is labelled as such.
+  const corroborated = Boolean(createdTask && acceptedTask)
     && marketplaceProblems(bindings).length === 0;
-  const attribution = attributionProven ? "okx_marketplace_task_verified" : "attribution_unproven";
+  const attribution = "attribution_unproven";
   problems.push(...marketplaceProblems({ ...bindings, acceptUnproven }));
 
   console.log(`receipt        ${receiptId}`);
@@ -671,15 +688,21 @@ async function confirm(args) {
   }
 
   record("confirm_passed", {
-    receiptId, buyer, feeAtomic, route, attribution, marketplaceTask, createdTask, acceptedTask,
+    receiptId, buyer, feeAtomic, route, attribution, corroborated,
+    marketplaceTask, createdTask, acceptedTask,
     deadline: payload.reconciliation?.deadline,
   });
   console.log(`\nCONFIRMED. An independent buyer paid exactly ${usdt(feeAtomic)} ${PAYMENT.symbol} and coverage is live.`);
-  if (!attributionProven) {
-    console.log("\nAttribution is UNPROVEN. Nothing here shows the purchase went through the listed");
-    console.log("service, so do not describe the result as an OKX marketplace sale. The payout claim");
-    console.log("is unaffected: buyer independence and the settlement are both verified above.");
-  }
+  // Printed on every run, not only the unsupported ones. Attribution cannot be
+  // established from the evidence OKX publishes, so there is no path through
+  // this script that earns the opposite message.
+  console.log("\nAttribution is UNPROVEN. Nothing available shows this purchase went through the");
+  console.log("listed service, so do not describe the result as an OKX marketplace sale. OKX");
+  console.log("publishes no authenticated mapping from an accepted order to a listed service id.");
+  console.log(corroborated
+    ? "The supplied task is consistent with PolicyPool's listing, which corroborates but does not prove it."
+    : "No task was supplied, or it did not match, so there is not even corroboration.");
+  console.log("The payout claim is unaffected: buyer independence and the settlement are verified above.");
   console.log(`Public verifier: ${API_BASE}/proof/receipt?id=${receiptId}`);
   console.log(`\nNow withhold Foreman delivery. After the deadline:`);
   console.log(`  npm run ops:breach:check  -- --receipt-id ${receiptId}`);

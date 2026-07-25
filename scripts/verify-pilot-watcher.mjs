@@ -285,18 +285,53 @@ assert.ok(
 // Proceeding unproven must be recorded as unproven wherever the run is written
 // down, or the distinction is lost the moment anyone reads the evidence log.
 const confirmSource = await readFile(new URL("./pilot-acceptance-watcher.mjs", import.meta.url), "utf8");
+// Attribution is never reported as proven. OKX publishes no authenticated
+// mapping from an accepted order to a listed service id — validateServiceBinding
+// returns "manual_external_evidence_required" — so another task from the same
+// agent, wallet, fee and asset satisfies every binding while being a different
+// purchase. The bindings corroborate; they cannot attribute.
 assert.match(
   confirmSource,
-  /const attribution = attributionProven \? "okx_marketplace_task_verified" : "attribution_unproven"/,
-  "the run must carry an explicit attribution verdict",
+  /const attribution = "attribution_unproven"/,
+  "the run must never report attribution as proven",
+);
+assert.doesNotMatch(
+  confirmSource,
+  /attribution = [^;]*okx_marketplace_task_verified/,
+  "no code path may label a run a verified marketplace sale",
+);
+assert.match(
+  confirmSource,
+  /record\("confirm_passed", \{[\s\S]*?corroborated,/,
+  "corroboration must be recorded separately from attribution",
+);
+// The unproven notice is unconditional, because no path earns the opposite.
+assert.doesNotMatch(
+  confirmSource,
+  /if \(!corroborated\) \{\s*\n\s*console\.log\("\\nAttribution is UNPROVEN/,
+  "the unproven notice must not be conditional",
+);
+
+// An unreadable settlement receipt must not be classified. A lagging or pruned
+// RPC returns null, and an absent log set is not an empty one; treating it as a
+// direct transfer writes an unsupported conclusion into an append-only log.
+assert.match(
+  confirmSource,
+  /if \(Array\.isArray\(settlement\?\.logs\)\)/,
+  "the route must only be classified from a receipt that actually returned logs",
+);
+assert.match(
+  confirmSource,
+  /route = "settlement_receipt_unavailable"/,
+  "an unreadable settlement receipt must say so rather than defaulting to a route",
 );
 // The verdict must come from every binding holding, not from a task merely
 // existing. Deriving it from createdTask alone was the defect: an unrelated
 // task by the same buyer would have been reported as a verified sale.
 assert.match(
   confirmSource,
-  /attributionProven = Boolean\(createdTask && acceptedTask\)[\s\S]{0,600}?\.length === 0/,
-  "attribution must be proven by the full binding, not by the presence of a task",
+  /corroborated = Boolean\(createdTask && acceptedTask\)[\s\S]{0,600}?\.length === 0/,
+  "corroboration must require the full binding, not merely the presence of a task",
 );
 // Every binding the helper accepts must actually be supplied by confirm. A guard
 // that is never fed its input is inert, and that is not hypothetical here: route
@@ -333,7 +368,7 @@ assert.match(
 // this purchase, which is the guard failing open rather than closed.
 assert.match(
   confirmSource,
-  /paymentRoute\(settlement\?\.logs, OKX_TASK\.escrow, marketplaceTask\)/,
+  /paymentRoute\(settlement\.logs, OKX_TASK\.escrow, marketplaceTask\)/,
   "confirm must classify the settlement route against the supplied marketplace task",
 );
 assert.match(
