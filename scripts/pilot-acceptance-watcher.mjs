@@ -16,6 +16,9 @@
 //     listed fee, from the buyer's own wallet.
 //
 // Usage:
+//   node scripts/pilot-acceptance-watcher.mjs watch-next \
+//     --buyer 0x… --job-description "…" [--cap 0.5]
+//
 //   node scripts/pilot-acceptance-watcher.mjs watch \
 //     --job-id 0x… --from-block 65123456 --buyer 0x… \
 //     --job-description "…" [--cap 0.5] [--target-agent Foreman#4348]
@@ -120,8 +123,99 @@ async function scanEscrow({ jobId, fromBlock, toBlock }) {
   return found;
 }
 
+const addressTopic = (address) => `0x${String(address).toLowerCase().replace(/^0x/, "").padStart(64, "0")}`;
+
+async function scanCreationsByBuyer({ buyer, fromBlock, toBlock }) {
+  const found = [];
+  for (let start = BigInt(fromBlock); start <= toBlock; start += MAX_LOG_SCAN_BLOCKS) {
+    const end = start + MAX_LOG_SCAN_BLOCKS - 1n < toBlock ? start + MAX_LOG_SCAN_BLOCKS - 1n : toBlock;
+    const chunk = await rpc("eth_getLogs", [{
+      address: OKX_TASK.escrow,
+      topics: [OKX_TASK.createdTopic, null, addressTopic(buyer)],
+      fromBlock: `0x${start.toString(16)}`,
+      toBlock: `0x${end.toString(16)}`,
+    }]);
+    found.push(...chunk);
+  }
+  return found;
+}
+
+export function createdJobsForBuyer(logs, buyer) {
+  const expectedBuyer = String(buyer || "").toLowerCase();
+  return (logs || [])
+    .filter((log) => (
+      log?.topics?.[0]?.toLowerCase() === OKX_TASK.createdTopic
+      && topicAddress(log.topics[2]) === expectedBuyer
+      && /^0x[a-fA-F0-9]{64}$/.test(String(log.topics[1] || ""))
+    ))
+    .map((log) => ({
+      jobId: log.topics[1].toLowerCase(),
+      creationTxHash: log.transactionHash,
+      creationBlock: Number(BigInt(log.blockNumber)),
+      logIndex: Number(BigInt(log.logIndex || "0x0")),
+    }))
+    .sort((left, right) => left.creationBlock - right.creationBlock || left.logIndex - right.logIndex);
+}
+
 async function headBlock() {
   return BigInt(await rpc("eth_blockNumber", []));
+}
+
+async function watchNext(args) {
+  const buyer = String(args.buyer || "").toLowerCase();
+  const jobDescription = String(args.jobDescription || "");
+  const cap = String(args.cap || "0.5");
+  const targetAgent = String(args.targetAgent || "Foreman#4348");
+  if (!/^0x[a-f0-9]{40}$/.test(buyer)) throw new Error("--buyer must be an address");
+  if (!jobDescription) throw new Error("--job-description is required");
+  if (houseWallets().has(buyer)) {
+    throw new Error("--buyer is the PolicyPool owner wallet; this pilot exists to pay someone else");
+  }
+  const startBlock = args.fromBlock && args.fromBlock !== true
+    ? BigInt(String(args.fromBlock))
+    : await headBlock();
+  if (startBlock < 0n) throw new Error("--from-block must be a nonnegative integer");
+
+  console.log(`PRE-ARMED at block ${startBlock}`);
+  console.log(`watching for the next OKX task created by ${buyer}`);
+  console.log(`expected target ${targetAgent}; the coverage preflight will reject any other provider\n`);
+  record("next_job_watch_started", {
+    buyer, fromBlock: startBlock.toString(), targetAgent, cap, jobDescription,
+  });
+
+  for (;;) {
+    try {
+      const matches = createdJobsForBuyer(
+        await scanCreationsByBuyer({ buyer, fromBlock: startBlock, toBlock: await headBlock() }),
+        buyer,
+      );
+      if (matches.length > 1) {
+        record("next_job_ambiguous", { buyer, matches });
+        throw new Error(
+          `found ${matches.length} new jobs from ${buyer}; refuse to guess which one is the Foreman pilot`,
+        );
+      }
+      if (matches.length === 1) {
+        const created = matches[0];
+        console.log(`job discovered  ${created.jobId}`);
+        console.log(`creation        block ${created.creationBlock}  tx ${created.creationTxHash}\n`);
+        record("next_job_discovered", { buyer, ...created });
+        return watch({
+          ...args,
+          jobId: created.jobId,
+          fromBlock: String(created.creationBlock),
+          buyer,
+          jobDescription,
+          cap,
+          targetAgent,
+        });
+      }
+    } catch (error) {
+      if (String(error?.message || "").includes("refuse to guess")) throw error;
+      console.error(`rpc error, retrying: ${error.message}`);
+    }
+    await new Promise((resolvePoll) => setTimeout(resolvePoll, POLL_MS));
+  }
 }
 
 // The two events a coverage quote binds to. Both are decoded here rather than
@@ -758,10 +852,12 @@ const [command, ...rest] = process.argv.slice(2);
 if (invokedDirectly) {
 const args = parseArgs(rest);
 try {
-  if (command === "watch") await watch(args);
+  if (command === "watch-next") await watchNext(args);
+  else if (command === "watch") await watch(args);
   else if (command === "confirm") await confirm(args);
   else {
-    console.error("usage: pilot-acceptance-watcher.mjs <watch|confirm> [options]");
+    console.error("usage: pilot-acceptance-watcher.mjs <watch-next|watch|confirm> [options]");
+    console.error("  watch-next --buyer 0x… --job-description \"…\" [--cap 0.5]");
     console.error("  watch   --job-id 0x… --from-block N --buyer 0x… --job-description \"…\" [--cap 0.5]");
     console.error("  confirm --receipt-id ppc-… --marketplace-task 0x… | --attribution-unproven");
     process.exitCode = 2;

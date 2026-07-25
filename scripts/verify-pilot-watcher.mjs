@@ -4,10 +4,11 @@
 // makes. This checks the guard can actually reach that conclusion.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { COVERAGE, PAYMENT } from "../api/lib/config.js";
+import { COVERAGE, OKX_TASK, PAYMENT } from "../api/lib/config.js";
 import {
   buyerAddress,
   canonicalAgentLabel,
+  createdJobsForBuyer,
   decodeAcceptedTask,
   houseWallets,
   marketplaceProblems,
@@ -86,6 +87,33 @@ assert.equal(decodeAcceptedTask(undefined), null, "a missing log must not throw"
 // address, a receipt paid by the configured PolicyPool wallet would pass as an
 // independent buyer and invalidate the one thing the pilot proves.
 const configured = houseWallets();
+
+const discoveredBuyer = `0x${"6".repeat(40)}`;
+const createdTopic = OKX_TASK.createdTopic;
+const createdJob = `0x${"a".repeat(64)}`;
+const unrelatedJob = `0x${"b".repeat(64)}`;
+const created = createdJobsForBuyer([
+  {
+    address: OKX_TASK.escrow,
+    topics: [createdTopic, unrelatedJob, `0x${"0".repeat(24)}${"7".repeat(40)}`],
+    transactionHash: `0x${"1".repeat(64)}`,
+    blockNumber: "0x10",
+    logIndex: "0x0",
+  },
+  {
+    address: OKX_TASK.escrow,
+    topics: [createdTopic, createdJob, `0x${"0".repeat(24)}${"6".repeat(40)}`],
+    transactionHash: `0x${"2".repeat(64)}`,
+    blockNumber: "0x11",
+    logIndex: "0x1",
+  },
+], discoveredBuyer);
+assert.deepEqual(created, [{
+  jobId: createdJob,
+  creationTxHash: `0x${"2".repeat(64)}`,
+  creationBlock: 17,
+  logIndex: 1,
+}]);
 assert.ok(configured.size > 0, "the exclusion set must not be empty, or every buyer looks independent");
 for (const address of configured) {
   assert.match(address, /^0x[a-f0-9]{40}$/, "excluded wallets must be normalised addresses");
