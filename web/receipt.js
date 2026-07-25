@@ -142,6 +142,16 @@ export function buildReceiptView(payload, options = {}) {
   const payoutAtomic = payout ? Number(payout.amountAtomic) : 0;
   const payoutIsPositive = Number.isFinite(payoutAtomic) && payoutAtomic > 0;
   const payoutUSDT = payoutIsPositive ? usdt(payout.amountAtomic) : null;
+  // What a missed deadline actually pays, and whether it can settle at all,
+  // depends on the covenant's recorded payout basis and clock mode. More than
+  // one state needs both, so they are resolved once rather than per branch.
+  const basis = target.payoutBasis
+    || (receipt.providerBond ? null : "legacy_reserve_covenant");
+  const relayClock = target.clockMode === "policypool_relay";
+  // A relay clock paired with a net-loss basis has no recovery-finality path:
+  // terminalRecovery() returns relay_net_loss_recovery_finality_unavailable for
+  // it unconditionally, so such a claim cannot execute on its own.
+  const cannotSettleAutomatically = relayClock && basis === "net_loss";
   // A started relay covenant's authoritative deadline is computed by the
   // reconciler and travels beside the hash-committed receipt, never inside it,
   // so the issued document alone under-reports it.
@@ -191,7 +201,17 @@ export function buildReceiptView(payload, options = {}) {
       plain = "This covenant ended without a payout and its reserved liability was released.";
     }
   } else if (state === "payout_due") {
-    plain = `The deadline passed without a verified delivery. A payout of up to ${capUSDT || "the cap"} USD₮0 is owed to the buyer and is pending execution.`;
+    // The limitation matters most here, at the point the claim actually becomes
+    // due, so it must survive the transition out of active rather than being
+    // replaced by a generic promise of execution.
+    const cap = capUSDT || "the cap";
+    if (cannotSettleAutomatically) {
+      plain = `The deadline passed without a verified delivery, so up to ${cap} USD₮0 is owed to the buyer. PolicyPool cannot settle it automatically in this release, because a relay clock combined with a net-loss basis has no recovery-finality path. This claim stays open for manual reconciliation rather than executing on its own.`;
+    } else if (basis === "net_loss") {
+      plain = `The deadline passed without a verified delivery, so up to ${cap} USD₮0 is owed to the buyer. On a net-loss basis it executes only once marketplace recovery is terminal, reduced by any verified recovered amounts.`;
+    } else {
+      plain = `The deadline passed without a verified delivery. A payout of up to ${cap} USD₮0 is owed to the buyer and is pending execution.`;
+    }
   } else if (state === "compensation_required") {
     // Must not claim a payout: issuance or fee settlement may be unconfirmed,
     // so this record may represent coverage that was never issued at all.
@@ -203,8 +223,6 @@ export function buildReceiptView(payload, options = {}) {
     // credit treats a deadline breach as payable even if the platform later
     // stops, closes, refunds, or expires the job. The wording is selected from
     // the receipt's own recorded basis rather than asserted for all of them.
-    const basis = target.payoutBasis
-      || (receipt.providerBond ? null : "legacy_reserve_covenant");
     const until = deadline || "the stored deadline";
     const cap = capUSDT || "the cap";
     if (basis === "provider_bonded_sla_credit") {
@@ -214,7 +232,7 @@ export function buildReceiptView(payload, options = {}) {
       // platform ends before the deadline is not released: absent a verified
       // in-SLA response, it still becomes payable at the relay deadline.
       // Promising release here would be a claim the reconciler contradicts.
-      plain = target.clockMode === "policypool_relay"
+      plain = relayClock
         ? `Coverage is in force until ${until}. If ${providerName} has not delivered a verified response by then, the buyer is owed up to ${cap} USD₮0 from the provider's first-loss bond. This covenant runs on PolicyPool's own relay clock, so what the marketplace does to the job does not by itself end the cover.`
         : `Coverage is in force until ${until}. If ${providerName} has not delivered by then, the buyer is owed up to ${cap} USD₮0 from the provider's first-loss bond, even if the platform later stops, closes, refunds, or expires the job. A job the platform ends before the deadline is released without a payout.`;
     } else if (basis === "net_loss") {
@@ -229,7 +247,7 @@ export function buildReceiptView(payload, options = {}) {
       // the relay pipeline never reads marketplace recovery at all. Promising
       // payment after terminal recovery would describe machinery that does not
       // exist, so the limitation is disclosed instead of papered over.
-      plain = target.clockMode === "policypool_relay"
+      plain = relayClock
         ? `Coverage is in force until ${until}. If ${providerName} has not delivered a verified response by then, up to ${cap} USD₮0 is owed against this covenant. PolicyPool cannot settle that claim automatically in this release, because a relay clock combined with a net-loss basis has no recovery-finality path, so the claim would stay open for manual reconciliation rather than paying out on its own.`
         : `Coverage is in force until ${until}. If ${providerName} has not delivered by then, up to ${cap} USD₮0 becomes payable only after marketplace recovery is terminal, reduced by any verified recovered amounts. A job the platform stops, refunds, or expires before the deadline is released without a payout.`;
     } else if (basis === "legacy_reserve_covenant") {

@@ -432,6 +432,47 @@ assert.match(
 assert.match(netLossRelay.plain, /recovery-finality path/i);
 assert.match(netLossRelay.plain, /manual reconciliation/i, "the reader must know what actually happens next");
 
+// The disclosure has to survive the transition out of active. The reconciler
+// moves the covenant to payout_due the moment the deadline is missed, which is
+// exactly when the missing settlement path starts to matter, so a generic
+// promise of pending execution there would drop it at the worst moment.
+function payoutDueView(payoutBasis, clockMode) {
+  return buildReceiptView({
+    ok: true,
+    receiptId: "ppc-payout-due-basis",
+    state: "payout_due",
+    receipt: {
+      version: "0.4.0",
+      covenant: { coverageCapUSDT: "0.5", deadline: "2026-07-26T00:00:00.000Z" },
+      target: { agentName: "Foreman", agentId: "4348", payoutBasis, ...(clockMode ? { clockMode } : {}) },
+      servicePayment: {},
+      providerBond: { custody: "provider_first_loss_bond_vault" },
+    },
+  });
+}
+
+const relayNetLossDue = payoutDueView("net_loss", "policypool_relay");
+assert.equal(relayNetLossDue.stateLabel, "PAYOUT DUE");
+assert.match(relayNetLossDue.plain, /0\.5 USD₮0 is owed/, "the amount owed must still be stated");
+assert.doesNotMatch(
+  relayNetLossDue.plain,
+  /pending execution/i,
+  "a claim with no recovery-finality path must not be described as pending execution",
+);
+assert.match(relayNetLossDue.plain, /cannot settle it automatically/i);
+assert.match(relayNetLossDue.plain, /manual reconciliation/i);
+
+// A verified-acceptance net-loss claim does execute, but only after terminal
+// recovery, so it must not read as unconditionally pending either.
+const netLossDue = payoutDueView("net_loss", "verified_acceptance");
+assert.match(netLossDue.plain, /marketplace recovery is terminal/i);
+assert.match(netLossDue.plain, /recovered amounts/i);
+assert.doesNotMatch(netLossDue.plain, /cannot settle it automatically/i);
+
+// Everything else keeps the original unconditional wording.
+const bondedDue = payoutDueView("provider_bonded_sla_credit", "verified_acceptance");
+assert.match(bondedDue.plain, /pending execution/i, "a settleable claim is still pending execution");
+
 const legacy = activeView("legacy_reserve_covenant", false);
 assert.match(legacy.plain, /still accepted/i, "a reserve covenant requires the job to stay accepted");
 assert.match(legacy.plain, /released without a payout/i, "a reserve covenant releases on platform-terminal outcomes");
