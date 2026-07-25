@@ -221,7 +221,7 @@ export function decodeAcceptedTask(log) {
 export function marketplaceProblems({
   taskId, targetJobId, receiptBuyer, created, accepted,
   expectedAgentId, expectedProvider, expectedFeeAtomic, expectedAsset, expectedServiceType,
-  route, expectedRoute, acceptUnproven = false,
+  acceptUnproven = false,
 }) {
   const problems = [];
   if (!taskId) {
@@ -306,16 +306,20 @@ export function marketplaceProblems({
       );
     }
   }
-  // A task can name the right agent, wallet, asset and amount and still not be
-  // how this fee was paid. If the fee settled as a direct transfer then it did
-  // not flow through this task, whatever else the task is. Requiring the escrow
-  // route is what stops a real but unrelated purchase standing in as proof.
-  if (expectedRoute && route && route !== expectedRoute) {
-    problems.push(
-      `the coverage fee settled as ${route}, so it did not flow through task ${taskId}.`
-      + " A task that did not carry the payment cannot attribute it.",
-    );
-  }
+  // The settlement route deliberately does not gate this, and must not be
+  // re-added. The coverage fee is an x402 payment: payment.settle goes through
+  // the facilitator and produces a plain token transfer from the payer to
+  // PAYMENT.payTo, which chain.verifySettlement verifies as exactly that. Any
+  // OKX task lives in its own escrow transaction. So the fee transaction
+  // carries no escrow log even for a genuine marketplace purchase, and
+  // requiring one rejected precisely the purchase this watcher exists to
+  // confirm.
+  //
+  // Route is still classified and written to the evidence log, because it is
+  // worth knowing, but it cannot attribute a payment in either direction. What
+  // binds a task to this purchase is the listing binding above: same buyer,
+  // PolicyPool's agent, PolicyPool's wallet, the exact fee, the coverage asset,
+  // and the service type the escrow recorded.
   return problems;
 }
 
@@ -639,8 +643,6 @@ async function confirm(args) {
     expectedFeeAtomic: PAYMENT.amountAtomic,
     expectedAsset: PAYMENT.asset,
     expectedServiceType: "A2MCP",
-    route,
-    expectedRoute: "okx_escrow_mediated",
   };
   // Verified means every binding held with no waiver applied, which is why this
   // is evaluated separately from what blocks the confirmation below.

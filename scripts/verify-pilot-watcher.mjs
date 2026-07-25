@@ -94,7 +94,6 @@ const bound = (over = {}) => ({
   created: createdBy(KEJI), accepted: acceptedAs(),
   expectedAgentId: PP_AGENT, expectedProvider: PP_WALLET, expectedFeeAtomic: FEE,
   expectedAsset: USDT, expectedServiceType: "A2MCP",
-  route: "okx_escrow_mediated", expectedRoute: "okx_escrow_mediated",
   ...over,
 });
 
@@ -133,12 +132,6 @@ assert.equal(
   "task matching must be case-insensitive",
 );
 assert.equal(paymentRoute(undefined, ESCROW, COVERAGE_TASK), "direct_endpoint_payment", "missing logs must not throw");
-// Only the exact route counts as attribution, so a settlement that touched the
-// escrow for something else is refused like any other unproven case.
-assert.ok(
-  marketplaceProblems(bound({ route: "escrow_unrelated_task" })).length > 0,
-  "escrow activity for another task must not verify attribution",
-);
 
 // Absent evidence refuses. This is the case Codex found: every other check
 // passes and the pilot would proceed on a purchase that produced no OKX sale.
@@ -211,19 +204,22 @@ assert.ok(
   "an unrecognised listing type must refuse",
 );
 
-// The fee has to have actually flowed through the task. A task can name the
-// right agent, wallet, asset and amount and still be a different purchase; if
-// the fee settled as a direct transfer it did not go through that task. Route
-// was computed and then never consulted, which is exactly how a direct
-// settlement got reported as a verified marketplace sale.
-assert.ok(
-  marketplaceProblems(bound({ route: "direct_endpoint_payment" })).length > 0,
-  "a directly settled fee cannot be attributed to an escrow task",
+// The settlement route must NOT gate attribution. The coverage fee is an x402
+// payment settled as a plain token transfer to PAYMENT.payTo, and any OKX task
+// lives in its own escrow transaction, so a genuine marketplace purchase has no
+// escrow log in its fee transaction. Requiring one rejected exactly the purchase
+// this watcher exists to confirm.
+assert.deepEqual(
+  marketplaceProblems(bound({ route: "direct_endpoint_payment" })),
+  [],
+  "a genuine marketplace purchase settles its fee as a direct token transfer and must still verify",
 );
-assert.ok(
-  marketplaceProblems(bound({ route: "direct_endpoint_payment", acceptUnproven: true })).length > 0,
-  "the waiver must not suppress a settlement route that contradicts the task",
+assert.deepEqual(
+  marketplaceProblems(bound({ route: "escrow_unrelated_task" })),
+  [],
+  "the fee transaction's escrow content cannot decide attribution in either direction",
 );
+
 // An amount without its denomination is not an amount.
 assert.ok(
   marketplaceProblems(bound({ accepted: acceptedAs({ asset: `0x${"c".repeat(40)}` }) })).length > 0,
@@ -314,11 +310,15 @@ for (const field of [
   "expectedFeeAtomic",
   "expectedAsset",
   "expectedServiceType",
-  "expectedRoute",
 ]) {
   assert.match(bindingsBlock, new RegExp(`${field}:`), `confirm must supply ${field} or that guard is inert`);
 }
-assert.match(bindingsBlock, /^\s*route,$/m, "confirm must supply the observed route, not just the expected one");
+// Route is recorded, not required. It must still reach the evidence log.
+assert.match(
+  confirmSource,
+  /record\("confirm_passed", \{[\s\S]*?route,/,
+  "the settlement route must still be recorded even though it does not gate attribution",
+);
 // Supplying the field is not enough; it has to name the right listing. Declaring
 // A2A here would invert the guard: A2A tasks would pass and genuine A2MCP
 // coverage purchases would be refused. PolicyPool's listed coverage service is
