@@ -24,10 +24,22 @@ PolicyPool does not rate subjective quality, accept caller-supplied policy overr
 
 > **v0.4 deployment status:** the remediated eight-contract stack is deployed, wired, and bytecode-verified on X Layer behind disabled public feature flags. House-operated pilots have passed orphaned-fee recovery, unpaid cancellation, completed-job release, challenge enforcement, and two post-challenge fixed-credit payouts. The restarted 24-hour attester soak completed; both preview signer services were then retired, leaving no standing production or preview attester endpoint. Production remains v0.3, and third-party-funded bonds remain blocked until a qualified audit and operationally independent signers. See [Universal Coverage v0.4](docs/UNIVERSAL_COVERAGE_V04.md), the [evidence-attester runbook](docs/EVIDENCE_ATTESTER_RUNBOOK.md), and the [internal Solidity audit](docs/INTERNAL_SOLIDITY_AUDIT_V04.md).
 
+## Why Evidence Binds To Chain
+
+PolicyPool never reads a marketplace page to decide what it owes. Every covered claim binds to X Layer transactions, and on 2026-07-25 that stopped being a theoretical preference.
+
+OKX.AI removed two fields from its public task page with no notice and no API replacement: `timeline` became `null` and `acceptCommands` was deleted. Between them they carried a job's acceptance instant and its on-chain task id. Six task ids across statuses `0`, `6`, and `7` return the same shape, so this is platform-wide rather than one stale task.
+
+Nothing covered was affected. `chain.verifyTargetOrder` still binds buyer, job, provider wallet, agent id, token, amount, service type, and accepted-service hash, and every receipt issued before that date stays independently replayable. What is unavailable is quoting from a public task URL, since the fields tying a URL to a job are gone. Supplying `targetJobId`, `targetCreationTxHash`, and `targetAcceptanceTxHash` to the paid endpoint works and never touched that page.
+
+One part of the first response was wrong and is worth recording: the failure was classified `retryable` with a ten-second delay, a condition that could never clear. The release gate caught it the same day and it is now a non-retryable `PUBLIC_TASK_EVIDENCE_UNAVAILABLE` naming the working fields. No payment was taken and no receipt was issued for any request that failed this way.
+
+PolicyPool will not fuzzy-match a public task to an on-chain job from a creation time, an amount, and an agent id. Exact verified binding is the product.
+
 ## Agent Coverage Loop
 
 1. The target agent must have a versioned policy snapshot in `api/lib/policy-registry.js`.
-2. The free preflight accepts an OKX.AI task URL or public task ID, reads the public task state, resolves its onchain evidence, and returns a signed short-lived quote bound to that job and buyer. Advanced callers may still supply the resolved evidence directly to the paid endpoint.
+2. The free preflight accepts an OKX.AI task URL or public task ID, reads the public task state, resolves its onchain evidence, and returns a signed short-lived quote bound to that job and buyer. Advanced callers may still supply the resolved evidence directly to the paid endpoint. **Since 2026-07-25 the public-task-URL half of this step is unavailable** for the reason recorded above; the direct-evidence path to the paid endpoint is unaffected.
 3. `api/lib/chain.js` verifies both transactions against the public task escrow and binds buyer, job, provider wallet, agent ID, token, paid amount, service type, and the exact accepted-service hash. The coverage payer must own the target job.
 4. The paid endpoint recovers the canonical request from the quote URL, x402 requirements, request body, or exactly one open quote for the verified payer. Zero or multiple payer matches fail without settlement. Direct full-body requests reject a visibly non-accepted task before returning a payment challenge, and the full eligibility pass runs again before a valid signed service payment is settled.
 5. The durable ledger atomically checks that active, pending, and payout-due liabilities plus the new cap do not exceed the live reserve.
