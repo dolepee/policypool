@@ -162,6 +162,29 @@ assert.match(
 // they pay.
 assert.match(evidenceNotice, /Proved against the task escrow/, "the notice must separate proved evidence");
 assert.match(evidenceNotice, /Taken on trust/, "the notice must name what it cannot prove");
+
+// The public-reference path is dormant, not deleted: OKX may restore the fields
+// it reads, and restoring it is meant to be a matter of enabling the radio. That
+// only holds if the dormant field stays submittable. It did not once already —
+// the input was left disabled with no name, so FormData would have carried no
+// reference and every restored request would have failed okx_task_reference_required
+// on an input the visitor could see themselves filling in.
+const publicField = coverage.match(/<div class="field-block[^"]*public-reference-field"[\s\S]*?<\/div>/)?.[0] || "";
+assert.ok(publicField, "the dormant public-reference field must still exist");
+assert.match(
+  publicField,
+  /name="taskReference"/,
+  "the dormant task input must keep its name, or restoring public mode submits nothing",
+);
+// Its disabled state belongs to the mode toggle, which flips it on selection.
+// A field pinned off in markup alone would survive that toggle and silently
+// break the path it exists to serve. applyEvidenceMode is exercised directly in
+// verify-site-failure-messages.mjs.
+assert.match(
+  coverageScript,
+  /export function applyEvidenceMode/,
+  "the mode toggle must stay exported so the restoration path is testable without a browser",
+);
 const provedClause = evidenceNotice.match(/Proved against the task escrow:[\s\S]*?<\/p>/)?.[0] || "";
 const trustedClause = evidenceNotice.match(/Taken on trust:[\s\S]*?<\/p>/)?.[0] || "";
 assert.ok(provedClause && trustedClause, "both halves of the disclosure must be present");

@@ -794,6 +794,29 @@ function revealPreflightResult() {
   result.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
 }
 
+// Shows, names and requires exactly the selected mode's inputs, so validation
+// cannot block on a field the request will not carry and FormData carries
+// nothing from the other mode. Exported and pure over the form so the restoration
+// path can be verified without a browser: the public radio ships disabled today,
+// which means that branch is otherwise only reachable by hand.
+export function applyEvidenceMode(form, direct) {
+  for (const field of form.querySelectorAll(".direct-evidence-field")) {
+    field.hidden = !direct;
+    for (const control of field.querySelectorAll("input, textarea")) {
+      control.required = direct && control.dataset.optional !== "true";
+      control.disabled = !direct;
+    }
+  }
+  for (const field of form.querySelectorAll(".public-reference-field")) {
+    field.hidden = direct;
+    for (const control of field.querySelectorAll("input, textarea")) {
+      control.disabled = direct;
+      control.required = !direct;
+    }
+  }
+  return form;
+}
+
 function bindCoveragePreflight() {
   const form = document.querySelector("#coverage-preflight-form");
   if (!form) return;
@@ -816,31 +839,17 @@ function bindCoveragePreflight() {
   customService.addEventListener("input", () => { targetService.value = customService.value.trim(); });
   setTargetMode();
 
-  // Only the chosen mode's fields are shown and required, so form validation
-  // cannot block on an input the request will not carry. The public-reference
-  // radio ships disabled because OKX withdrew the fields it depends on; if they
-  // return, enabling that radio is the whole change and this already works.
+  // Only the chosen mode's fields are shown, named and required, so validation
+  // cannot block on an input the request will not carry and FormData carries
+  // exactly the chosen mode's inputs. The public-reference radio ships disabled
+  // because OKX withdrew the fields it depends on. Restoring that path means
+  // enabling the radio and updating the notice copy; the wiring below already
+  // handles the rest.
   const modeInputs = [...form.querySelectorAll('input[name="evidenceMode"]')];
-  const setEvidenceMode = () => {
-    const direct = form.querySelector('input[name="evidenceMode"]:checked')?.value
-      !== "public_task_reference";
-    for (const field of form.querySelectorAll(".direct-evidence-field")) {
-      field.hidden = !direct;
-      for (const control of field.querySelectorAll("input, textarea")) {
-        // The task reference is only required for enrolled v0.4 A2A policies,
-        // which the browser cannot know before quoting, so it is offered rather
-        // than demanded. The API states the condition in its discovery response.
-        control.required = direct && control.dataset.optional !== "true";
-        control.disabled = !direct;
-      }
-    }
-    for (const field of form.querySelectorAll(".public-reference-field")) {
-      field.hidden = direct;
-      // The task input stays disabled in both modes while the upstream fields
-      // are withdrawn; the mode radio is the switch, not this.
-      taskInput.required = false;
-    }
-  };
+  const setEvidenceMode = () => applyEvidenceMode(
+    form,
+    form.querySelector('input[name="evidenceMode"]:checked')?.value !== "public_task_reference",
+  );
   for (const input of modeInputs) input.addEventListener("change", setEvidenceMode);
   setEvidenceMode();
   form.addEventListener("submit", async (event) => {

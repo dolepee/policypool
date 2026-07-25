@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { preflightMessage, preflightValueRows } from "../web/coverage-site.js";
+import { applyEvidenceMode, preflightMessage, preflightValueRows } from "../web/coverage-site.js";
 
 // The product site refused with a de-underscored error code for anything its
 // local map had not seen. When OKX withdrew the public task evidence, a visitor
@@ -182,3 +182,64 @@ assert.ok(
 );
 
 console.log("PolicyPool site messaging verified: classified failures and ordinary declines reach the visitor, curated wording wins where it exists, and a quote with no marketplace page still renders its target job.");
+
+// The public-reference path is switched off today because OKX withdrew the
+// fields it reads. Restoring it must be a matter of enabling the radio, not a
+// scavenger hunt through the form, so the mode toggle is verified here rather
+// than asserted in a comment. It was wrong once already: the input had been left
+// disabled with no name, so FormData would have sent nothing and every restored
+// request would have failed okx_task_reference_required.
+const control = (name, extra = {}) => ({ name, disabled: null, required: null, dataset: {}, ...extra });
+const field = (className, controls) => ({
+  className,
+  hidden: null,
+  controls,
+  querySelectorAll: () => controls,
+});
+const buildForm = () => {
+  const directControls = [
+    control("targetJobId"),
+    control("targetCreationTxHash"),
+    control("targetAcceptanceTxHash"),
+    control("targetBuyer"),
+    control("jobDescription"),
+  ];
+  const publicControls = [control("taskReference")];
+  const fields = [
+    field("direct-evidence-field", directControls),
+    field("public-reference-field", publicControls),
+  ];
+  return {
+    directControls,
+    publicControls,
+    fields,
+    querySelectorAll(selector) {
+      return fields.filter((entry) => `.${entry.className}` === selector);
+    },
+  };
+};
+
+const directForm = buildForm();
+applyEvidenceMode(directForm, true);
+assert.ok(directForm.publicControls.every((c) => c.disabled === true),
+  "the public field must be disabled in direct mode so FormData cannot carry it");
+assert.ok(directForm.publicControls.every((c) => c.required === false),
+  "a hidden field must not be required, or validation blocks on an invisible input");
+assert.ok(directForm.directControls.every((c) => c.disabled === false));
+assert.equal(directForm.fields.find((f) => f.className === "public-reference-field").hidden, true);
+
+const publicForm = buildForm();
+applyEvidenceMode(publicForm, false);
+assert.ok(publicForm.publicControls.every((c) => c.disabled === false),
+  "restoring public mode must enable the task field, or the request carries no reference");
+assert.ok(publicForm.publicControls.every((c) => c.required === true),
+  "the task reference is the whole input of the public path, so it must be required there");
+assert.ok(publicForm.directControls.every((c) => c.disabled === true),
+  "direct fields must not be submitted alongside a public reference");
+assert.equal(publicForm.fields.find((f) => f.className === "direct-evidence-field").hidden, true);
+
+// An input marked optional stays optional in its own mode.
+const optionalForm = buildForm();
+optionalForm.directControls[0].dataset.optional = "true";
+applyEvidenceMode(optionalForm, true);
+assert.equal(optionalForm.directControls[0].required, false, "an optional field must never be demanded");
