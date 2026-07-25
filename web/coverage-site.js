@@ -699,6 +699,43 @@ function renderPreflightValues(entries) {
   }));
 }
 
+// The rows a successful quote renders. Pure and exported so the null-task
+// shape is verified in CI: reading data.task.title unconditionally threw for
+// every direct-evidence quote, and nothing outside a browser could catch it.
+export function preflightValueRows(data) {
+  const providerFunded = data.coverage.fundingSource === "provider_first_loss_bond";
+  return [
+    // Direct-evidence quotes deliberately carry no marketplace page, so the
+    // covered job is identified by the on-chain id the buyer supplied and the
+    // verifier proved. Reading data.task.title unconditionally threw here and
+    // took the whole result panel with it.
+    data.task
+      ? { label: "Task", value: data.task.title, href: data.task.publicUrl }
+      : {
+        label: "Target job",
+        value: short(data.paidRequest?.body?.targetJobId || ""),
+        href: data.paidRequest?.body?.targetAcceptanceTxHash
+          ? `${EXPLORER_TX}${data.paidRequest.body.targetAcceptanceTxHash}`
+          : undefined,
+      },
+    ...(data.scopeEvidence === "verified_accepted_service_binding"
+      ? [{ label: "Scope proved by", value: "Accepted service binding on X Layer" }]
+      : []),
+    { label: "Target", value: `${data.policy.agentName} #${data.policy.agentId}` },
+    { label: "Coverage cap", value: `${data.coverage.capUSDT} USD₮0` },
+    { label: "Service fee", value: `${data.coverage.serviceFeeUSDT} USD₮0` },
+    { label: "Deadline", value: dateTime(data.coverage.deadline) },
+    { label: "Enrollment closes", value: dateTime(data.coverage.enrollmentClosesAt) },
+    { label: "Quote expires", value: dateTime(data.quote.expiresAt) },
+    {
+      label: providerFunded ? "Provider bond free" : "Reserve free",
+      value: `${providerFunded ? data.coverage.providerBondAvailableUSDT : data.coverage.availableUSDT} USD₮0`,
+    },
+    { label: "Creation tx", value: short(data.evidence.creationTxHash), href: `${EXPLORER_TX}${data.evidence.creationTxHash}` },
+    { label: "Acceptance tx", value: short(data.evidence.acceptanceTxHash), href: `${EXPLORER_TX}${data.evidence.acceptanceTxHash}` },
+  ];
+}
+
 function showPreflightResult(data) {
   document.querySelector("#preflight-empty").hidden = true;
   document.querySelector("#preflight-output").hidden = false;
@@ -728,21 +765,7 @@ function showPreflightResult(data) {
     ? "The accepted task, signed provider policy, buyer/provider binding, enrollment window, SLA, and live provider bond all passed."
     : "The accepted task, target policy, buyer/provider binding, enrollment window, SLA, and live reserve capacity all passed.";
   paid.hidden = false;
-  renderPreflightValues([
-    { label: "Task", value: data.task.title, href: data.task.publicUrl },
-    { label: "Target", value: `${data.policy.agentName} #${data.policy.agentId}` },
-    { label: "Coverage cap", value: `${data.coverage.capUSDT} USD₮0` },
-    { label: "Service fee", value: `${data.coverage.serviceFeeUSDT} USD₮0` },
-    { label: "Deadline", value: dateTime(data.coverage.deadline) },
-    { label: "Enrollment closes", value: dateTime(data.coverage.enrollmentClosesAt) },
-    { label: "Quote expires", value: dateTime(data.quote.expiresAt) },
-    {
-      label: providerFunded ? "Provider bond free" : "Reserve free",
-      value: `${providerFunded ? data.coverage.providerBondAvailableUSDT : data.coverage.availableUSDT} USD₮0`,
-    },
-    { label: "Creation tx", value: short(data.evidence.creationTxHash), href: `${EXPLORER_TX}${data.evidence.creationTxHash}` },
-    { label: "Acceptance tx", value: short(data.evidence.acceptanceTxHash), href: `${EXPLORER_TX}${data.evidence.acceptanceTxHash}` },
-  ]);
+  renderPreflightValues(preflightValueRows(data));
   document.querySelector("#coverage-request-json").textContent = JSON.stringify(data.paidRequest, null, 2);
 }
 

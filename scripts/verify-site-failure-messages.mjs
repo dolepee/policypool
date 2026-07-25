@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { preflightMessage } from "../web/coverage-site.js";
+import { preflightMessage, preflightValueRows } from "../web/coverage-site.js";
 
 // The product site refused with a de-underscored error code for anything its
 // local map had not seen. When OKX withdrew the public task evidence, a visitor
@@ -123,4 +123,59 @@ assert.equal(
   "Something specific went wrong.",
 );
 
-console.log("PolicyPool site failure messaging verified: classified API failures reach the visitor, curated wording wins where it exists, and unclassified failures still degrade safely.");
+
+// A direct-evidence quote carries no marketplace page, so `task` is null by
+// design. The renderer read `data.task.title` unconditionally, which threw and
+// took the whole result panel with it, leaving a buyer who had just quoted
+// successfully with nothing to copy. Nothing outside a browser could catch that,
+// so the row builder is pure and exported and the null shape is asserted here.
+const directQuote = {
+  ok: true,
+  eligible: true,
+  task: null,
+  evidenceMode: "verified_onchain_evidence",
+  scopeEvidence: "verified_accepted_service_binding",
+  policy: { agentName: "Foreman", agentId: "4348" },
+  coverage: {
+    capUSDT: "0.5",
+    serviceFeeUSDT: "0.1",
+    deadline: "2026-07-25T18:00:00.000Z",
+    enrollmentClosesAt: "2026-07-25T17:50:00.000Z",
+    availableUSDT: "4.6",
+    fundingSource: "shared_reserve",
+  },
+  quote: { expiresAt: "2026-07-25T17:50:00.000Z" },
+  evidence: { creationTxHash: `0x${"c".repeat(64)}`, acceptanceTxHash: `0x${"d".repeat(64)}` },
+  paidRequest: {
+    body: {
+      targetJobId: `0x${"7".repeat(64)}`,
+      targetAcceptanceTxHash: `0x${"d".repeat(64)}`,
+    },
+  },
+};
+
+const directRows = preflightValueRows(directQuote);
+const labels = directRows.map((row) => row.label);
+assert.ok(!labels.includes("Task"), "a quote with no marketplace page must not claim a task row");
+const targetJobRow = directRows.find((row) => row.label === "Target job");
+assert.ok(targetJobRow, "a direct quote must still identify the covered job");
+assert.match(targetJobRow.value, /^0x7+…7+$/, "the target job row must show the supplied job id, shortened");
+assert.ok(
+  directRows.some((row) => row.label === "Scope proved by"),
+  "a direct quote must say scope came from the accepted-service binding, not a description",
+);
+// The public path keeps its task row exactly as before.
+const publicRows = preflightValueRows({
+  ...directQuote,
+  task: { title: "Market evidence job", publicUrl: "https://www.okx.ai/tasks/401999" },
+  scopeEvidence: "public_task_description_matched_registered_policy",
+});
+const publicTaskRow = publicRows.find((row) => row.label === "Task");
+assert.equal(publicTaskRow.value, "Market evidence job");
+assert.equal(publicTaskRow.href, "https://www.okx.ai/tasks/401999");
+assert.ok(
+  !publicRows.some((row) => row.label === "Scope proved by"),
+  "the public path's scope note is only shown where scope came from the service binding",
+);
+
+console.log("PolicyPool site messaging verified: classified failures and ordinary declines reach the visitor, curated wording wins where it exists, and a quote with no marketplace page still renders its target job.");

@@ -351,7 +351,11 @@ export function createCoveragePreflightHandler(dependencies = {}) {
       targetServiceId: input.targetServiceId,
       targetTaskReference: task?.publicTaskId,
     };
-    const guard = evaluateGuard(guardInput, policy);
+    // The buyer writes jobDescription in direct mode, so it cannot be what
+    // grants scope. verifyTargetOrder has already bound the accepted service to
+    // this policy against the escrow; that is the evidence, and the guard is
+    // told which it is holding.
+    const guard = evaluateGuard(guardInput, policy, { descriptionIsAuthenticated: !directEvidence });
     if (guard.verdict !== "ALLOW") return decline(res, guard.reason, { task, targetOrder });
 
     const providerFunded = Boolean(policy.onchainPolicyId);
@@ -458,6 +462,9 @@ export function createCoveragePreflightHandler(dependencies = {}) {
       // where the evidence came from. `evidenceMode` says which path ran.
       task,
       evidenceMode: directEvidence ? "verified_onchain_evidence" : "public_task_reference",
+      // Which evidence established that this job is inside the policy's scope.
+      // A buyer-written description never does.
+      scopeEvidence: guard.scopeEvidence,
       // Same target, buyer, policy and cap always produce the same id, so a
       // client that retries after a timeout can tell it is looking at one
       // attempt rather than two. An identity, not a lock: idempotent settlement

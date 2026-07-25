@@ -1,0 +1,358 @@
+// Pre-staged acceptance watcher for the controlled provider-failure pilot.
+//
+// Foreman #4348 is registered with a truthful 300-second SLA and a 60-second
+// enrollment window, and those numbers are not being widened to make this
+// convenient. Sixty seconds is not enough for a human to notice an acceptance,
+// find two transactions, and quote coverage. So this runs *before* the provider
+// accepts, watches the escrow from the known creation block, and has the
+// direct-evidence quote in hand the moment acceptance lands.
+//
+// What it deliberately does not do:
+//   - It never pays. It prepares the listed marketplace purchase and stops.
+//   - It never touches /api/covered-job-receipt. Paying that endpoint directly
+//     settles a valid covenant that OKX never sees, so it would not be a
+//     marketplace sale for agent #4674.
+//   - It never confirms coverage without proving the buyer paid exactly the
+//     listed fee, from the buyer's own wallet.
+//
+// Usage:
+//   node scripts/pilot-acceptance-watcher.mjs watch \
+//     --job-id 0x… --from-block 65123456 --buyer 0x… \
+//     --job-description "…" [--cap 0.5] [--target-agent Foreman#4348]
+//
+//   node scripts/pilot-acceptance-watcher.mjs confirm --receipt-id ppc-…
+//
+// Every observation is appended to an evidence log. Nothing is ever rewritten.
+
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, resolve } from "node:path";
+import { MARKETPLACE, OKX_TASK, PAYMENT, XLAYER } from "../api/lib/config.js";
+import { sha256 } from "../api/lib/utils.js";
+
+const API_BASE = process.env.POLICYPOOL_API_BASE || "https://policypool.vercel.app";
+const RPC_URL = process.env.XLAYER_RPC_URL || XLAYER.rpcUrl;
+const EVIDENCE_LOG = process.env.POLICYPOOL_PILOT_EVIDENCE
+  || resolve(homedir(), ".config/policypool/pilot-evidence.jsonl");
+const POLL_MS = Number(process.env.POLICYPOOL_PILOT_POLL_MS || 2000);
+const HOUSE_WALLET = "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7";
+
+function parseArgs(argv) {
+  const args = {};
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (!token.startsWith("--")) continue;
+    const key = token.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+    const next = argv[index + 1];
+    args[key] = !next || next.startsWith("--") ? true : next;
+  }
+  return args;
+}
+
+// Append-only by construction: the log is opened for append and never read back
+// for mutation. A pilot's evidence must not be quietly editable after the fact.
+function record(event, payload) {
+  const line = JSON.stringify({ at: new Date().toISOString(), event, ...payload });
+  mkdirSync(dirname(EVIDENCE_LOG), { recursive: true });
+  appendFileSync(EVIDENCE_LOG, `${line}\n`, { mode: 0o600 });
+  return line;
+}
+
+function readEvidence() {
+  if (!existsSync(EVIDENCE_LOG)) return [];
+  return readFileSync(EVIDENCE_LOG, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+    .filter(Boolean);
+}
+
+async function rpc(method, params) {
+  const response = await fetch(RPC_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  const body = await response.json();
+  if (body.error) throw new Error(`${method}: ${body.error.message}`);
+  return body.result;
+}
+
+const topicAddress = (topic) => `0x${String(topic).slice(26)}`.toLowerCase();
+const topicUint = (topic) => BigInt(topic);
+
+async function escrowLogs({ jobId, fromBlock }) {
+  return rpc("eth_getLogs", [{
+    address: OKX_TASK.escrow,
+    topics: [null, jobId.toLowerCase()],
+    fromBlock: `0x${BigInt(fromBlock).toString(16)}`,
+    toBlock: "latest",
+  }]);
+}
+
+// The two events a coverage quote binds to. Both are decoded here rather than
+// pattern-matched loosely, so a log that merely mentions the job cannot be
+// mistaken for its creation or its acceptance.
+function decode(logs, { jobId, buyer }) {
+  const job = jobId.toLowerCase();
+  const forJob = logs.filter((log) => log.topics[1]?.toLowerCase() === job);
+
+  const created = forJob.find((log) => log.topics[0]?.toLowerCase() === OKX_TASK.createdTopic);
+  const accepted = forJob.find((log) => log.topics[0]?.toLowerCase() === OKX_TASK.acceptedTopic);
+  const statusChanged = forJob.find((log) => (
+    log.topics[0]?.toLowerCase() === OKX_TASK.statusChangedTopic
+    && topicUint(log.topics[2]) === 0n
+    && topicUint(log.topics[3]) === 1n
+  ));
+
+  const result = {
+    creationTxHash: created?.transactionHash || null,
+    creationBlock: created ? Number(BigInt(created.blockNumber)) : null,
+    onChainBuyer: created ? topicAddress(created.topics[2]) : null,
+    acceptanceTxHash: accepted?.transactionHash || null,
+    acceptanceBlock: accepted ? Number(BigInt(accepted.blockNumber)) : null,
+    provider: accepted ? topicAddress(accepted.topics[2]) : null,
+    statusChangedTxHash: statusChanged?.transactionHash || null,
+  };
+
+  // The escrow moves the job to accepted and emits the accepted event; a quote
+  // needs the transaction carrying the acceptance evidence. Requiring both to
+  // agree stops a status flip in one transaction being paired with acceptance
+  // details from another.
+  result.acceptanceConsistent = Boolean(
+    result.acceptanceTxHash
+    && result.statusChangedTxHash
+    && result.acceptanceTxHash.toLowerCase() === result.statusChangedTxHash.toLowerCase(),
+  );
+  result.buyerMatches = Boolean(
+    result.onChainBuyer && buyer && result.onChainBuyer === buyer.toLowerCase(),
+  );
+  return result;
+}
+
+// The attempt key the plan asks for: buyer, target job, policy hash, cap. A
+// restart recomputes the same key and resumes the same attempt rather than
+// opening a second one.
+function attemptKey({ buyer, jobId, policyHash, capAtomic }) {
+  return `ppa-${sha256([
+    String(buyer).toLowerCase(),
+    String(jobId).toLowerCase(),
+    String(policyHash),
+    String(capAtomic),
+  ].join("|")).slice(0, 24)}`;
+}
+
+async function preflight(body) {
+  const response = await fetch(`${API_BASE}/api/coverage-preflight`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, payload: await response.json() };
+}
+
+function usdt(atomic) {
+  const raw = BigInt(atomic);
+  const unit = 10n ** BigInt(PAYMENT.decimals);
+  const fraction = (raw % unit).toString().padStart(PAYMENT.decimals, "0").replace(/0+$/, "");
+  return `${raw / unit}.${fraction.padEnd(2, "0")}`;
+}
+
+async function watch(args) {
+  const jobId = String(args.jobId || "").toLowerCase();
+  const buyer = String(args.buyer || "").toLowerCase();
+  const fromBlock = args.fromBlock;
+  const jobDescription = String(args.jobDescription || "");
+  const cap = String(args.cap || "0.5");
+  const targetAgent = String(args.targetAgent || "Foreman#4348");
+
+  if (!/^0x[a-f0-9]{64}$/.test(jobId)) throw new Error("--job-id must be a bytes32 hash");
+  if (!/^0x[a-f0-9]{40}$/.test(buyer)) throw new Error("--buyer must be an address");
+  if (!fromBlock || fromBlock === true) throw new Error("--from-block is required");
+  if (!jobDescription) throw new Error("--job-description is required");
+  if (buyer === HOUSE_WALLET) {
+    throw new Error("--buyer is the PolicyPool owner wallet; this pilot exists to pay someone else");
+  }
+
+  console.log(`watching escrow ${OKX_TASK.escrow} for job ${jobId} from block ${fromBlock}`);
+  console.log(`buyer ${buyer} (confirmed not the house wallet)`);
+  console.log(`evidence log: ${EVIDENCE_LOG}\n`);
+  record("watch_started", { jobId, buyer, fromBlock: String(fromBlock), targetAgent, cap });
+
+  let announcedCreation = false;
+  for (;;) {
+    let events;
+    try {
+      events = decode(await escrowLogs({ jobId, fromBlock }), { jobId, buyer });
+    } catch (error) {
+      // A transient RPC failure must not end a watch that may have one minute
+      // of enrollment window left.
+      console.error(`rpc error, retrying: ${error.message}`);
+      await new Promise((r) => setTimeout(r, POLL_MS));
+      continue;
+    }
+
+    if (events.creationTxHash && !announcedCreation) {
+      announcedCreation = true;
+      console.log(`creation seen  block ${events.creationBlock}  tx ${events.creationTxHash}`);
+      if (!events.buyerMatches) {
+        record("buyer_mismatch", { jobId, expected: buyer, onChain: events.onChainBuyer });
+        throw new Error(
+          `the job was created by ${events.onChainBuyer}, not ${buyer}; coverage would be refused`,
+        );
+      }
+      record("creation_observed", {
+        jobId,
+        creationTxHash: events.creationTxHash,
+        creationBlock: events.creationBlock,
+        onChainBuyer: events.onChainBuyer,
+      });
+    }
+
+    if (events.acceptanceTxHash && events.acceptanceConsistent) {
+      console.log(`ACCEPTED       block ${events.acceptanceBlock}  tx ${events.acceptanceTxHash}`);
+      console.log(`provider       ${events.provider}\n`);
+      record("acceptance_observed", {
+        jobId,
+        acceptanceTxHash: events.acceptanceTxHash,
+        acceptanceBlock: events.acceptanceBlock,
+        provider: events.provider,
+      });
+
+      const body = {
+        targetAgent,
+        targetJobId: jobId,
+        targetCreationTxHash: events.creationTxHash,
+        targetAcceptanceTxHash: events.acceptanceTxHash,
+        targetBuyer: buyer,
+        jobDescription,
+        requestedCoverageUSDT: cap,
+      };
+      const { status, payload } = await preflight(body);
+      record("preflight_result", { status, eligible: payload.eligible === true, payload });
+
+      if (payload.eligible !== true) {
+        console.error(`preflight refused: ${payload.reason || payload.error}`);
+        console.error(payload.message || "");
+        console.error(payload.nextAction || "");
+        console.error("\nnothing was charged and no receipt exists. abort and restart with a fresh job.");
+        process.exitCode = 1;
+        return;
+      }
+
+      const key = attemptKey({
+        buyer,
+        jobId,
+        policyHash: payload.policy?.policyHash,
+        capAtomic: payload.coverage?.approvedCoverageCapAtomic,
+      });
+      const priorAttempt = readEvidence().find(
+        (entry) => entry.event === "purchase_prepared" && entry.attemptKey === key,
+      );
+      record("purchase_prepared", {
+        attemptKey: key,
+        serverAttemptId: payload.coverageAttemptId || null,
+        resumed: Boolean(priorAttempt),
+        deadline: payload.coverage?.deadline,
+        enrollmentClosesAt: payload.coverage?.enrollmentClosesAt,
+        body,
+      });
+
+      console.log("=".repeat(72));
+      console.log(priorAttempt
+        ? `RESUMING attempt ${key} (already prepared at ${priorAttempt.at})`
+        : `attempt ${key}`);
+      if (payload.coverageAttemptId && payload.coverageAttemptId !== key) {
+        console.log(`note: server attempt id ${payload.coverageAttemptId} differs from local key`);
+      }
+      console.log("=".repeat(72));
+      console.log(`cap approved   ${usdt(payload.coverage.approvedCoverageCapAtomic)} ${PAYMENT.symbol}`);
+      console.log(`fee to pay     ${usdt(payload.coverage.coverageServiceFeeAtomic)} ${PAYMENT.symbol}`);
+      console.log(`bound by       ${payload.coverage.capBoundReason}`);
+      console.log(`deadline       ${payload.coverage.deadline}`);
+      console.log(`enrol closes   ${payload.coverage.enrollmentClosesAt}`);
+      console.log(`\n${payload.coverage.summary}\n`);
+      console.log(`BUY THROUGH THE LISTED SERVICE, not the HTTP endpoint:`);
+      console.log(`  agent    #${MARKETPLACE.agentId}   ${MARKETPLACE.agentUrl}`);
+      console.log(`  service  #${MARKETPLACE.serviceId}`);
+      console.log(`  payer    ${payload.paidRequest?.payerMustEqualTargetBuyer || buyer}`);
+      console.log(`\ntask payload:\n${JSON.stringify(body, null, 2)}\n`);
+      console.log(`A direct payment to /api/covered-job-receipt would settle a valid`);
+      console.log(`covenant that OKX never records as a sale for agent #${MARKETPLACE.agentId}.\n`);
+      console.log(`once purchased:  node scripts/pilot-acceptance-watcher.mjs confirm --receipt-id ppc-…`);
+      return;
+    }
+
+    await new Promise((r) => setTimeout(r, POLL_MS));
+  }
+}
+
+// Coverage is only treated as live once the buyer has demonstrably paid the
+// listed fee, exactly, from their own wallet. A receipt that exists is not the
+// same as a receipt the external buyer paid for.
+async function confirm(args) {
+  const receiptId = String(args.receiptId || "");
+  if (!/^ppc-[a-f0-9]{16}$/.test(receiptId)) throw new Error("--receipt-id must look like ppc-<16 hex>");
+
+  const response = await fetch(`${API_BASE}/api/coverage-status?receiptId=${encodeURIComponent(receiptId)}`);
+  const payload = await response.json();
+  record("confirm_status", { receiptId, status: response.status, payload });
+
+  const receipt = payload.receipt || {};
+  const fee = receipt.servicePayment || {};
+  const buyer = String(receipt.targetJob?.buyer || receipt.buyer || "").toLowerCase();
+  const feeAtomic = String(fee.amountAtomic ?? "");
+  const problems = [];
+
+  if (payload.state !== "active") problems.push(`state is ${payload.state}, expected active`);
+  if (payload.coverageState !== "COVERAGE_ACTIVE") {
+    problems.push(`coverageState is ${payload.coverageState}, expected COVERAGE_ACTIVE`);
+  }
+  if (feeAtomic !== String(PAYMENT.amountAtomic)) {
+    problems.push(`fee paid was ${feeAtomic || "unknown"} atomic, expected exactly ${PAYMENT.amountAtomic}`);
+  }
+  if (!buyer) problems.push("the receipt does not name a buyer wallet");
+  else if (buyer === HOUSE_WALLET) problems.push(`buyer is the house wallet ${HOUSE_WALLET}`);
+
+  console.log(`receipt        ${receiptId}`);
+  console.log(`state          ${payload.state} / ${payload.coverageState}`);
+  console.log(`buyer          ${buyer || "(absent)"}`);
+  console.log(`fee paid       ${feeAtomic ? `${usdt(feeAtomic)} ${PAYMENT.symbol}` : "(absent)"}`);
+  console.log(`liability      ${payload.liabilityAtomic ? usdt(payload.liabilityAtomic) : "(absent)"} ${PAYMENT.symbol}`);
+  console.log(`deadline       ${payload.reconciliation?.deadline || "(absent)"}`);
+
+  if (problems.length > 0) {
+    record("confirm_failed", { receiptId, problems });
+    console.error(`\nNOT CONFIRMED:`);
+    for (const problem of problems) console.error(`  - ${problem}`);
+    console.error(`\nDo not withhold delivery until this passes.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  record("confirm_passed", { receiptId, buyer, feeAtomic, deadline: payload.reconciliation?.deadline });
+  console.log(`\nCONFIRMED. An independent buyer paid exactly ${usdt(feeAtomic)} ${PAYMENT.symbol} and coverage is live.`);
+  console.log(`Public verifier: ${API_BASE}/proof/receipt?id=${receiptId}`);
+  console.log(`\nNow withhold Foreman delivery. After the deadline:`);
+  console.log(`  npm run ops:breach:check  -- --receipt-id ${receiptId}`);
+  console.log(`  npm run ops:breach:settle -- --receipt-id ${receiptId}`);
+  console.log(`\nThen decode the payout Transfer log and check the recipient is ${buyer},`);
+  console.log(`not ${HOUSE_WALLET}.`);
+}
+
+const [command, ...rest] = process.argv.slice(2);
+const args = parseArgs(rest);
+try {
+  if (command === "watch") await watch(args);
+  else if (command === "confirm") await confirm(args);
+  else {
+    console.error("usage: pilot-acceptance-watcher.mjs <watch|confirm> [options]");
+    console.error("  watch   --job-id 0x… --from-block N --buyer 0x… --job-description \"…\" [--cap 0.5]");
+    console.error("  confirm --receipt-id ppc-…");
+    process.exitCode = 2;
+  }
+} catch (error) {
+  record("fatal", { command, message: error instanceof Error ? error.message : String(error) });
+  console.error(`\n${error instanceof Error ? error.message : String(error)}`);
+  process.exitCode = 1;
+}

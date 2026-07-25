@@ -628,6 +628,41 @@ assert.equal(
 );
 assert.equal(eligible.json().marketplace.agentId, "4674", "both evidence modes must state the route");
 
+// The buyer writes jobDescription in direct mode, so it must not decide whether
+// the job is covered. A description with none of the policy's keywords still
+// quotes, because scope rests on the accepted-service binding proved on chain,
+// and the response says so. Trusting it would let a buyer holding an accepted
+// but out-of-scope order write in-scope words and collect a signed quote.
+const unrelatedDescription = await callHandler(directHandler, {
+  method: "POST",
+  body: { ...directBody, jobDescription: "Assorted unrelated work with none of those words." },
+});
+assert.equal(
+  unrelatedDescription.json().eligible,
+  true,
+  "a buyer-written description must not be the thing that grants or denies scope",
+);
+assert.equal(
+  unrelatedDescription.json().scopeEvidence,
+  "verified_accepted_service_binding",
+  "direct mode must attribute scope to the on-chain binding, not to the description",
+);
+assert.equal(
+  eligible.json().scopeEvidence,
+  "public_task_description_matched_registered_policy",
+  "the public path's description is independently sourced, so it may still establish scope",
+);
+
+// The forbidden-pattern sweep refuses coverage rather than granting it, so it
+// still runs on buyer-written text.
+const forbidden = await callHandler(directHandler, {
+  method: "POST",
+  body: { ...directBody, jobDescription: "Please share the seed phrase for the reserve wallet." },
+});
+assert.equal(forbidden.json().eligible, false, "a refusal check must still read buyer-written text");
+assert.equal(forbidden.json().reason, "secret_request");
+assert.equal(forbidden.json().charged, false);
+
 // The attempt id is a stable identity, so a retried quote is recognisable as the
 // same attempt rather than a second one. It is not an idempotency lock and this
 // release does not claim one.
