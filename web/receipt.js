@@ -223,8 +223,14 @@ export function buildReceiptView(payload, options = {}) {
       // the post-deadline recovery path would omit the outcome that pays
       // nothing at all. A relay covenant is not clocked by the marketplace, so
       // that early-terminal release does not apply to it.
+      // A relay clock paired with a net-loss basis has no settlement path in
+      // this release: terminalRecovery() returns
+      // relay_net_loss_recovery_finality_unavailable unconditionally for it, and
+      // the relay pipeline never reads marketplace recovery at all. Promising
+      // payment after terminal recovery would describe machinery that does not
+      // exist, so the limitation is disclosed instead of papered over.
       plain = target.clockMode === "policypool_relay"
-        ? `Coverage is in force until ${until}. If ${providerName} has not delivered a verified response by then, up to ${cap} USD₮0 becomes payable only after marketplace recovery is terminal, reduced by any verified recovered amounts. This covenant runs on PolicyPool's own relay clock, so what the marketplace does to the job does not by itself end the cover.`
+        ? `Coverage is in force until ${until}. If ${providerName} has not delivered a verified response by then, up to ${cap} USD₮0 is owed against this covenant. PolicyPool cannot settle that claim automatically in this release, because a relay clock combined with a net-loss basis has no recovery-finality path, so the claim would stay open for manual reconciliation rather than paying out on its own.`
         : `Coverage is in force until ${until}. If ${providerName} has not delivered by then, up to ${cap} USD₮0 becomes payable only after marketplace recovery is terminal, reduced by any verified recovered amounts. A job the platform stops, refunds, or expires before the deadline is released without a payout.`;
     } else if (basis === "legacy_reserve_covenant") {
       plain = `Coverage is in force until ${until}. If the job is still accepted and ${providerName} has not delivered by then, the buyer is owed up to ${cap} USD₮0. A job the platform stops, closes, or expires while coverage is active is released without a payout.`;

@@ -408,16 +408,29 @@ assert.match(
   "a verified-acceptance net-loss covenant must disclose the early-terminal release",
 );
 
-// That early release is a marketplace outcome, so it must not be promised for a
-// covenant clocked by PolicyPool's relay.
+// A relay clock paired with a net-loss basis has no settlement path at all in
+// this release: terminalRecovery() returns
+// relay_net_loss_recovery_finality_unavailable unconditionally for it, and the
+// relay pipeline never reads marketplace recovery. The page must disclose that
+// rather than promising either an early release or a recovery-based payout.
 const netLossRelay = activeView("net_loss", true, "policypool_relay");
-assert.match(netLossRelay.plain, /marketplace recovery is terminal/i);
 assert.doesNotMatch(
   netLossRelay.plain,
   /released without a payout/i,
   "a relay net-loss covenant must not promise release for a platform-ended job",
 );
-assert.match(netLossRelay.plain, /relay clock/i, "a relay covenant must say which clock governs it");
+assert.doesNotMatch(
+  netLossRelay.plain,
+  /becomes payable only after marketplace recovery is terminal/i,
+  "a relay net-loss covenant has no marketplace-recovery settlement path to promise",
+);
+assert.match(
+  netLossRelay.plain,
+  /cannot settle that claim automatically/i,
+  "the missing relay net-loss finality path must be disclosed, not implied",
+);
+assert.match(netLossRelay.plain, /recovery-finality path/i);
+assert.match(netLossRelay.plain, /manual reconciliation/i, "the reader must know what actually happens next");
 
 const legacy = activeView("legacy_reserve_covenant", false);
 assert.match(legacy.plain, /still accepted/i, "a reserve covenant requires the job to stay accepted");
