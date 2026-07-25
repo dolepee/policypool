@@ -5,7 +5,14 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { COVERAGE, PAYMENT } from "../api/lib/config.js";
-import { buyerAddress, decodeAcceptedTask, houseWallets, marketplaceProblems, paymentRoute } from "./pilot-acceptance-watcher.mjs";
+import {
+  buyerAddress,
+  canonicalAgentLabel,
+  decodeAcceptedTask,
+  houseWallets,
+  marketplaceProblems,
+  paymentRoute,
+} from "./pilot-acceptance-watcher.mjs";
 
 const HOUSE = "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7";
 const KEJI = "0x52e19669d7b199531bf689f7ec943632bd211b75";
@@ -96,6 +103,26 @@ assert.equal(houseWallets([undefined, null, "", "nope", 42]).size, configured.si
   "non-addresses must be dropped rather than added to the exclusion set");
 // Casing must not decide independence.
 assert.ok(houseWallets([PAYMENT.payTo.toUpperCase().replace("0X", "0x")]).has(PAYMENT.payTo.toLowerCase()));
+
+// The watcher accepts aliases, ids and service ids, while receipts report the
+// canonical directory identity. The successful preflight is the authority for
+// that identity, so the evidence log must store AgentName#AgentId regardless of
+// the spelling supplied on the CLI.
+assert.equal(
+  canonicalAgentLabel({ agentName: "Foreman", agentId: "4348" }),
+  "Foreman#4348",
+  "the canonical target must come from the resolved preflight policy",
+);
+assert.throws(
+  () => canonicalAgentLabel({ agentName: "Foreman" }),
+  /canonical target agent/,
+  "an eligible response without a complete canonical identity must fail closed",
+);
+assert.throws(
+  () => canonicalAgentLabel({ agentId: "4348" }),
+  /canonical target agent/,
+  "an agent id alone is not the canonical identity a receipt reports",
+);
 
 // Marketplace attribution. A receipt is identical whether the buyer used the
 // listed service or paid /api/covered-job-receipt directly: same state, fee,
@@ -415,6 +442,36 @@ assert.match(
   bindingsBlock,
   /expectedServiceType:\s*"A2MCP"/,
   "confirm must declare PolicyPool's actual listing type, not merely some type",
+);
+// The supplied marketplace task buys PolicyPool's listing, not the covered
+// provider's service. Binding acceptance to receipt.target.providerWallet makes
+// every non-PolicyPool target fail even when the coverage purchase is genuine.
+assert.match(
+  bindingsBlock,
+  /expectedProvider:\s*PAYMENT\.payTo/,
+  "marketplace acceptance must bind to PolicyPool's configured listing wallet",
+);
+assert.doesNotMatch(
+  bindingsBlock,
+  /expectedProvider:\s*receipt\.target\?\.providerWallet/,
+  "the covered provider wallet must not stand in for PolicyPool's listing wallet",
+);
+// Pin the canonical identity to the append-only purchase_prepared record. A
+// helper that is correct but never feeds the persisted body leaves confirmation
+// comparing the raw alias and reproduces the original defect.
+const preparedRecord = confirmSource.match(
+  /record\("purchase_prepared", \{[\s\S]*?\n      \}\);/,
+)?.[0] || "";
+assert.ok(preparedRecord, "watch must append a purchase_prepared record");
+assert.match(
+  preparedRecord,
+  /body:\s*\{\s*\.\.\.body,\s*targetAgent:\s*canonicalTargetAgent\s*\}/,
+  "the prepared attempt must persist the canonical target returned by preflight",
+);
+assert.match(
+  preparedRecord,
+  /requestedTargetAgent:\s*targetAgent/,
+  "the raw CLI target should remain available as audit context",
 );
 // And the route must be classified against the task it is meant to attribute.
 // Calling paymentRoute without the task id makes every escrow log look like

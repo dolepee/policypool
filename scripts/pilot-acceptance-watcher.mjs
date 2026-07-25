@@ -179,6 +179,20 @@ export function buyerAddress(...candidates) {
   return "";
 }
 
+// The CLI accepts aliases, ids, service ids and case-insensitive names, but the
+// receipt reports the directory's canonical AgentName#AgentId identity. Persist
+// that canonical value from the successful preflight so confirmation compares
+// like with like instead of rejecting a valid receipt because the operator used
+// an alias such as "4348".
+export function canonicalAgentLabel(policy) {
+  const agentId = String(policy?.agentId || "").trim();
+  const agentName = String(policy?.agentName || "").trim();
+  if (!agentId || !agentName) {
+    throw new Error("eligible preflight did not return a canonical target agent");
+  }
+  return `${agentName}#${agentId}`;
+}
+
 // A coverage payment and a marketplace purchase are distinguishable on chain,
 // and this was verified against real transactions before it was relied on. The
 // one external coverage purchase to date settled as an EIP-3009
@@ -456,6 +470,7 @@ async function watch(args) {
         return;
       }
 
+      const canonicalTargetAgent = canonicalAgentLabel(payload.policy);
       const key = attemptKey({
         buyer,
         jobId,
@@ -471,7 +486,8 @@ async function watch(args) {
         resumed: Boolean(priorAttempt),
         deadline: payload.coverage?.deadline,
         enrollmentClosesAt: payload.coverage?.enrollmentClosesAt,
-        body,
+        requestedTargetAgent: targetAgent,
+        body: { ...body, targetAgent: canonicalTargetAgent },
         paidRequestBody: payload.paidRequest?.body || null,
         quoteId: payload.paidRequest?.body?.quoteId || null,
       });
@@ -660,7 +676,11 @@ async function confirm(args) {
     created: createdTask,
     accepted: acceptedTask,
     expectedAgentId: MARKETPLACE.agentId,
-    expectedProvider: receipt.target?.providerWallet || null,
+    // The marketplace task is the purchase of PolicyPool's coverage listing,
+    // so its accepted event names PolicyPool's configured provider wallet. The
+    // covered target's provider wallet belongs to the separate job being
+    // protected and is used only by the independence and withholding checks.
+    expectedProvider: PAYMENT.payTo,
     expectedFeeAtomic: PAYMENT.amountAtomic,
     expectedAsset: PAYMENT.asset,
     expectedServiceType: "A2MCP",
