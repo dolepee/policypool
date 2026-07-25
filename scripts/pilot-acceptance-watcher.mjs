@@ -353,16 +353,28 @@ async function confirm(args) {
   // Confirming any active receipt paid by some non-house wallet would green-light
   // withholding delivery on a job this pilot never watched. The prepared attempt
   // is the authority on which job, buyer and agent are in scope.
-  // Several attempts can sit in the log across restarts or aborted runs. Taking
-  // the last one would compare this receipt against whichever attempt happened
-  // to be prepared most recently, which is not necessarily the one it belongs to.
+  // Several attempts can sit in the log: restarts, aborted runs, or a re-quote
+  // after changing the cap. Selecting by job alone picks the oldest of those and
+  // then fails its own key comparison against a receipt a later attempt matches
+  // exactly. Compute the receipt's key first and select by that, so a valid
+  // receipt is recognised whichever attempt produced it.
   const preparedAttempts = readEvidence().filter((entry) => entry.event === "purchase_prepared");
   const receiptJobForMatch = String(
     payload.receipt?.targetJob?.jobId || payload.receipt?.target?.jobId || "",
   ).toLowerCase();
-  const prepared = preparedAttempts.find(
-    (entry) => String(entry.body?.targetJobId || "").toLowerCase() === receiptJobForMatch,
-  ) || preparedAttempts.at(-1);
+  const receiptAttemptKey = attemptKey({
+    buyer: String(payload.receipt?.targetJob?.buyer || payload.receipt?.buyer || "").toLowerCase(),
+    jobId: receiptJobForMatch,
+    policyHash: payload.receipt?.target?.policyHash,
+    capAtomic: payload.receipt?.covenant?.coverageCapAtomic,
+  });
+  const prepared = preparedAttempts.find((entry) => entry.attemptKey === receiptAttemptKey)
+    // No exact match: fall back to a same-job attempt purely so the refusal can
+    // say which covenant differs, rather than reporting nothing to compare.
+    || preparedAttempts.find(
+      (entry) => String(entry.body?.targetJobId || "").toLowerCase() === receiptJobForMatch,
+    )
+    || preparedAttempts.at(-1);
   if (!prepared) {
     problems.push("no watched attempt found in the evidence log; run `watch` first");
   } else {
@@ -387,12 +399,7 @@ async function confirm(args) {
     // exactly those four things, so recompute it from the receipt and require
     // equality rather than comparing a subset.
     if (prepared.attemptKey) {
-      const receiptKey = attemptKey({
-        buyer,
-        jobId: receiptJob,
-        policyHash: receipt.target?.policyHash,
-        capAtomic: receipt.covenant?.coverageCapAtomic,
-      });
+      const receiptKey = receiptAttemptKey;
       if (receiptKey !== prepared.attemptKey) {
         problems.push(
           `receipt attempt ${receiptKey} is not the prepared attempt ${prepared.attemptKey}`

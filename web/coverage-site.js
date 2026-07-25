@@ -661,7 +661,15 @@ async function hydrateUniversalProviders() {
         const option = document.createElement("option");
         option.value = String(policy.agentId);
         option.dataset.serviceId = String(policy.serviceId);
-        option.textContent = `${policy.agentName} #${policy.agentId} · ${policy.serviceName}`;
+        // An enrolled A2A covenant is reconciled from the withdrawn public task
+        // page, so neither evidence mode can cover it. Offering it selectable
+        // would walk a buyer through gathering every transaction only to be
+        // refused at the end.
+        const unreachable = String(policy.serviceType || "").toUpperCase() === "A2A";
+        option.disabled = unreachable;
+        option.textContent = unreachable
+          ? `${policy.agentName} #${policy.agentId} · ${policy.serviceName} — unavailable while OKX withholds task evidence`
+          : `${policy.agentName} #${policy.agentId} · ${policy.serviceName}`;
         target.insertBefore(option, custom || null);
       }
     }

@@ -78,6 +78,26 @@ for (const receiptId of ["ppc-6c3d1dbe749cca96", "ppc-136a34aee2022a42", "ppc-5e
 assert.match(coverageScript, /data-copy-link/, "shared product script must support copyable public proof links");
 assert.match(coverageScript, /Provider bond free/, "universal preflight results must identify provider-bond funding");
 
+// An enrolled A2A covenant is reconciled from the withdrawn public task page, so
+// neither evidence mode can cover it. Listing such a provider as selectable
+// walks a buyer through gathering every transaction only to be refused at the
+// end, so the option is disabled and says why.
+assert.match(
+  coverageScript,
+  /serviceType \|\| ""\)\.toUpperCase\(\) === "A2A"/,
+  "enrolled A2A providers must be identified before being offered",
+);
+assert.match(
+  coverageScript,
+  /option\.disabled = unreachable/,
+  "an unreachable provider must not be selectable",
+);
+assert.match(
+  coverageScript,
+  /unavailable while OKX withholds task evidence/,
+  "a disabled provider must say why it is unavailable",
+);
+
 const coverage = await readFile(new URL("../web/coverage.html", import.meta.url), "utf8");
 assert.match(
   coverage,
@@ -117,8 +137,22 @@ assert.match(evidenceNotice, /in either form/, "the notice must cover public tas
 // down.
 assert.match(
   evidenceNotice,
-  /still fully available|still available/i,
+  /still available below for most providers/i,
   "the notice must say coverage can still be bought here, not merely that a path is gone",
+);
+// It must not claim availability without qualification: enrolled v0.4 A2A
+// policies cannot be covered at all while their reconciliation reads the
+// withdrawn page.
+assert.doesNotMatch(
+  evidenceNotice,
+  /fully available/i,
+  "availability must be qualified, since enrolled A2A policies cannot be covered",
+);
+assert.match(evidenceNotice, /A2A service are the exception/i, "the notice must name the exception");
+assert.match(
+  evidenceNotice,
+  /will not sell what it cannot settle/i,
+  "the notice must say why those providers are refused rather than merely that they are",
 );
 
 // The notice must not present the buyer's own description as something
