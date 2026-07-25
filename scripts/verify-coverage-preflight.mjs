@@ -538,6 +538,75 @@ assert.deepEqual(
 );
 assert.equal(direct.json().paidRequest.body.targetJobId, DIRECT_JOB_ID);
 assert.equal(direct.json().paidRequest.body.jobDescription, DIRECT_DESCRIPTION);
+
+// A v0.4 A2A policy still requires a public task reference. The page being
+// unreadable does not mean the buyer forgot their task id, and refusing to carry
+// it would leave enrolled A2A providers with no usable preflight at all: the
+// public mode is advertised unavailable and this one would decline every time
+// with public_task_reference_required_for_universal_a2a.
+const universalDirectHandler = createCoveragePreflightHandler({
+  chain: {
+    ...universalChain,
+    async verifyTargetOrder(args) {
+      return { ...(await chain.verifyTargetOrder(args)), jobId: args.jobId, buyer: args.buyer };
+    },
+    async resolveTargetOrderEvidence() {
+      throw new Error("direct evidence must not resolve through the public task index");
+    },
+  },
+  ledger,
+  policyResolver: { async resolve() { return { policy: universalPolicy, source: "v0.4_provider_enrollment_registry" }; } },
+  taskFetcher: async () => { throw new Error("the public page must not be fetched in direct mode"); },
+  now: () => Date.parse("2026-07-11T10:02:00.000Z"),
+  quoteSecret: QUOTE_SECRET,
+});
+
+const universalDirectWithout = await callHandler(universalDirectHandler, {
+  method: "POST",
+  body: { ...directBody, targetAgent: "3465", targetServiceId: "30019" },
+});
+assert.equal(
+  universalDirectWithout.json().reason,
+  "public_task_reference_required_for_universal_a2a",
+  "a v0.4 A2A policy must still insist on a public task reference",
+);
+assert.equal(universalDirectWithout.json().charged, false);
+
+const universalDirect = await callHandler(universalDirectHandler, {
+  method: "POST",
+  headers: { host: "policypool.test" },
+  body: {
+    ...directBody,
+    targetAgent: "3465",
+    targetServiceId: "30019",
+    taskReference: task.publicUrl,
+  },
+});
+assert.equal(
+  universalDirect.json().eligible,
+  true,
+  "supplying the task reference alongside direct evidence must satisfy the A2A requirement",
+);
+assert.equal(universalDirect.json().evidenceMode, "verified_onchain_evidence");
+assert.equal(
+  universalDirect.json().paidRequest.body.targetTaskReference,
+  task.publicTaskId,
+  "the reference must reach the paid request, normalised from the URL the caller gave",
+);
+assert.equal(
+  universalDirect.json().task,
+  null,
+  "accepting a reference must not mean the withdrawn page was read",
+);
+
+// A malformed reference is refused rather than passed through as junk.
+const badReference = await callHandler(universalDirectHandler, {
+  method: "POST",
+  body: { ...directBody, targetAgent: "3465", targetServiceId: "30019", taskReference: "https://example.com/tasks/1" },
+});
+assert.equal(badReference.statusCode, 422);
+assert.equal(badReference.json().error, "okx_task_host_not_allowed");
+assert.equal(badReference.json().charged, false);
 assert.equal(
   "targetTaskReference" in direct.json().paidRequest.body,
   false,

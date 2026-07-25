@@ -1,7 +1,7 @@
 import { COVERAGE, MARKETPLACE, PAYMENT, XLAYER } from "./lib/config.js";
 import { createChainService, EvidenceError } from "./lib/chain.js";
 import { createLedger } from "./lib/ledger.js";
-import { fetchOkxTaskPage, OkxTaskPageError } from "./lib/okx-task-page.js";
+import { fetchOkxTaskPage, OkxTaskPageError, parseOkxTaskReference } from "./lib/okx-task-page.js";
 import {
   createQuoteService,
   QuoteConfigurationError,
@@ -303,6 +303,23 @@ export function createCoveragePreflightHandler(dependencies = {}) {
     // id, asset, amount, service type and accepted-service hash. Nothing the
     // caller asserts is taken on trust: a wrong buyer wallet, a forged hash, a
     // reverted transaction, or a job that is not accepted all fail there.
+    // A v0.4 A2A policy still requires a public task reference, and the page
+    // being unreadable does not mean the buyer has forgotten their task id. Take
+    // it when offered so enrolled A2A providers keep a usable path; without this
+    // every such request declines with public_task_reference_required_for_universal_a2a
+    // while the public mode is advertised unavailable, which is no path at all.
+    let publicTaskReference = task?.publicTaskId || null;
+    if (directEvidence && input.taskReference) {
+      try {
+        publicTaskReference = String(parseOkxTaskReference(input.taskReference));
+      } catch (error) {
+        return sendJson(res, 422, {
+          ok: false,
+          error: error instanceof OkxTaskPageError ? error.code : "okx_task_reference_invalid",
+          charged: false,
+        });
+      }
+    }
     const jobId = directEvidence ? input.targetJobId : task.jobId;
     const jobDescription = directEvidence ? input.jobDescription : task.description;
     let evidence;
@@ -349,7 +366,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
       jobDescription,
       requestedCoverageAtomic: input.requestedCoverageAtomic,
       targetServiceId: input.targetServiceId,
-      targetTaskReference: task?.publicTaskId,
+      targetTaskReference: publicTaskReference,
     };
     const guard = evaluateGuard(guardInput, policy);
     if (guard.verdict !== "ALLOW") return decline(res, guard.reason, { task, targetOrder });
@@ -421,7 +438,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
       // Omitted entirely in direct mode rather than sent empty: there is no
       // public task reference to record, and a blank one would read as a lookup
       // that was attempted and returned nothing.
-      ...(task?.publicTaskId ? { targetTaskReference: task.publicTaskId } : {}),
+      ...(publicTaskReference ? { targetTaskReference: publicTaskReference } : {}),
       jobDescription,
       requestedCoverageUSDT: formatUsdtAtomic(coverageCapAtomic, PAYMENT.decimals),
     };

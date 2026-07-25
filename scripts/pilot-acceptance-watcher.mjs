@@ -355,6 +355,25 @@ async function confirm(args) {
     if (expectedAgent && receiptAgent && receiptAgent !== expectedAgent) {
       problems.push(`receipt covers ${receiptAgent}, the watched attempt was ${expectedAgent}`);
     }
+    // Job, buyer and agent can all match while the covenant differs: a different
+    // approved cap, or a policy revised between the quote and the purchase, is a
+    // different covenant than the one prepared. The attempt key already spans
+    // exactly those four things, so recompute it from the receipt and require
+    // equality rather than comparing a subset.
+    if (prepared.attemptKey) {
+      const receiptKey = attemptKey({
+        buyer,
+        jobId: receiptJob,
+        policyHash: receipt.target?.policyHash,
+        capAtomic: receipt.covenant?.coverageCapAtomic,
+      });
+      if (receiptKey !== prepared.attemptKey) {
+        problems.push(
+          `receipt attempt ${receiptKey} is not the prepared attempt ${prepared.attemptKey}`
+          + ` (policy ${receipt.target?.policyHash || "unknown"}, cap ${receipt.covenant?.coverageCapAtomic || "unknown"})`,
+        );
+      }
+    }
   }
 
   if (payload.state !== "active") problems.push(`state is ${payload.state}, expected active`);
