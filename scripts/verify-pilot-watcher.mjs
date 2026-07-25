@@ -4,7 +4,8 @@
 // makes. This checks the guard can actually reach that conclusion.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { buyerAddress, decodeAcceptedTask, marketplaceProblems, paymentRoute } from "./pilot-acceptance-watcher.mjs";
+import { COVERAGE, PAYMENT } from "../api/lib/config.js";
+import { buyerAddress, decodeAcceptedTask, houseWallets, marketplaceProblems, paymentRoute } from "./pilot-acceptance-watcher.mjs";
 
 const HOUSE = "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7";
 const KEJI = "0x52e19669d7b199531bf689f7ec943632bd211b75";
@@ -71,6 +72,30 @@ assert.equal(decoded.asset, "0x779ded0c9e1022225f8e0630b35a9b54be713736", "the a
 assert.equal(decoded.amountAtomic, "500000", "the escrowed amount is the third word");
 assert.equal(decodeAcceptedTask({ data: "0x", topics: [] }), null, "a log with no payload must not decode");
 assert.equal(decodeAcceptedTask(undefined), null, "a missing log must not throw");
+
+// Buyer independence is the pilot's primary claim, so the wallets it must not be
+// come from the running configuration. POLICYPOOL_PAY_TO and
+// POLICYPOOL_RESERVE_WALLET are environment overrides; against a hard-coded
+// address, a receipt paid by the configured PolicyPool wallet would pass as an
+// independent buyer and invalidate the one thing the pilot proves.
+const configured = houseWallets();
+assert.ok(configured.size > 0, "the exclusion set must not be empty, or every buyer looks independent");
+for (const address of configured) {
+  assert.match(address, /^0x[a-f0-9]{40}$/, "excluded wallets must be normalised addresses");
+}
+assert.ok(configured.has(PAYMENT.payTo.toLowerCase()), "the configured payment recipient must be excluded");
+assert.ok(configured.has(COVERAGE.reserveWallet.toLowerCase()), "the configured reserve wallet must be excluded");
+// The covered provider is house-operated in this pilot, so a buyer equal to it
+// is not independent either.
+const withProvider = houseWallets([`0x${"7".repeat(40)}`]);
+assert.ok(withProvider.has(`0x${"7".repeat(40)}`), "an extra controlled wallet must be excludable");
+assert.ok(!configured.has(`0x${"7".repeat(40)}`), "extras must not leak into the default set");
+// Garbage must not silently become an excluded wallet, which would be a
+// permanently unmatchable entry rather than a guard.
+assert.equal(houseWallets([undefined, null, "", "nope", 42]).size, configured.size,
+  "non-addresses must be dropped rather than added to the exclusion set");
+// Casing must not decide independence.
+assert.ok(houseWallets([PAYMENT.payTo.toUpperCase().replace("0X", "0x")]).has(PAYMENT.payTo.toLowerCase()));
 
 // Marketplace attribution. A receipt is identical whether the buyer used the
 // listed service or paid /api/covered-job-receipt directly: same state, fee,
@@ -324,6 +349,34 @@ assert.match(
   confirmSource,
   /route = "settlement_receipt_unavailable"/,
   "an unreadable settlement receipt must say so rather than defaulting to a route",
+);
+// --target-agent covers any policy, so the withholding instruction must name the
+// attempt that was actually confirmed. Telling the operator to withhold Foreman
+// while a different provider is covered leaves the covered job delivered.
+assert.doesNotMatch(
+  confirmSource,
+  /Now withhold Foreman delivery/,
+  "the withholding instruction must not hard-code a provider",
+);
+assert.match(
+  confirmSource,
+  /Now withhold \$\{withholdAgent\} delivery/,
+  "the withholding instruction must name the confirmed attempt's provider",
+);
+assert.match(
+  confirmSource,
+  /prepared\?\.body\?\.targetAgent/,
+  "the withheld provider must come from the matched prepared attempt",
+);
+// The independence checks must read the exclusion set, not a pinned address.
+assert.doesNotMatch(confirmSource, /const HOUSE_WALLET = "0x/, "the house wallet must not be hard-coded");
+// Anchored to the guard itself, not to the call appearing anywhere. The same
+// expression is used in the closing console output, so a looser match stayed
+// green while the actual check was weakened.
+assert.match(
+  confirmSource,
+  /houseWallets\(\[receipt\.target\?\.providerWallet\]\)\.has\(buyer\)/,
+  "the buyer independence check must exclude the covered provider's own wallet",
 );
 // The verdict must come from every binding holding, not from a task merely
 // existing. Deriving it from createdTask alone was the defect: an unrelated

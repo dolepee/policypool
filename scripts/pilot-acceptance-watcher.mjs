@@ -28,7 +28,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { MARKETPLACE, OKX_TASK, PAYMENT, XLAYER } from "../api/lib/config.js";
+import { COVERAGE, MARKETPLACE, OKX_TASK, PAYMENT, XLAYER } from "../api/lib/config.js";
 import { sha256 } from "../api/lib/utils.js";
 import { validateServiceBinding } from "../api/lib/chain.js";
 
@@ -37,7 +37,16 @@ const RPC_URL = process.env.XLAYER_RPC_URL || XLAYER.rpcUrl;
 const EVIDENCE_LOG = process.env.POLICYPOOL_PILOT_EVIDENCE
   || resolve(homedir(), ".config/policypool/pilot-evidence.jsonl");
 const POLL_MS = Number(process.env.POLICYPOOL_PILOT_POLL_MS || 2000);
-const HOUSE_WALLET = "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7";
+// Buyer independence is the pilot's primary claim, so the wallets it must not be
+// are read from the running configuration rather than pinned here. POLICYPOOL_PAY_TO
+// and POLICYPOOL_RESERVE_WALLET are environment overrides; against a hard-coded
+// address, a receipt paid by the configured PolicyPool wallet would have passed
+// as an independent buyer and invalidated the one thing the pilot proves.
+export function houseWallets(extra = []) {
+  return new Set([PAYMENT.payTo, COVERAGE.reserveWallet, ...extra]
+    .filter((address) => typeof address === "string" && /^0x[a-fA-F0-9]{40}$/.test(address))
+    .map((address) => address.toLowerCase()));
+}
 
 function parseArgs(argv) {
   const args = {};
@@ -373,7 +382,7 @@ async function watch(args) {
   }
   const startBlock = BigInt(fromBlock);
   if (!jobDescription) throw new Error("--job-description is required");
-  if (buyer === HOUSE_WALLET) {
+  if (houseWallets().has(buyer)) {
     throw new Error("--buyer is the PolicyPool owner wallet; this pilot exists to pay someone else");
   }
 
@@ -592,7 +601,11 @@ async function confirm(args) {
     problems.push(`fee paid was ${feeAtomic || "unknown"} atomic, expected exactly ${PAYMENT.amountAtomic}`);
   }
   if (!buyer) problems.push("the receipt does not name a buyer wallet");
-  else if (buyer === HOUSE_WALLET) problems.push(`buyer is the house wallet ${HOUSE_WALLET}`);
+  // The covered provider's own wallet counts too: in this pilot the provider is
+  // house-operated, so a buyer equal to it is not an independent buyer either.
+  else if (houseWallets([receipt.target?.providerWallet]).has(buyer)) {
+    problems.push(`buyer ${buyer} is a PolicyPool-controlled wallet, so it is not an independent buyer`);
+  }
 
   // Everything above is identical whether the buyer used the listed service or
   // paid the endpoint directly, so none of it can establish that this became an
@@ -704,11 +717,19 @@ async function confirm(args) {
     : "No task was supplied, or it did not match, so there is not even corroboration.");
   console.log("The payout claim is unaffected: buyer independence and the settlement are verified above.");
   console.log(`Public verifier: ${API_BASE}/proof/receipt?id=${receiptId}`);
-  console.log(`\nNow withhold Foreman delivery. After the deadline:`);
+  // Named from the attempt that was actually confirmed. --target-agent allows any
+  // policy, and telling the operator to withhold Foreman while a different
+  // provider is covered would leave the covered job delivered.
+  const withholdAgent = String(
+    prepared?.body?.targetAgent
+    || (receipt.target?.agentId ? `${receipt.target.agentName}#${receipt.target.agentId}` : "")
+    || "the covered provider",
+  );
+  console.log(`\nNow withhold ${withholdAgent} delivery. After the deadline:`);
   console.log(`  npm run ops:breach:check  -- --receipt-id ${receiptId}`);
   console.log(`  npm run ops:breach:settle -- --receipt-id ${receiptId}`);
   console.log(`\nThen decode the payout Transfer log and check the recipient is ${buyer},`);
-  console.log(`not ${HOUSE_WALLET}.`);
+  console.log(`not any of ${[...houseWallets([receipt.target?.providerWallet])].join(", ")}.`);
 }
 
 // Guarded so a test can import the guards above without running the CLI.
