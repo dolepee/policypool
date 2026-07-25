@@ -9,6 +9,25 @@ function sendJson(res, status, payload) {
   return rawSendJson(res, status, enrichCoverageResponse(payload, { httpStatus: status }));
 }
 
+// The reconciler writes a fresh event on every transition, so the convenience
+// `deadline` it copies onto `universalReconciliation` when a relay clock starts
+// is overwritten by the next release, payout-due, or settlement transition. The
+// start event's own evidence survives in the retained transition log, so a relay
+// covenant past its start still has an objective deadline: read it from there
+// rather than reporting a covenant that never had one.
+function reconciledDeadline(record) {
+  const latest = record.universalReconciliation;
+  if (latest?.deadline) return latest.deadline;
+  if (latest?.evidence?.deadline) return latest.evidence.deadline;
+  const transitions = Array.isArray(record.transitions) ? record.transitions : [];
+  for (let index = transitions.length - 1; index >= 0; index -= 1) {
+    const entry = transitions[index];
+    const deadline = entry?.deadline || entry?.evidence?.deadline;
+    if (deadline) return deadline;
+  }
+  return null;
+}
+
 export function createCoverageStatusHandler(dependencies = {}) {
   let ledger = dependencies.ledger;
   let chain = dependencies.chain;
@@ -33,9 +52,7 @@ export function createCoverageStatusHandler(dependencies = {}) {
       // edited here: it is hash-committed, so the computed deadline travels
       // beside it rather than inside it.
       const receiptDeadline = record.receipt?.covenant?.deadline || null;
-      const effectiveDeadline = receiptDeadline
-        || record.universalReconciliation?.deadline
-        || null;
+      const effectiveDeadline = receiptDeadline || reconciledDeadline(record);
       const deadlineMs = Date.parse(effectiveDeadline || "");
       // v0.4 transitions record their reason and evidence in
       // universalReconciliation and never populate record.release, so a

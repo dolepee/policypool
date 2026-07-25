@@ -137,4 +137,114 @@ const universallyPaid = await fetchStatus({
 assert.equal(universallyPaid.release, null, "a paid record must not grow a fabricated release");
 assert.equal(universallyPaid.coverageState, "PAID_OUT");
 
-console.log("PolicyPool universal coverage-status verified: unified release evidence, reconciled deadlines, and untouched legacy records.");
+// A relay covenant that has moved past its start no longer carries the deadline
+// on its latest reconciliation event: the reconciler's transition() builds a
+// fresh event each time and only the start transition merged the deadline in.
+// The start event's evidence survives in the retained transition log, so a
+// released or paid relay record must still report an objective deadline rather
+// than reading as a covenant that never had one. This is the shape the
+// reconciler actually persists, not a hand-fed deadline.
+const relayStartTransition = {
+  from: "pending_start",
+  to: "active",
+  reason: "verified_funded_request_reached_provider_relay",
+  observedAt: "2026-07-25T09:00:00.000Z",
+  evidence: {
+    relayReceiptId: "rly-1",
+    startedAt: "2026-07-25T09:00:00.000Z",
+    deadline: PAST_DEADLINE,
+  },
+  transitionHash: "sha256:start",
+};
+
+for (const [label, terminal] of [
+  ["released", {
+    state: "released",
+    liabilityAtomic: "0",
+    event: {
+      from: "active",
+      to: "released",
+      reason: "provider_response_delivered_within_sla",
+      observedAt: "2026-07-25T09:45:00.000Z",
+      evidence: { relayReceiptId: "rly-1", deliveredAt: "2026-07-25T09:45:00.000Z" },
+    },
+  }],
+  ["payout_due", {
+    state: "payout_due",
+    liabilityAtomic: "500000",
+    event: {
+      from: "active",
+      to: "payout_due",
+      reason: "verified_okx_a2a_deadline_breach_with_provider_bonded_sla_credit",
+      observedAt: "2026-07-25T10:30:00.000Z",
+      evidence: { relayReceiptId: "rly-1" },
+    },
+  }],
+]) {
+  const record = await fetchStatus({
+    receiptId: `ppc-relay-${label}`,
+    state: terminal.state,
+    liabilityAtomic: terminal.liabilityAtomic,
+    // A relay covenant's issued receipt carries no deadline of its own.
+    receipt: { version: "0.4.0", covenant: {} },
+    transitions: [relayStartTransition, { ...terminal.event, transitionHash: `sha256:${label}` }],
+    universalReconciliation: terminal.event,
+  });
+  assert.equal(
+    record.reconciliation.deadline,
+    PAST_DEADLINE,
+    `a ${label} relay covenant must keep the deadline its start transition recorded`,
+  );
+  assert.equal(record.reconciliation.deadlineSource, "universal_reconciliation", label);
+  assert.equal(record.reconciliation.deadlinePassed, true, label);
+}
+
+// The released relay covenant above must still report its verified reason, so
+// deadline recovery does not come at the cost of release evidence.
+const relayReleased = await fetchStatus({
+  receiptId: "ppc-relay-released-evidence",
+  state: "released",
+  liabilityAtomic: "0",
+  receipt: { version: "0.4.0", covenant: {} },
+  transitions: [relayStartTransition],
+  universalReconciliation: {
+    from: "active",
+    to: "released",
+    reason: "provider_response_delivered_within_sla",
+    observedAt: "2026-07-25T09:45:00.000Z",
+    evidence: { relayReceiptId: "rly-1" },
+  },
+});
+assert.equal(relayReleased.release.reason, "provider_response_delivered_within_sla");
+assert.equal(relayReleased.release.source, "universal_reconciliation");
+assert.equal(relayReleased.reconciliation.deadline, PAST_DEADLINE);
+
+// A record whose history genuinely never recorded a deadline must report none
+// rather than inventing one from an unrelated transition.
+const noDeadlineAnywhere = await fetchStatus({
+  receiptId: "ppc-relay-no-deadline",
+  state: "released",
+  liabilityAtomic: "0",
+  receipt: { version: "0.4.0", covenant: {} },
+  transitions: [{
+    from: "pending_start",
+    to: "cancelled_unpaid",
+    reason: "fee_never_settled",
+    observedAt: "2026-07-25T09:00:00.000Z",
+    evidence: { relayReceiptId: "rly-2" },
+    transitionHash: "sha256:cancel",
+  }],
+  universalReconciliation: {
+    from: "pending_start",
+    to: "released",
+    reason: "unstarted_relay_clock_expired",
+    observedAt: "2026-07-25T09:30:00.000Z",
+    evidence: {},
+  },
+});
+assert.equal(noDeadlineAnywhere.reconciliation.deadline, null);
+assert.equal(noDeadlineAnywhere.reconciliation.deadlineSource, null);
+assert.equal(noDeadlineAnywhere.reconciliation.deadlinePassed, false);
+assert.equal(noDeadlineAnywhere.reconciliation.payoutDueCandidate, false);
+
+console.log("PolicyPool universal coverage-status verified: unified release evidence, reconciled deadlines surviving later transitions, and untouched legacy records.");
