@@ -110,6 +110,26 @@ assert.match(coverage, /covered-job-receipt/, "the notice must name the endpoint
 // form still offers both, so the outage disclosure must cover both forms.
 assert.match(coverage, /in either form/, "the notice must cover public task IDs as well as URLs");
 
+// The same disclosure lives in three places and has now been narrowed to "URL"
+// twice. parseOkxTaskReference normalises a bare task id and a URL to the same
+// withdrawn page, so any surface that scopes the outage to URLs alone sends a
+// reader into a preflight guaranteed to fail.
+const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+assert.doesNotMatch(
+  readme,
+  /public-task-URL half/,
+  "the coverage loop must not scope the outage to URLs alone",
+);
+assert.match(readme, /## Why Evidence Binds To Chain/, "the withdrawal record must stay in the README");
+assert.match(
+  readme,
+  /public task reference in either form/,
+  "the withdrawal record must state that a bare task id is equally unavailable",
+);
+for (const field of ["targetAgent", "jobDescription", "targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash"]) {
+  assert.match(readme, new RegExp(`\`${field}\``), `the README fallback must name ${field}`);
+}
+
 for (const [file, route] of subordinatePages) {
   const html = await readFile(new URL(`../web/${file}`, import.meta.url), "utf8");
   assert.equal((html.match(/<h1\b/g) || []).length, 1, `${file} must have one h1`);
