@@ -267,7 +267,8 @@ assert.equal(relayBeforeDeadline.reconciliation.payoutDueCandidate, false, "cove
 
 // A v0.4 covenant runs through observeOkxA2AClock, which separates release from
 // payout for every terminal status by comparing the job's own resolution
-// timestamp to the deadline. That timestamp is not read here.
+// timestamp to the deadline. Past the deadline that timestamp could fall on
+// either side of it and is not read here, so the answer is undecidable.
 for (const jobStatus of [2, 3, 4, 5, 6, 7, 8, 9]) {
   const universalTerminal = await fetchStatus(
     activeRecord({ receiptId: `ppc-universal-terminal-${jobStatus}`, universal: true, clockMode: "verified_acceptance" }),
@@ -277,6 +278,24 @@ for (const jobStatus of [2, 3, 4, 5, 6, 7, 8, 9]) {
     universalTerminal.reconciliation.payoutDueCandidate,
     null,
     `a universal covenant on terminal status ${jobStatus} needs a resolution timestamp to decide`,
+  );
+
+  // Observing that same terminal status while the deadline is still ahead dates
+  // the resolution before it, so the clock can only release and no timestamp is
+  // needed. Reporting undecidable here would withhold an answer we do have.
+  const beforeDeadline = await fetchStatus(
+    activeRecord({
+      receiptId: `ppc-universal-terminal-early-${jobStatus}`,
+      universal: true,
+      clockMode: "verified_acceptance",
+      deadline: FUTURE_DEADLINE,
+    }),
+    { jobStatus },
+  );
+  assert.equal(
+    beforeDeadline.reconciliation.payoutDueCandidate,
+    false,
+    `status ${jobStatus} observed before the deadline resolved before it, so release is certain`,
   );
 }
 

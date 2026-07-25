@@ -61,7 +61,11 @@ function candidacy({ record, clockMode, deadlinePassed, jobStatus }) {
 
   if (isUniversalRecord(record)) {
     if (status === 1) return deadlinePassed;
-    if (UNIVERSAL_TERMINAL_STATUSES.has(status)) return null;
+    // Observing a job already terminal while its deadline is still ahead dates
+    // the resolution before that deadline, so observeOkxA2AClock can only
+    // release it. The timestamp is only genuinely needed once the deadline has
+    // passed, where the resolution could fall on either side of it.
+    if (UNIVERSAL_TERMINAL_STATUSES.has(status)) return deadlinePassed ? null : false;
     return false;
   }
 
