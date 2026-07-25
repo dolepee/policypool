@@ -177,11 +177,23 @@ export function buyerAddress(...candidates) {
 // the ERC-4337 EntryPoint and emitted escrow created and statusChanged logs.
 // A receipt records neither, so the receipt alone can never establish
 // attribution: state, fee, buyer, job, policy and cap are identical either way.
-export function paymentRoute(logs, escrow) {
-  const touched = (logs || []).some(
+export function paymentRoute(logs, escrow, taskId) {
+  const escrowLogs = (logs || []).filter(
     (log) => String(log?.address || "").toLowerCase() === String(escrow).toLowerCase(),
   );
-  return touched ? "okx_escrow_mediated" : "direct_endpoint_payment";
+  if (escrowLogs.length === 0) return "direct_endpoint_payment";
+  // Touching the escrow is not the same as being this purchase. A settlement can
+  // carry escrow activity for some entirely different task, and the marketplace
+  // task is validated by a separate historical scan that never looks at these
+  // logs, so "an escrow address appeared" would let an unrelated escrow
+  // operation plus an unrelated qualifying task pass a direct purchase off as a
+  // verified sale. Require the settlement to name the task itself.
+  const wanted = String(taskId || "").toLowerCase();
+  if (!wanted) return "escrow_unrelated_task";
+  const carriesTask = escrowLogs.some(
+    (log) => String(log?.topics?.[1] || "").toLowerCase() === wanted,
+  );
+  return carriesTask ? "okx_escrow_mediated" : "escrow_unrelated_task";
 }
 
 // The accepted event carries the listing behind a task: agentId, asset, amount
@@ -594,7 +606,7 @@ async function confirm(args) {
   let route = "unknown";
   if (fee.transaction) {
     const settlement = await rpc("eth_getTransactionReceipt", [fee.transaction]);
-    route = paymentRoute(settlement?.logs, OKX_TASK.escrow);
+    route = paymentRoute(settlement?.logs, OKX_TASK.escrow, marketplaceTask);
   }
 
   const bindings = {

@@ -98,17 +98,43 @@ const bound = (over = {}) => ({
 // settled as an EIP-3009 transfer straight to the token contract and never
 // touched the escrow, while the same buyer's marketplace purchase of the covered
 // job emitted escrow logs.
+const TOKEN_LOG = { address: "0x779ded0c9e1022225f8e0630b35a9b54be713736" };
+const escrowLogFor = (jobId, address = ESCROW) => ({ address, topics: [`0x${"5".repeat(64)}`, jobId] });
 assert.equal(
-  paymentRoute([{ address: "0x779ded0c9e1022225f8e0630b35a9b54be713736" }], ESCROW),
+  paymentRoute([TOKEN_LOG], ESCROW, COVERAGE_TASK),
   "direct_endpoint_payment",
   "a settlement that never touches the escrow is a direct endpoint payment",
 );
 assert.equal(
-  paymentRoute([{ address: "0x779ded0c9e1022225f8e0630b35a9b54be713736" }, { address: ESCROW.toUpperCase() }], ESCROW),
+  paymentRoute([TOKEN_LOG, escrowLogFor(COVERAGE_TASK, ESCROW.toUpperCase())], ESCROW, COVERAGE_TASK),
   "okx_escrow_mediated",
   "escrow involvement must be recognised regardless of address casing",
 );
-assert.equal(paymentRoute(undefined, ESCROW), "direct_endpoint_payment", "missing logs must not throw");
+// Touching the escrow is not the same as being this purchase. The marketplace
+// task is validated by a separate historical scan that never reads these logs,
+// so an unrelated escrow operation must not be able to stand in for one.
+assert.equal(
+  paymentRoute([TOKEN_LOG, escrowLogFor(TARGET_JOB)], ESCROW, COVERAGE_TASK),
+  "escrow_unrelated_task",
+  "escrow activity for a different task must not attribute this settlement",
+);
+assert.equal(
+  paymentRoute([escrowLogFor(COVERAGE_TASK)], ESCROW, ""),
+  "escrow_unrelated_task",
+  "with no task to match against, escrow activity proves nothing",
+);
+assert.equal(
+  paymentRoute([escrowLogFor(COVERAGE_TASK.toUpperCase().replace("0X", "0x"))], ESCROW, COVERAGE_TASK),
+  "okx_escrow_mediated",
+  "task matching must be case-insensitive",
+);
+assert.equal(paymentRoute(undefined, ESCROW, COVERAGE_TASK), "direct_endpoint_payment", "missing logs must not throw");
+// Only the exact route counts as attribution, so a settlement that touched the
+// escrow for something else is refused like any other unproven case.
+assert.ok(
+  marketplaceProblems(bound({ route: "escrow_unrelated_task" })).length > 0,
+  "escrow activity for another task must not verify attribution",
+);
 
 // Absent evidence refuses. This is the case Codex found: every other check
 // passes and the pilot would proceed on a purchase that produced no OKX sale.
@@ -263,6 +289,14 @@ for (const field of [
   assert.match(bindingsBlock, new RegExp(`${field}:`), `confirm must supply ${field} or that guard is inert`);
 }
 assert.match(bindingsBlock, /^\s*route,$/m, "confirm must supply the observed route, not just the expected one");
+// And the route must be classified against the task it is meant to attribute.
+// Calling paymentRoute without the task id makes every escrow log look like
+// this purchase, which is the guard failing open rather than closed.
+assert.match(
+  confirmSource,
+  /paymentRoute\(settlement\?\.logs, OKX_TASK\.escrow, marketplaceTask\)/,
+  "confirm must classify the settlement route against the supplied marketplace task",
+);
 assert.match(
   confirmSource,
   /record\("confirm_passed", \{[\s\S]*?attribution,/,
