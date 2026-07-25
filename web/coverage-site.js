@@ -523,6 +523,10 @@ async function hydrateProof(records) {
   await show(initial);
 }
 
+// The API's generic placeholders carry no information, so a curated local line
+// or a raw code is preferable to either of them.
+const GENERIC_API_MESSAGE = /^The request could not be completed( right now)?\.$/;
+
 function preflightReason(reason) {
   const reasons = {
     target_policy_not_registered: "That provider does not have a registered PolicyPool policy. No payment was requested.",
@@ -540,6 +544,22 @@ function preflightReason(reason) {
     coverage_quote_window_elapsed: "The verified quote window closed before payment. Run preflight again.",
   };
   return reasons[String(reason || "")] || String(reason || "Coverage could not be verified.").replaceAll("_", " ");
+}
+
+// /api/coverage-preflight returns an explicit buyer-facing message and next
+// action for every classified failure. The local map above is curated and stays
+// authoritative where it has an entry, but anything it has not seen should show
+// the contract rather than a de-underscored code: that is how a reader learned
+// the OKX public task evidence had been withdrawn, instead of reading
+// "okx task timeline unavailable".
+export function preflightMessage(payload) {
+  const reason = String(payload?.error || "");
+  const curated = preflightReason(reason);
+  if (curated !== reason.replaceAll("_", " ")) return curated;
+  const message = String(payload?.message || "").trim();
+  if (!message || GENERIC_API_MESSAGE.test(message)) return curated;
+  const nextAction = String(payload?.nextAction || "").trim();
+  return nextAction ? `${message} ${nextAction}` : message;
 }
 
 function providerCard(policy) {
@@ -794,7 +814,7 @@ function bindCoveragePreflight() {
           }
         }
         if (String(data.error || "").startsWith("okx_task_")) taskInput.setAttribute("aria-invalid", "true");
-        throw new Error(preflightReason(data.error));
+        throw new Error(preflightMessage(data));
       }
       showPreflightResult(data);
       setPreflightStatus(data.eligible ? "Preflight passed. Review the verified paid request." : "Preflight completed without charge.", data.eligible ? "success" : "error");
@@ -838,10 +858,15 @@ async function hydrateLiveData() {
   }
 }
 
-bindMobileNavigation();
-bindCopyLinks();
-bindCoveragePreflight();
-hydrateUniversalProviders();
-initScrollReveals();
-hydrateLiveData();
-hydrateExternalProofs();
+// Guarded like receipt.js so the pure helpers above can be imported and verified
+// in CI without a browser. In a page `document` always exists, so every binding
+// still runs exactly as before.
+if (typeof document !== "undefined") {
+  bindMobileNavigation();
+  bindCopyLinks();
+  bindCoveragePreflight();
+  hydrateUniversalProviders();
+  initScrollReveals();
+  hydrateLiveData();
+  hydrateExternalProofs();
+}
