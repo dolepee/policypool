@@ -83,7 +83,7 @@ The marketplace keeps its own escrow and order lifecycle. PolicyPool adds a capp
 - Payment asset: X Layer USD₮0, 6 decimals, EIP-3009 domain `USD₮0` version `1`.
 - Objective breach: accepted job still undelivered after the stored deadline.
 - Reserve: public X Layer wallet, with every liability exposed by `/api/coverage-ledger`.
-- Payout execution: a scheduled, idempotent executor uses the operator-controlled reserve only after reconciliation records `payout_due`; the receipt becomes `paid` only after independent onchain verification. This does not claim autonomous custody.
+- Payout execution: an operator-authorized, idempotent executor uses the operator-controlled reserve only for a specified receipt after reconciliation records `payout_due`; the receipt becomes `paid` only after independent onchain verification. This does not claim autonomous custody or unattended payout discovery.
 - Commercial minimum: `0.5 USD₮0` of requested coverage for a `0.1 USDT` service fee. Smaller requests are declined by the free preflight before payment.
 
 Unknown targets are rejected before payment and produce no coverage receipt. Jobs that are already submitted or terminal are not issued new coverage. The cap cannot exceed the target-job value, configured maximum, or uncommitted reserve.
