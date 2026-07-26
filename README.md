@@ -33,15 +33,17 @@ No wallet or private key is required:
 3. Reproduce the enabled v0.3 payment, accounting, and payout proof:
 
 ```bash
-git clone https://github.com/dolepee/policypool.git
+git clone --recurse-submodules https://github.com/dolepee/policypool.git
 cd policypool
 npm ci
 npm run agent:verify-live
 ```
 
-For the complete internal release gate, including v0.4 contract tests and flag-off checks:
+For the complete internal release gate, install [Foundry](https://book.getfoundry.sh/getting-started/installation), confirm `forge`
+is available, then run the v0.4 contract tests and flag-off checks:
 
 ```bash
+forge --version
 npm run agent:gate-v04
 ```
 
