@@ -173,9 +173,27 @@ assert.match(evidenceNotice, /taken on trust/i, "the notice must name what it ca
 
 const home = await readFile(new URL("../web/home.html", import.meta.url), "utf8");
 assert.match(home, /90-SECOND PROOF PATH/, "home must expose a judge-readable proof path");
-assert.match(home, /href="\/proof\?state=paid"/, "home primary proof path must open the verified paid outcome");
-assert.match(home, /href="\/proof#evidence-chain"/, "home proof path must link to the stable evidence-chain anchor");
+assert.equal(
+  (home.match(/href="\/proof\?receiptId=ppc-bd38c81112102af0"/g) || []).length,
+  2,
+  "home CTA and first demo step must pin the controlled 0.5 USD₮0 payout receipt",
+);
+assert.match(
+  home,
+  /href="\/proof\?receiptId=ppc-bd38c81112102af0#evidence-chain"/,
+  "home evidence step must retain the pinned receipt while linking to the stable evidence-chain anchor",
+);
 assert.match(home, /href="\/ledger"/, "home proof path must end at the live reserve ledger");
+assert.match(
+  coverageScript,
+  /record\.receiptId === requestedReceiptId && record\.state === "paid" && record\.payoutTx/,
+  "proof hydration must resolve a pinned paid receipt instead of silently selecting the newest paid record",
+);
+assert.match(
+  coverageScript,
+  /Pinned proof \$\{requestedReceiptId\} is not available as a paid receipt/,
+  "an unavailable pinned receipt must fail visibly instead of falling back to a different proof",
+);
 
 // The public-reference path is dormant, not deleted: OKX may restore the fields
 // it reads, and restoring it is meant to be a matter of enabling the radio. That

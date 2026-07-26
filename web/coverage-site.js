@@ -493,8 +493,13 @@ function setProofUnavailable(message) {
 }
 
 async function hydrateProof(records) {
+  const query = new URLSearchParams(window.location.search);
+  const requestedReceiptId = query.get("receiptId");
+  const requestedPaidRecord = requestedReceiptId
+    ? records.find((record) => record.receiptId === requestedReceiptId && record.state === "paid" && record.payoutTx)
+    : null;
   const available = new Map([
-    ["paid", records.find((record) => record.state === "paid" && record.payoutTx)],
+    ["paid", requestedReceiptId ? requestedPaidRecord : records.find((record) => record.state === "paid" && record.payoutTx)],
     ["released", records.find((record) => record.state === "released")],
   ]);
   const buttons = [...document.querySelectorAll("[data-proof-state]")];
@@ -506,7 +511,11 @@ async function hydrateProof(records) {
   const show = async (state) => {
     const record = available.get(state);
     if (!record) {
-      setProofUnavailable(`No ${state} receipt is available in the public ledger.`);
+      setProofUnavailable(
+        requestedReceiptId && state === "paid"
+          ? `Pinned proof ${requestedReceiptId} is not available as a paid receipt in the public ledger.`
+          : `No ${state} receipt is available in the public ledger.`,
+      );
       return;
     }
     try { renderProof(await fetchStatus(record)); }
@@ -523,8 +532,8 @@ async function hydrateProof(records) {
       if (!next.disabled) { next.focus(); next.click(); }
     });
   });
-  const requested = new URLSearchParams(window.location.search).get("state");
-  const initial = available.get(requested) ? requested : available.get("paid") ? "paid" : "released";
+  const requested = query.get("state");
+  const initial = requestedReceiptId ? "paid" : available.get(requested) ? requested : available.get("paid") ? "paid" : "released";
   await show(initial);
 }
 
