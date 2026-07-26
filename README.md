@@ -28,7 +28,7 @@ PolicyPool does not rate subjective quality, accept caller-supplied policy overr
 
 No wallet or private key is required:
 
-1. Open the [public receipt verifier](https://policypool.vercel.app/proof/receipt?id=ppc-bd38c81112102af0) and follow the accepted job, stored deadline, bounded cap, and verified payout transaction.
+1. Open the [independent-buyer payout receipt](https://policypool.vercel.app/proof/receipt?id=ppc-2de02877d7c0d080) and follow the accepted job, stored deadline, bounded cap, and verified payout transaction.
 2. Inspect the [live reserve and liability ledger](https://policypool.vercel.app/api/coverage-ledger).
 3. Reproduce the enabled v0.3 payment, accounting, and payout proof:
 
@@ -83,7 +83,7 @@ The marketplace keeps its own escrow and order lifecycle. PolicyPool adds a capp
 - Payment asset: X Layer USD₮0, 6 decimals, EIP-3009 domain `USD₮0` version `1`.
 - Objective breach: accepted job still undelivered after the stored deadline.
 - Reserve: public X Layer wallet, with every liability exposed by `/api/coverage-ledger`.
-- Payout execution: reserve operator transfer, followed by independent onchain verification. The current release does not claim autonomous custody or automatic transfer execution.
+- Payout execution: an operator-authorized, idempotent executor uses the operator-controlled reserve only for a specified receipt after reconciliation records `payout_due`; the receipt becomes `paid` only after independent onchain verification. This does not claim autonomous custody or unattended payout discovery.
 - Commercial minimum: `0.5 USD₮0` of requested coverage for a `0.1 USDT` service fee. Smaller requests are declined by the free preflight before payment.
 
 Unknown targets are rejected before payment and produce no coverage receipt. Jobs that are already submitted or terminal are not issued new coverage. The cap cannot exceed the target-job value, configured maximum, or uncommitted reserve.
@@ -136,6 +136,27 @@ npm run agent:verify-v04-payouts
 ```
 
 The live fee treasury balance is `0.5 USD₮0`: `0.2` predated this deployment and the three controlled v0.4 captures added exactly `0.3`. Fee escrow balance and accounting are both zero.
+
+## Independent-Buyer Payout Proof
+
+An independent buyer wallet paid PolicyPool `0.1 USD₮0` to cover one accepted
+GlassDesk job for up to `0.5 USD₮0`. The target provider is house-operated and
+the missed deadline was controlled; the buyer wallet is outside the PolicyPool
+team. This is external-buyer validation, not an external-provider claim,
+organic failure, or production adoption.
+
+| Proof | Public evidence |
+| --- | --- |
+| Paid coverage receipt and stored deadline | [`ppc-2de02877d7c0d080`](https://policypool.vercel.app/proof/receipt?id=ppc-2de02877d7c0d080) |
+| Target job accepted on X Layer | [`0x8739…af42`](https://www.oklink.com/x-layer/tx/0x8739199d607a4282ae55b1268b3c66ccf8b9161ea9c6116b104ac395a3ebaf42) |
+| Buyer paid the `0.1 USD₮0` coverage fee | [`0x6cf4…6c04`](https://www.oklink.com/x-layer/tx/0x6cf400c3f0d2ccaefb34950867eaddc16c080c2f3554a3565fc392fa88b56c04) |
+| Reserve paid the independent buyer exactly `0.5 USD₮0` | [`0x874a…ca30`](https://www.oklink.com/x-layer/tx/0x874a8cca8009c06f65688c5e3588dadde0866f13e62074a68aa7ad8184e5ca30) |
+| Buyer wallet | [`0x52E1…1B75`](https://www.oklink.com/x-layer/address/0x52E19669d7b199531bF689f7ec943632Bd211B75) |
+
+The payout transaction succeeded in block `66333596`. Its USD₮0 `Transfer`
+event binds the reserve, independent buyer, asset, and exact `500000` atomic
+amount. The public ledger shows the receipt `paid`, no remaining liability, and
+`4.7 USD₮0` available reserve after settlement.
 
 ## Controlled Lifecycle Proof
 

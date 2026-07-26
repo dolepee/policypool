@@ -78,9 +78,10 @@ assert.match(proof, /0x14529d6d09489f8e446db8fa8cc70aac71e21aa529864a726dce04c59
 assert.match(proof, /public v0\.4 flags off/, "v0.4 proof must retain the flag-off boundary");
 assert.doesNotMatch(proof, /NET-LOSS CREDIT|0\.3 USD₮0|state-pending">PayoutDue/, "v0.4 proof must not retain the invalid reduced-payout claim");
 assert.match(proof, /href="\/proof\/receipt"/, "proof room must expose the public receipt verifier for receipts it does not itself display");
+assert.match(proof, /Reading four public external receipts/, "proof room must name all four curated external-buyer receipts");
 
 const coverageScript = await readFile(new URL("../web/coverage-site.js", import.meta.url), "utf8");
-for (const receiptId of ["ppc-6c3d1dbe749cca96", "ppc-136a34aee2022a42", "ppc-5e59d4e5300b6fc3"]) {
+for (const receiptId of ["ppc-2de02877d7c0d080", "ppc-6c3d1dbe749cca96", "ppc-136a34aee2022a42", "ppc-5e59d4e5300b6fc3"]) {
   assert.ok(coverageScript.includes(receiptId), `external proof catalog must include ${receiptId}`);
 }
 assert.match(coverageScript, /data-copy-link/, "shared product script must support copyable public proof links");
@@ -174,13 +175,13 @@ assert.match(evidenceNotice, /taken on trust/i, "the notice must name what it ca
 const home = await readFile(new URL("../web/home.html", import.meta.url), "utf8");
 assert.match(home, /90-SECOND PROOF PATH/, "home must expose a judge-readable proof path");
 assert.equal(
-  (home.match(/href="\/proof\?receiptId=ppc-bd38c81112102af0"/g) || []).length,
+  (home.match(/href="\/proof\?receiptId=ppc-2de02877d7c0d080"/g) || []).length,
   2,
-  "home CTA and first demo step must pin the controlled 0.5 USD₮0 payout receipt",
+  "home CTA and first demo step must pin the independent-buyer 0.5 USD₮0 payout receipt",
 );
 assert.match(
   home,
-  /href="\/proof\?receiptId=ppc-bd38c81112102af0#evidence-chain"/,
+  /href="\/proof\?receiptId=ppc-2de02877d7c0d080#evidence-chain"/,
   "home evidence step must retain the pinned receipt while linking to the stable evidence-chain anchor",
 );
 assert.match(home, /href="\/ledger"/, "home proof path must end at the live reserve ledger");
@@ -326,6 +327,11 @@ for (const [file, route] of subordinatePages) {
 }
 
 const receipt = await readFile(new URL("../web/receipt.html", import.meta.url), "utf8");
+assert.match(
+  receipt,
+  /href="\/proof\/receipt\?id=ppc-2de02877d7c0d080"[^>]*>independent buyer paid after a missed deadline/,
+  "receipt verifier must make the independent-buyer payout the paid example",
+);
 for (const property of ["og:image:type", "og:image:width", "og:image:height"]) {
   assert.match(receipt, new RegExp(`property="${property}"`), `receipt verifier must include ${property}`);
 }

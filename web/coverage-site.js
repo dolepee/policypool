@@ -6,6 +6,7 @@ const providerNames = new Map([
   ["3808", "Warden"],
 ]);
 const externalProofCatalog = Object.freeze([
+  { receiptId: "ppc-2de02877d7c0d080", buyer: "0x52E19669d7b199531bF689f7ec943632Bd211B75" },
   { receiptId: "ppc-6c3d1dbe749cca96", buyer: "0xfc9b58e81BcE27c2f46558D501228D935f93e802" },
   { receiptId: "ppc-136a34aee2022a42", buyer: "0xfc9b58e81BcE27c2f46558D501228D935f93e802" },
   { receiptId: "ppc-5e59d4e5300b6fc3", buyer: "0xf4C9FA07f3BB852547fdC4DF7c1d9Fd9991cfA51" },
