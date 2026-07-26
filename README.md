@@ -33,7 +33,7 @@ No wallet or private key is required:
 3. Reproduce the enabled v0.3 payment, accounting, and payout proof:
 
 ```bash
-git clone --recurse-submodules https://github.com/dolepee/policypool.git
+git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/dolepee/policypool.git
 cd policypool
 npm ci
 npm run agent:verify-live
