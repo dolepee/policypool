@@ -61,11 +61,15 @@
           <form class="coverage-form-card" id="coverage-preflight-form" novalidate>
             <div class="card-heading"><span>01</span><div><p>Coverage request</p><h2>Identify the accepted job.</h2></div></div>
             <div class="evidence-notice" role="note">
-              <p><b>Since 25 July 2026, quoting from a public task reference is unavailable, in either form.</b> A task URL and a bare public task ID resolve to the same page, and OKX.AI stopped publishing the acceptance timeline and the on-chain task ID there, with no notice and no API replacement. Those two fields were what bound a task to its on-chain job.</p>
-              <p>Nothing already covered is affected. Every PolicyPool claim is bound to X Layer rather than to a marketplace page, so existing receipts stay independently replayable. <b>Coverage is still available below for most providers</b> by supplying the X Layer evidence yourself. Providers enrolled on the v0.4 stack with an A2A service are the exception and are shown unavailable: their covenants are reconciled from the same withdrawn page, so coverage bought for them could not be settled, and PolicyPool will not sell what it cannot settle.</p>
-              <p><b>Proved against the task escrow:</b> <code>targetJobId</code>, <code>targetCreationTxHash</code>, <code>targetAcceptanceTxHash</code> and <code>targetBuyer</code>, along with the provider wallet, agent id, asset and amount read from the accepted order. A wallet that does not own the job is refused before any payment.</p>
-              <p><b>Taken on trust:</b> your <code>jobDescription</code>, and which <code>targetAgent</code> policy you select. These are checked against the policy's published scope, but OKX publishes no authenticated mapping from an accepted order to a listed service, so PolicyPool cannot prove the covered work is the work the policy describes.</p>
-              <p><a href="https://github.com/dolepee/policypool#why-evidence-binds-to-chain">Why PolicyPool binds evidence to chain</a></p>
+              <p class="evidence-notice-label">EVIDENCE PATH UPDATE</p>
+              <p><b>Coverage is still available below for most providers using verified X Layer evidence.</b> The public task URL/ID shortcut is unavailable in either form because OKX.AI no longer publishes the two fields that bind its task page to the on-chain job.</p>
+              <details>
+                <summary>What changed, what is verified, and which providers are affected</summary>
+                <p>Nothing already covered is affected. Every PolicyPool claim binds to X Layer rather than to a marketplace page, so existing receipts stay independently replayable. Providers enrolled on the v0.4 stack with an A2A service are the exception and are shown unavailable: their covenants are reconciled from the same withdrawn page, so PolicyPool will not sell what it cannot settle.</p>
+                <p><b>Proved against the task escrow:</b> <code>targetJobId</code>, <code>targetCreationTxHash</code>, <code>targetAcceptanceTxHash</code> and the buyer wallet, along with the provider wallet, agent id, asset and amount read from the accepted order. A wallet that does not own the job is refused before any payment.</p>
+                <p><b>Required but taken on trust:</b> your <code>jobDescription</code>, and which <code>targetAgent</code> policy you select. These are checked against the policy's published scope, but OKX publishes no authenticated mapping from an accepted order to a listed service.</p>
+                <p><a href="https://github.com/dolepee/policypool#why-evidence-binds-to-chain">Read the full evidence boundary ↗</a></p>
+              </details>
             </div>
             <fieldset class="mode-switch" id="coverage-mode">
               <legend>How will you identify the accepted job?</legend>

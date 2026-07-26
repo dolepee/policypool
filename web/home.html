@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="PolicyPool makes accepted agent work coverable with a bounded covenant backed by a public X Layer reserve." />
+    <meta name="description" content="Reserve-backed coverage for accepted AI-agent work. Inspect real X Layer releases, payouts, and public covenant receipts." />
     <link rel="canonical" href="https://policypool.vercel.app/" />
-    <meta property="og:title" content="PolicyPool — Coverable agent work" />
-    <meta property="og:description" content="Published policy. Accepted job. Public reserve. A receipt that ends in release or payout." />
+    <meta property="og:title" content="PolicyPool — Funded coverage for agent work" />
+    <meta property="og:description" content="Accepted job. Published policy. Public reserve. Real X Layer release or payout receipts." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://policypool.vercel.app/" />
     <meta property="og:image" content="https://policypool.vercel.app/agent-og.png" />
@@ -14,11 +14,11 @@
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="PolicyPool — Coverable agent work" />
-    <meta name="twitter:description" content="A funded covenant between an accepted agent job and a public reserve." />
+    <meta name="twitter:title" content="PolicyPool — Funded coverage for agent work" />
+    <meta name="twitter:description" content="See the reserve, the covenant, and real X Layer release or payout receipts." />
     <meta name="twitter:image" content="https://policypool.vercel.app/agent-og.png" />
     <meta name="theme-color" content="#f4f1e8" />
-    <title>PolicyPool — Coverable Agent Work</title>
+    <title>PolicyPool — Funded Coverage for Agent Work</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -74,8 +74,8 @@
             <h1>Promises are cheap.<br /><em>Coverage isn’t.</em></h1>
             <p class="hero-statement">PolicyPool verifies an accepted agent job, reserves a bounded cap, and receipts the ending: capacity returns on delivery, or the buyer is paid after a covered deadline miss.</p>
             <div class="action-row">
-              <a class="button button-ink" href="/coverage">Run free preflight</a>
-              <a class="text-action" href="/proof">Inspect the real payout <span aria-hidden="true">↗</span></a>
+              <a class="button button-ink" href="/proof?state=paid">Start the live proof</a>
+              <a class="text-action" href="/coverage">Run coverage preflight <span aria-hidden="true">→</span></a>
             </div>
             <ol class="covenant-rail" aria-label="PolicyPool covenant path">
               <li><span>01</span><b>Job accepted</b></li>
@@ -103,6 +103,21 @@
             </dl>
             <p data-ledger-updated>Reading directly from the public ledger.</p>
           </aside>
+        </div>
+      </section>
+
+      <section class="demo-path" aria-labelledby="demo-path-title">
+        <div class="site-shell demo-path-layout">
+          <div class="demo-path-intro">
+            <span class="section-index">90-SECOND PROOF PATH</span>
+            <h2 id="demo-path-title">See the promise become money.</h2>
+            <p>Follow one controlled missed deadline from accepted order to a verified 0.5 USD₮0 payout, then inspect the live reserve that backed it.</p>
+          </div>
+          <ol class="demo-path-steps">
+            <li><a href="/proof?state=paid"><span>01</span><div><b>Open the paid receipt</b><small>Accepted → covered → paid</small></div><i aria-hidden="true">↗</i></a></li>
+            <li><a href="/proof#evidence-chain"><span>02</span><div><b>Trace four public links</b><small>Order, acceptance, fee, payout</small></div><i aria-hidden="true">↗</i></a></li>
+            <li><a href="/ledger"><span>03</span><div><b>Check live solvency</b><small>Reserve, commitments, capacity</small></div><i aria-hidden="true">↗</i></a></li>
+          </ol>
         </div>
       </section>
 

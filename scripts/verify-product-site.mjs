@@ -67,6 +67,7 @@ for (const provider of ["glassdesk", "foreman", "warden"]) {
 }
 
 const proof = await readFile(new URL("../web/proof.html", import.meta.url), "utf8");
+assert.match(proof, /id="evidence-chain"/, "proof room must provide a stable evidence-chain demo anchor");
 assert.match(proof, /id="external-usage"/, "proof room must expose external usage separately from controlled proofs");
 assert.match(proof, /Buyer-funded covenants/, "external usage must lead with buyer-funded evidence");
 assert.match(proof, /controlled tests remain excluded/, "external usage must preserve the controlled-proof boundary");
@@ -168,7 +169,13 @@ assert.match(
 // fields tells a visitor the opposite of what the API returns, moments before
 // they pay.
 assert.match(evidenceNotice, /Proved against the task escrow/, "the notice must separate proved evidence");
-assert.match(evidenceNotice, /Taken on trust/, "the notice must name what it cannot prove");
+assert.match(evidenceNotice, /taken on trust/i, "the notice must name what it cannot prove");
+
+const home = await readFile(new URL("../web/home.html", import.meta.url), "utf8");
+assert.match(home, /90-SECOND PROOF PATH/, "home must expose a judge-readable proof path");
+assert.match(home, /href="\/proof\?state=paid"/, "home primary proof path must open the verified paid outcome");
+assert.match(home, /href="\/proof#evidence-chain"/, "home proof path must link to the stable evidence-chain anchor");
+assert.match(home, /href="\/ledger"/, "home proof path must end at the live reserve ledger");
 
 // The public-reference path is dormant, not deleted: OKX may restore the fields
 // it reads, and restoring it is meant to be a matter of enabling the radio. That
@@ -193,7 +200,7 @@ assert.match(
   "the mode toggle must stay exported so the restoration path is testable without a browser",
 );
 const provedClause = evidenceNotice.match(/Proved against the task escrow:[\s\S]*?<\/p>/)?.[0] || "";
-const trustedClause = evidenceNotice.match(/Taken on trust:[\s\S]*?<\/p>/)?.[0] || "";
+const trustedClause = evidenceNotice.match(/taken on trust:[\s\S]*?<\/p>/i)?.[0] || "";
 assert.ok(provedClause && trustedClause, "both halves of the disclosure must be present");
 assert.doesNotMatch(
   provedClause,
