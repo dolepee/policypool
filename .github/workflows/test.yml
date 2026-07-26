@@ -12,7 +12,7 @@ env:
 
 jobs:
   check:
-    name: Foundry project
+    name: Full release gate
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -23,6 +23,15 @@ jobs:
           git remote add origin https://github.com/dolepee/policypool.git
           git fetch --depth=1 origin "$GITHUB_SHA"
           git checkout --detach FETCH_HEAD
+
+      - name: Use repository Node version
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
 
       - name: Install required submodules
         run: |
@@ -39,5 +48,12 @@ jobs:
       - name: Show Forge version
         run: forge --version
 
-      - name: Run full verifier
-        run: node scripts/verify-all.mjs
+      - name: Run agent, accounting, contract, and public-product gates
+        run: npm run agent:gate-v04
+
+      - name: Check deployed hook bytecode and historical proof receipts
+        run: |
+          forge build --sizes
+          node --dns-result-order=ipv4first scripts/verify-deployment.mjs
+          node --dns-result-order=ipv4first scripts/verify-proof.mjs
+          node --dns-result-order=ipv4first scripts/verify-surge.mjs

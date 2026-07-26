@@ -24,6 +24,31 @@ PolicyPool does not rate subjective quality, accept caller-supplied policy overr
 
 > **v0.4 deployment status:** the remediated eight-contract stack is deployed, wired, and bytecode-verified on X Layer behind disabled public feature flags. House-operated pilots have passed orphaned-fee recovery, unpaid cancellation, completed-job release, challenge enforcement, and two post-challenge fixed-credit payouts. The restarted 24-hour attester soak completed; both preview signer services were then retired, leaving no standing production or preview attester endpoint. Production remains v0.3, and third-party-funded bonds remain blocked until a qualified audit and operationally independent signers. See [Universal Coverage v0.4](docs/UNIVERSAL_COVERAGE_V04.md), the [evidence-attester runbook](docs/EVIDENCE_ATTESTER_RUNBOOK.md), and the [internal Solidity audit](docs/INTERNAL_SOLIDITY_AUDIT_V04.md).
 
+## Verify In Five Minutes
+
+No wallet or private key is required:
+
+1. Open the [public receipt verifier](https://policypool.vercel.app/proof/receipt?id=ppc-bd38c81112102af0) and follow the accepted job, stored deadline, bounded cap, and verified payout transaction.
+2. Inspect the [live reserve and liability ledger](https://policypool.vercel.app/api/coverage-ledger).
+3. Reproduce the enabled v0.3 payment, accounting, and payout proof:
+
+```bash
+git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/dolepee/policypool.git
+cd policypool
+npm ci
+npm run agent:verify-live
+```
+
+For the complete internal release gate, install [Foundry](https://book.getfoundry.sh/getting-started/installation), confirm `forge`
+is available, then run the v0.4 contract tests and flag-off checks:
+
+```bash
+forge --version
+npm run agent:gate-v04
+```
+
+The public verifier signs and spends nothing. The v0.4 command validates deployed-but-disabled code and controlled house proofs; it does not activate enrollment or authorize third-party capital.
+
 ## Why Evidence Binds To Chain
 
 PolicyPool never reads a marketplace page to decide what it owes. Every covered claim binds to X Layer transactions, and on 2026-07-25 that stopped being a theoretical preference.
