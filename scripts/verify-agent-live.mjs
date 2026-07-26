@@ -14,11 +14,21 @@ const endpoint = `${baseUrl}/api/covered-job-receipt`;
 const ledgerEndpoint = `${baseUrl}/api/coverage-ledger`;
 const controlledReceiptId = process.env.POLICYPOOL_PROOF_RECEIPT_ID || "ppc-bd38c81112102af0";
 const controlledStatusEndpoint = `${baseUrl}/api/coverage-status?receiptId=${controlledReceiptId}`;
-const independentReceiptId = "ppc-2de02877d7c0d080";
-const independentStatusEndpoint = `${baseUrl}/api/coverage-status?receiptId=${independentReceiptId}`;
+const independentProofBaseUrl = process.env.POLICYPOOL_INDEPENDENT_PROOF_BASE_URL
+  || "https://policypool.vercel.app";
+const independentReceiptId = process.env.POLICYPOOL_INDEPENDENT_PROOF_RECEIPT_ID
+  || "ppc-2de02877d7c0d080";
+const independentStatusEndpoint =
+  `${independentProofBaseUrl}/api/coverage-status?receiptId=${independentReceiptId}`;
+const independentLedgerEndpoint = `${independentProofBaseUrl}/api/coverage-ledger`;
 const expectedReserve = getAddress("0xE2F0c858724A9a72310D7264400e04B37423FBBC");
 const expectedBuyer = getAddress("0x4ABBAe03affF90F50d4F6B42b3E362f5228aD4C7");
-const expectedIndependentBuyer = getAddress("0x52E19669d7b199531bF689f7ec943632Bd211B75");
+const expectedIndependentBuyer = getAddress(
+  process.env.POLICYPOOL_INDEPENDENT_PROOF_BUYER
+    || "0x52E19669d7b199531bF689f7ec943632Bd211B75",
+);
+const expectedServiceFeeRecipient = expectedReserve;
+const expectedServiceFeeAtomic = 100000n;
 const expectedPayoutAtomic = 500000n;
 const transferEvent = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
 
@@ -170,6 +180,32 @@ assert.equal(getAddress(independent.payout.proof.to), expectedIndependentBuyer);
 assert.equal(getAddress(independent.payout.proof.asset), PAYMENT.asset);
 assert.equal(independent.reconciliation.deadlinePassed, true);
 
+const independentServicePaymentTransaction = independent.receipt.servicePayment.transaction;
+const independentServicePaymentReceipt = await publicClient.getTransactionReceipt({
+  hash: independentServicePaymentTransaction,
+});
+assert.equal(independentServicePaymentReceipt.status, "success", "independent service-payment transaction must succeed");
+assert.equal(
+  independentServicePaymentReceipt.blockNumber.toString(),
+  independent.receipt.servicePayment.transferBlock,
+);
+const independentServicePaymentTransfer = independentServicePaymentReceipt.logs.find((log) => {
+  if (log.address.toLowerCase() !== PAYMENT.asset.toLowerCase()) return false;
+  try {
+    const decoded = decodeEventLog({ abi: [transferEvent], data: log.data, topics: log.topics });
+    return decoded.eventName === "Transfer"
+      && getAddress(decoded.args.from) === expectedIndependentBuyer
+      && getAddress(decoded.args.to) === expectedServiceFeeRecipient
+      && decoded.args.value === expectedServiceFeeAtomic;
+  } catch {
+    return false;
+  }
+});
+assert.ok(
+  independentServicePaymentTransfer,
+  "X Layer receipt must contain the exact independent-buyer coverage-fee transfer",
+);
+
 const independentPayoutTransaction = independent.payout.transaction;
 const independentPayoutReceipt = await publicClient.getTransactionReceipt({ hash: independentPayoutTransaction });
 assert.equal(independentPayoutReceipt.status, "success", "independent payout transaction must succeed");
@@ -188,7 +224,17 @@ const independentPayoutTransfer = independentPayoutReceipt.logs.find((log) => {
 });
 assert.ok(independentPayoutTransfer, "X Layer receipt must contain the exact reserve-to-independent-buyer USDt0 transfer");
 
-const independentLedgerRecord = ledgerBody.records.find((record) => record.receiptId === independentReceiptId);
+const independentLedger = await fetch(independentLedgerEndpoint, { cache: "no-store" });
+assert.equal(
+  independentLedger.status,
+  200,
+  `independent proof ledger expected 200, got ${independentLedger.status}`,
+);
+const independentLedgerBody = await independentLedger.json();
+assert.equal(independentLedgerBody.ok, true);
+const independentLedgerRecord = independentLedgerBody.records.find(
+  (record) => record.receiptId === independentReceiptId,
+);
 assert.ok(independentLedgerRecord, "independent payout receipt must appear in the public ledger");
 assert.equal(independentLedgerRecord.state, "paid");
 assert.equal(independentLedgerRecord.payoutTx, independentPayoutTransaction);
