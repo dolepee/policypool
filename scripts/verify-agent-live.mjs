@@ -14,8 +14,11 @@ const endpoint = `${baseUrl}/api/covered-job-receipt`;
 const ledgerEndpoint = `${baseUrl}/api/coverage-ledger`;
 const controlledReceiptId = process.env.POLICYPOOL_PROOF_RECEIPT_ID || "ppc-bd38c81112102af0";
 const controlledStatusEndpoint = `${baseUrl}/api/coverage-status?receiptId=${controlledReceiptId}`;
+const independentReceiptId = "ppc-2de02877d7c0d080";
+const independentStatusEndpoint = `${baseUrl}/api/coverage-status?receiptId=${independentReceiptId}`;
 const expectedReserve = getAddress("0xE2F0c858724A9a72310D7264400e04B37423FBBC");
 const expectedBuyer = getAddress("0x4ABBAe03affF90F50d4F6B42b3E362f5228aD4C7");
+const expectedIndependentBuyer = getAddress("0x52E19669d7b199531bF689f7ec943632Bd211B75");
 const expectedPayoutAtomic = 500000n;
 const transferEvent = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
 
@@ -151,6 +154,45 @@ assert.ok(controlledLedgerRecord, "controlled payout receipt must appear in the 
 assert.equal(controlledLedgerRecord.state, "paid");
 assert.equal(controlledLedgerRecord.payoutTx, payoutTransaction);
 
+const independentStatus = await fetch(independentStatusEndpoint, { cache: "no-store" });
+assert.equal(independentStatus.status, 200, `independent payout status expected 200, got ${independentStatus.status}`);
+const independent = await independentStatus.json();
+assert.equal(independent.ok, true);
+assert.equal(independent.state, "paid", "independent-buyer breach must end in paid state");
+assert.equal(independent.receiptId, independentReceiptId);
+assert.equal(BigInt(independent.liabilityAtomic), expectedPayoutAtomic);
+assert.equal(BigInt(independent.payout.amountAtomic), expectedPayoutAtomic);
+assert.equal(getAddress(independent.receipt.buyer.address), expectedIndependentBuyer);
+assert.equal(getAddress(independent.receipt.servicePayment.payer), expectedIndependentBuyer);
+assert.equal(getAddress(independent.payout.recipient), expectedIndependentBuyer);
+assert.equal(getAddress(independent.payout.proof.from), expectedReserve);
+assert.equal(getAddress(independent.payout.proof.to), expectedIndependentBuyer);
+assert.equal(getAddress(independent.payout.proof.asset), PAYMENT.asset);
+assert.equal(independent.reconciliation.deadlinePassed, true);
+
+const independentPayoutTransaction = independent.payout.transaction;
+const independentPayoutReceipt = await publicClient.getTransactionReceipt({ hash: independentPayoutTransaction });
+assert.equal(independentPayoutReceipt.status, "success", "independent payout transaction must succeed");
+assert.equal(independentPayoutReceipt.blockNumber.toString(), independent.payout.proof.blockNumber);
+const independentPayoutTransfer = independentPayoutReceipt.logs.find((log) => {
+  if (log.address.toLowerCase() !== PAYMENT.asset.toLowerCase()) return false;
+  try {
+    const decoded = decodeEventLog({ abi: [transferEvent], data: log.data, topics: log.topics });
+    return decoded.eventName === "Transfer"
+      && getAddress(decoded.args.from) === expectedReserve
+      && getAddress(decoded.args.to) === expectedIndependentBuyer
+      && decoded.args.value === expectedPayoutAtomic;
+  } catch {
+    return false;
+  }
+});
+assert.ok(independentPayoutTransfer, "X Layer receipt must contain the exact reserve-to-independent-buyer USDt0 transfer");
+
+const independentLedgerRecord = ledgerBody.records.find((record) => record.receiptId === independentReceiptId);
+assert.ok(independentLedgerRecord, "independent payout receipt must appear in the public ledger");
+assert.equal(independentLedgerRecord.state, "paid");
+assert.equal(independentLedgerRecord.payoutTx, independentPayoutTransaction);
+
 const liabilityForState = (state) => ledgerBody.records
   .filter((record) => record.state === state)
   .reduce((total, record) => total + BigInt(record.liabilityAtomic), 0n);
@@ -178,4 +220,5 @@ assert.equal(
 
 console.log(`PolicyPool live fail-closed verifier passed: ${endpoint}`);
 console.log(`PolicyPool controlled payout verified independently on X Layer: ${payoutTransaction}`);
+console.log(`PolicyPool independent-buyer payout verified on X Layer: ${independentPayoutTransaction}`);
 console.log("No payment was signed or spent by this no-secret verifier.");
