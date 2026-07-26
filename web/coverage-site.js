@@ -330,6 +330,15 @@ async function fetchStatus(record) {
   return proof;
 }
 
+function proofRecordFromStatus(status) {
+  return {
+    receiptId: status.receiptId,
+    state: status.state,
+    servicePaymentTx: status.receipt?.servicePayment?.transaction || null,
+    payoutTx: status.payout?.transaction || status.payout?.proof?.txHash || null,
+  };
+}
+
 function externalStateCopy(state) {
   if (state === "released") return "Target work completed; reserved capacity returned.";
   if (state === "paid") return "Covered breach paid from the public reserve.";
@@ -493,8 +502,20 @@ function setProofUnavailable(message) {
 }
 
 async function hydrateProof(records) {
+  const query = new URLSearchParams(window.location.search);
+  const requestedReceiptId = query.get("receiptId");
+  let requestedPaidRecord = null;
+  if (requestedReceiptId) {
+    try {
+      const status = await fetchReceiptStatus(requestedReceiptId);
+      const record = proofRecordFromStatus(status);
+      if (record.state === "paid" && record.payoutTx) requestedPaidRecord = record;
+    } catch {
+      requestedPaidRecord = null;
+    }
+  }
   const available = new Map([
-    ["paid", records.find((record) => record.state === "paid" && record.payoutTx)],
+    ["paid", requestedReceiptId ? requestedPaidRecord : records.find((record) => record.state === "paid" && record.payoutTx)],
     ["released", records.find((record) => record.state === "released")],
   ]);
   const buttons = [...document.querySelectorAll("[data-proof-state]")];
@@ -506,7 +527,11 @@ async function hydrateProof(records) {
   const show = async (state) => {
     const record = available.get(state);
     if (!record) {
-      setProofUnavailable(`No ${state} receipt is available in the public ledger.`);
+      setProofUnavailable(
+        requestedReceiptId && state === "paid"
+          ? `Pinned proof ${requestedReceiptId} is not available as a paid receipt in the public ledger.`
+          : `No ${state} receipt is available in the public ledger.`,
+      );
       return;
     }
     try { renderProof(await fetchStatus(record)); }
@@ -523,8 +548,8 @@ async function hydrateProof(records) {
       if (!next.disabled) { next.focus(); next.click(); }
     });
   });
-  const requested = new URLSearchParams(window.location.search).get("state");
-  const initial = available.get(requested) ? requested : available.get("paid") ? "paid" : "released";
+  const requested = query.get("state");
+  const initial = requestedReceiptId ? "paid" : available.get(requested) ? requested : available.get("paid") ? "paid" : "released";
   await show(initial);
 }
 
