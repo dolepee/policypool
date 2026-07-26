@@ -122,6 +122,23 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
 .covenant-rail b { display: block; overflow: hidden; font-family: var(--sans); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .covenant-rail li:not(:last-child)::after { content: ""; position: absolute; z-index: 1; top: 19px; right: -4px; width: 7px; height: 7px; border-top: 1px solid var(--ink-soft); border-right: 1px solid var(--ink-soft); transform: rotate(45deg); background: var(--paper); }
 
+.demo-path { border-bottom: 1px solid var(--ink); background: var(--yellow-soft); }
+.demo-path-layout { display: grid; grid-template-columns: minmax(280px, 0.68fr) minmax(0, 1.32fr); min-height: 250px; }
+.demo-path-intro { padding: 40px 42px 40px 0; border-right: 1px solid var(--ink); }
+.demo-path-intro h2 { margin: 11px 0 13px; font-family: var(--serif); font-size: clamp(34px, 3.5vw, 50px); font-weight: 500; line-height: 0.98; letter-spacing: -0.045em; }
+.demo-path-intro p { max-width: 490px; margin: 0; color: var(--ink-soft); font-size: 14px; line-height: 1.55; }
+.demo-path-steps { display: grid; grid-template-columns: repeat(3, 1fr); margin: 0; padding: 0; list-style: none; }
+.demo-path-steps li { min-width: 0; }
+.demo-path-steps li + li { border-left: 1px solid var(--ink); }
+.demo-path-steps a { display: grid; min-height: 100%; grid-template-rows: auto 1fr auto; padding: 34px 26px 28px; transition: background 160ms ease, color 160ms ease; }
+.demo-path-steps a:hover { background: var(--ink); color: var(--white); }
+.demo-path-steps a > span { font-family: var(--mono); font-size: 9px; }
+.demo-path-steps a > div { align-self: center; }
+.demo-path-steps b { display: block; margin-bottom: 8px; font-family: var(--serif); font-size: 27px; font-weight: 500; line-height: 1.02; }
+.demo-path-steps small { display: block; color: var(--ink-soft); font-size: 11px; line-height: 1.45; }
+.demo-path-steps a:hover small { color: #bed0cd; }
+.demo-path-steps i { justify-self: end; font-family: var(--mono); font-size: 14px; font-style: normal; }
+
 .reserve-poster { position: relative; overflow: hidden; min-height: 500px; padding: 28px; border: 1px solid var(--ink); border-radius: 32px 32px 4px 32px; background: var(--mint); box-shadow: 14px 14px 0 var(--ink); }
 .reserve-poster::before, .reserve-poster::after { content: ""; position: absolute; border: 1px solid rgba(18, 44, 44, 0.22); border-radius: 50%; }
 .reserve-poster::before { width: 330px; height: 330px; right: -135px; top: 80px; }
@@ -218,6 +235,11 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
 .evidence-notice p:last-child { margin-bottom: 0; }
 .evidence-notice b { color: var(--ink); }
 .evidence-notice a { color: var(--blue); }
+.evidence-notice .evidence-notice-label { margin-bottom: 7px; color: var(--coral); font-family: var(--mono); font-size: 8px; font-weight: 600; letter-spacing: 0.08em; }
+.evidence-notice details { margin-top: 13px; border-top: 1px solid var(--line-strong); padding-top: 11px; }
+.evidence-notice summary { color: var(--ink); font-size: 12px; font-weight: 700; cursor: pointer; }
+.evidence-notice details[open] summary { margin-bottom: 12px; }
+.evidence-notice details p { font-size: 12px; }
 .mode-switch { display: grid; grid-template-columns: 1fr 1fr; margin: 0; padding: 0; border: 0; border-bottom: 1px solid var(--line); }
 .mode-switch legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .mode-option { display: flex; align-items: flex-start; gap: 10px; padding: 15px 26px; cursor: pointer; }
@@ -502,6 +524,8 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
   .system-strip-track > div:first-child { min-width: 130px; }
   .hero-layout, .page-hero-layout { grid-template-columns: 1fr; }
   .hero-layout { min-height: auto; padding-block: 70px 54px; }
+  .demo-path-layout { grid-template-columns: 1fr; }
+  .demo-path-intro { padding: 36px 0 30px; border-right: 0; border-bottom: 1px solid var(--ink); }
   .reserve-poster { min-height: 450px; }
   .page-hero-layout { min-height: auto; gap: 34px; padding-block: 52px 62px; }
   .desk-section, .ledger-overview, .proof-room { margin-top: 0; }
@@ -546,6 +570,11 @@ code, .section-index, .signal-label, dt, .ticket-state, .status-dot, .system-str
   .covenant-rail li:nth-child(even) { border-left: 1px solid var(--line); }
   .covenant-rail li:nth-last-child(-n + 2) { border-bottom: 0; }
   .covenant-rail li::after { display: none; }
+  .demo-path-steps { grid-template-columns: 1fr; }
+  .demo-path-steps li + li { border-top: 1px solid var(--ink); border-left: 0; }
+  .demo-path-steps a { min-height: 148px; grid-template-columns: 34px 1fr auto; grid-template-rows: 1fr; align-items: center; padding: 22px 18px; }
+  .demo-path-steps b { font-size: 25px; }
+  .demo-path-steps i { align-self: center; }
   .reserve-poster { min-height: 420px; padding: 22px; border-radius: 26px 26px 3px 26px; box-shadow: 8px 8px 0 var(--ink); }
   .reserve-number { margin-top: 54px; }
   .reserve-number strong { font-size: 90px; }
