@@ -330,6 +330,15 @@ async function fetchStatus(record) {
   return proof;
 }
 
+function proofRecordFromStatus(status) {
+  return {
+    receiptId: status.receiptId,
+    state: status.state,
+    servicePaymentTx: status.receipt?.servicePayment?.transaction || null,
+    payoutTx: status.payout?.transaction || status.payout?.proof?.txHash || null,
+  };
+}
+
 function externalStateCopy(state) {
   if (state === "released") return "Target work completed; reserved capacity returned.";
   if (state === "paid") return "Covered breach paid from the public reserve.";
@@ -495,9 +504,16 @@ function setProofUnavailable(message) {
 async function hydrateProof(records) {
   const query = new URLSearchParams(window.location.search);
   const requestedReceiptId = query.get("receiptId");
-  const requestedPaidRecord = requestedReceiptId
-    ? records.find((record) => record.receiptId === requestedReceiptId && record.state === "paid" && record.payoutTx)
-    : null;
+  let requestedPaidRecord = null;
+  if (requestedReceiptId) {
+    try {
+      const status = await fetchReceiptStatus(requestedReceiptId);
+      const record = proofRecordFromStatus(status);
+      if (record.state === "paid" && record.payoutTx) requestedPaidRecord = record;
+    } catch {
+      requestedPaidRecord = null;
+    }
+  }
   const available = new Map([
     ["paid", requestedReceiptId ? requestedPaidRecord : records.find((record) => record.state === "paid" && record.payoutTx)],
     ["released", records.find((record) => record.state === "released")],

@@ -186,8 +186,18 @@ assert.match(
 assert.match(home, /href="\/ledger"/, "home proof path must end at the live reserve ledger");
 assert.match(
   coverageScript,
-  /record\.receiptId === requestedReceiptId && record\.state === "paid" && record\.payoutTx/,
-  "proof hydration must resolve a pinned paid receipt instead of silently selecting the newest paid record",
+  /const status = await fetchReceiptStatus\(requestedReceiptId\)/,
+  "proof hydration must resolve a pinned receipt directly instead of requiring it to remain in the recent ledger window",
+);
+assert.match(
+  coverageScript,
+  /status\.payout\?\.transaction \|\| status\.payout\?\.proof\?\.txHash/,
+  "a directly resolved proof must retain its independently verified payout transaction",
+);
+assert.match(
+  coverageScript,
+  /record\.state === "paid" && record\.payoutTx/,
+  "a pinned receipt must still be paid and carry a payout transaction",
 );
 assert.match(
   coverageScript,
