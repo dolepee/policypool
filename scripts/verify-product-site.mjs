@@ -41,8 +41,15 @@ for (const [file, route] of pages) {
   );
 }
 
-const legacyAgent = await readFile(new URL("../web/agent.html", import.meta.url), "utf8");
-assert.match(legacyAgent, /http-equiv="refresh" content="0; url=\/"/, "legacy /agent page must redirect home");
+assert.ok(
+  vercel.routes.some((entry) => entry.src === "/agent" && entry.dest === "/web/home.html"),
+  "legacy /agent route must resolve directly to the product home",
+);
+
+const webPackage = JSON.parse(await readFile(new URL("../web/package.json", import.meta.url), "utf8"));
+const webBuild = webPackage.scripts?.build || "";
+assert.match(webBuild, /rm -rf dist/, "web build must remove stale output before copying assets");
+assert.doesNotMatch(webBuild, /\bagent\.(?:html|js)\b/, "web build must not restore retired agent assets");
 
 const providers = await readFile(new URL("../web/providers.html", import.meta.url), "utf8");
 assert.match(providers, /FOUNDING REGISTRY \/ 03 POLICIES/, "provider registry must publish all three founding policies");
@@ -283,4 +290,12 @@ for (const [file, route] of subordinatePages) {
   assert.match(html, /name="twitter:image"/, "provider enrollment must include a Twitter image");
 }
 
-console.log("PolicyPool product-site gate passed: five routes, shared navigation, metadata, and legacy redirect.");
+const receipt = await readFile(new URL("../web/receipt.html", import.meta.url), "utf8");
+for (const property of ["og:image:type", "og:image:width", "og:image:height"]) {
+  assert.match(receipt, new RegExp(`property="${property}"`), `receipt verifier must include ${property}`);
+}
+for (const name of ["twitter:title", "twitter:description", "twitter:image"]) {
+  assert.match(receipt, new RegExp(`name="${name}"`), `receipt verifier must include ${name}`);
+}
+
+console.log("PolicyPool product-site gate passed: five routes, shared navigation, metadata, and legacy route.");
