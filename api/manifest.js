@@ -201,8 +201,8 @@ export function createManifestHandler({
         charged: false,
       },
       states: {
-        coverage: ["active", "released", "payout_due", "paid"],
-        terminal: ["released", "paid"],
+        coverage: ["active", "declined", "released", "payout_due", "paid"],
+        terminal: ["declined", "released", "paid"],
         payoutExecution: "never_automatic_in_v0.3",
       },
       automation: {

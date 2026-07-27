@@ -66,6 +66,14 @@ assert.deepEqual(manifest.preflightInput.modes.directEvidence.required, [
   "targetBuyer",
   "jobDescription",
 ]);
+assert.deepEqual(manifest.states.coverage, [
+  "active",
+  "declined",
+  "released",
+  "payout_due",
+  "paid",
+]);
+assert.deepEqual(manifest.states.terminal, ["declined", "released", "paid"]);
 assert.equal(manifest.providers.length, 3);
 assert.equal(manifest.providers.filter((provider) => provider.coverableNow).length, 2);
 assert.equal(manifest.providers.find((provider) => provider.agentId === "3808")?.coverableNow, false);
