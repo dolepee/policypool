@@ -14,6 +14,7 @@ const getManifest = async ({
   reserveAtomic = 4_700_000,
   injectedLedger = ledger(committedAtomic),
   injectedChain = chain(reserveAtomic),
+  configuredMinimumAtomic,
   configuredMaximumAtomic,
   capacityReadTimeoutMs,
 } = {}) => {
@@ -21,6 +22,7 @@ const getManifest = async ({
     now: fixedNow,
     ledger: injectedLedger,
     chain: injectedChain,
+    configuredMinimumAtomic,
     configuredMaximumAtomic,
     capacityReadTimeoutMs,
   }), { method: "GET", url: "/api/manifest" });
@@ -50,6 +52,12 @@ assert.deepEqual(manifest.preflightInput.modes.publicReference.required, [
   "targetAgent",
   "taskReference",
 ]);
+assert.equal(manifest.preflightInput.modes.publicReference.available, false);
+assert.equal(
+  manifest.preflightInput.modes.publicReference.unavailableReason,
+  "okx_public_task_evidence_withdrawn",
+);
+assert.equal(manifest.preflightInput.modes.directEvidence.available, true);
 assert.deepEqual(manifest.preflightInput.modes.directEvidence.required, [
   "targetAgent",
   "targetJobId",
@@ -104,6 +112,15 @@ assert.equal(timedOut.coverage.acceptingNewCoverage, false);
 
 for (const configuredMaximumAtomic of ["not-an-amount", "-1"]) {
   const invalidConfiguration = await getManifest({ configuredMaximumAtomic });
+  assert.equal(invalidConfiguration.coverage.maximumAtomic, "0");
+  assert.equal(invalidConfiguration.coverage.maximumBasis, "unavailable_fail_closed");
+  assert.equal(invalidConfiguration.coverage.capacityStatus, "unavailable");
+  assert.equal(invalidConfiguration.coverage.acceptingNewCoverage, false);
+}
+
+for (const configuredMinimumAtomic of ["not-an-amount", "-1", "6000000"]) {
+  const invalidConfiguration = await getManifest({ configuredMinimumAtomic });
+  assert.equal(invalidConfiguration.coverage.minimumAtomic, "0");
   assert.equal(invalidConfiguration.coverage.maximumAtomic, "0");
   assert.equal(invalidConfiguration.coverage.maximumBasis, "unavailable_fail_closed");
   assert.equal(invalidConfiguration.coverage.capacityStatus, "unavailable");

@@ -29,12 +29,14 @@ async function withTimeout(promise, timeoutMs) {
 async function sellableCeilingAtomic({
   ledger,
   chain,
+  configuredMinimumAtomic = COVERAGE.minAtomic,
   configuredMaximumAtomic = COVERAGE.maxAtomic,
   timeoutMs = CAPACITY_READ_TIMEOUT_MS,
 }) {
   try {
+    const minimum = BigInt(configuredMinimumAtomic);
     const configured = BigInt(configuredMaximumAtomic);
-    if (configured < 0n) throw new Error("configured_capacity_invalid");
+    if (minimum < 0n || configured < minimum) throw new Error("configured_capacity_invalid");
     const activeLedger = ledger || createLedger();
     const activeChain = chain || createChainService();
     const [stats, balance] = await withTimeout(Promise.all([
@@ -46,6 +48,7 @@ async function sellableCeilingAtomic({
     if (committed < 0n || reserve < 0n) throw new Error("capacity_read_invalid");
     const available = reserve > committed ? reserve - committed : 0n;
     return {
+      minimumAtomic: minimum,
       maximumAtomic: available < configured ? available : configured,
       status: "verified",
     };
@@ -54,6 +57,7 @@ async function sellableCeilingAtomic({
     // must not advertise unverified capacity. Quote issuance performs its own
     // authoritative solvency check and remains the final decision point.
     return {
+      minimumAtomic: 0n,
       maximumAtomic: 0n,
       status: "unavailable",
     };
@@ -84,6 +88,7 @@ export function createManifestHandler({
   universalHandler = createUniversalManifestHandler(),
   ledger: injectedLedger,
   chain: injectedChain,
+  configuredMinimumAtomic = COVERAGE.minAtomic,
   configuredMaximumAtomic = COVERAGE.maxAtomic,
   capacityReadTimeoutMs = CAPACITY_READ_TIMEOUT_MS,
 } = {}) {
@@ -94,11 +99,12 @@ export function createManifestHandler({
     const capacity = await sellableCeilingAtomic({
       ledger: injectedLedger,
       chain: injectedChain,
+      configuredMinimumAtomic,
       configuredMaximumAtomic,
       timeoutMs: capacityReadTimeoutMs,
     });
     const acceptingNewCoverage = capacity.status === "verified"
-      && capacity.maximumAtomic >= BigInt(COVERAGE.minAtomic);
+      && capacity.maximumAtomic >= capacity.minimumAtomic;
     return sendJson(res, 200, {
       ok: true,
       protocol: "PolicyPool Agent Coverage",
@@ -133,9 +139,10 @@ export function createManifestHandler({
       },
       coverage: {
         reserveWallet: COVERAGE.reserveWallet,
-        minimumAtomic: COVERAGE.minAtomic,
+        minimumAtomic: capacity.minimumAtomic.toString(),
         maximumAtomic: capacity.maximumAtomic.toString(),
         maximumUSDT: formatUsdtAtomic(capacity.maximumAtomic, PAYMENT.decimals),
+        minimumConfiguredAtomic: configuredMinimumAtomic,
         maximumConfiguredAtomic: configuredMaximumAtomic,
         maximumBasis: capacity.status === "verified"
           ? "lesser_of_configured_ceiling_and_uncommitted_reserve"
@@ -173,8 +180,13 @@ export function createManifestHandler({
       preflightInput: {
         appliesTo: "https://policypool.vercel.app/api/coverage-preflight",
         modes: {
-          publicReference: { required: ["targetAgent", "taskReference"] },
+          publicReference: {
+            required: ["targetAgent", "taskReference"],
+            available: false,
+            unavailableReason: "okx_public_task_evidence_withdrawn",
+          },
           directEvidence: {
+            available: true,
             required: [
               "targetAgent",
               "targetJobId",
