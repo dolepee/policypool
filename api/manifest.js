@@ -29,10 +29,12 @@ async function withTimeout(promise, timeoutMs) {
 async function sellableCeilingAtomic({
   ledger,
   chain,
+  configuredMaximumAtomic = COVERAGE.maxAtomic,
   timeoutMs = CAPACITY_READ_TIMEOUT_MS,
 }) {
-  const configured = BigInt(COVERAGE.maxAtomic);
   try {
+    const configured = BigInt(configuredMaximumAtomic);
+    if (configured < 0n) throw new Error("configured_capacity_invalid");
     const activeLedger = ledger || createLedger();
     const activeChain = chain || createChainService();
     const [stats, balance] = await withTimeout(Promise.all([
@@ -82,6 +84,7 @@ export function createManifestHandler({
   universalHandler = createUniversalManifestHandler(),
   ledger: injectedLedger,
   chain: injectedChain,
+  configuredMaximumAtomic = COVERAGE.maxAtomic,
   capacityReadTimeoutMs = CAPACITY_READ_TIMEOUT_MS,
 } = {}) {
   return async function handler(req, res) {
@@ -91,6 +94,7 @@ export function createManifestHandler({
     const capacity = await sellableCeilingAtomic({
       ledger: injectedLedger,
       chain: injectedChain,
+      configuredMaximumAtomic,
       timeoutMs: capacityReadTimeoutMs,
     });
     const acceptingNewCoverage = capacity.status === "verified"
@@ -132,7 +136,7 @@ export function createManifestHandler({
         minimumAtomic: COVERAGE.minAtomic,
         maximumAtomic: capacity.maximumAtomic.toString(),
         maximumUSDT: formatUsdtAtomic(capacity.maximumAtomic, PAYMENT.decimals),
-        maximumConfiguredAtomic: COVERAGE.maxAtomic,
+        maximumConfiguredAtomic: configuredMaximumAtomic,
         maximumBasis: capacity.status === "verified"
           ? "lesser_of_configured_ceiling_and_uncommitted_reserve"
           : "unavailable_fail_closed",

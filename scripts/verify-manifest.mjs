@@ -14,12 +14,14 @@ const getManifest = async ({
   reserveAtomic = 4_700_000,
   injectedLedger = ledger(committedAtomic),
   injectedChain = chain(reserveAtomic),
+  configuredMaximumAtomic,
   capacityReadTimeoutMs,
 } = {}) => {
   const response = await callHandler(createManifestHandler({
     now: fixedNow,
     ledger: injectedLedger,
     chain: injectedChain,
+    configuredMaximumAtomic,
     capacityReadTimeoutMs,
   }), { method: "GET", url: "/api/manifest" });
   assert.equal(response.statusCode, 200);
@@ -99,6 +101,14 @@ const timedOut = await getManifest({
 assert.equal(timedOut.coverage.maximumAtomic, "0");
 assert.equal(timedOut.coverage.capacityStatus, "unavailable");
 assert.equal(timedOut.coverage.acceptingNewCoverage, false);
+
+for (const configuredMaximumAtomic of ["not-an-amount", "-1"]) {
+  const invalidConfiguration = await getManifest({ configuredMaximumAtomic });
+  assert.equal(invalidConfiguration.coverage.maximumAtomic, "0");
+  assert.equal(invalidConfiguration.coverage.maximumBasis, "unavailable_fail_closed");
+  assert.equal(invalidConfiguration.coverage.capacityStatus, "unavailable");
+  assert.equal(invalidConfiguration.coverage.acceptingNewCoverage, false);
+}
 
 let probeDependencyCalls = 0;
 const unusedLedger = {
