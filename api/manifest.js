@@ -1,7 +1,68 @@
+import { createChainService } from "./lib/chain.js";
 import { COVERAGE, MARKETPLACE, PAYMENT, XLAYER } from "./lib/config.js";
+import { createLedger } from "./lib/ledger.js";
 import { listPublishedPolicies, policyCoverageCapAtomic } from "./lib/policy-registry.js";
 import { formatUsdtAtomic, sendJson } from "./lib/utils.js";
 import { createUniversalManifestHandler } from "./universal-manifest.js";
+
+const CAPACITY_READ_TIMEOUT_MS = 2_500;
+
+async function withTimeout(promise, timeoutMs) {
+  let timeout;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("capacity_read_timeout")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// The advertised ceiling has to be a cap we would actually issue. The reserve
+// solvency invariant refuses any quote where committed + cap exceeds the
+// reserve, so publishing the configured maximum while the uncommitted reserve
+// sits below it advertises a cap that declines on request. Publish the smaller
+// of the two and keep the configured value visible beside it.
+async function sellableCeilingAtomic({
+  ledger,
+  chain,
+  configuredMinimumAtomic = COVERAGE.minAtomic,
+  configuredMaximumAtomic = COVERAGE.maxAtomic,
+  timeoutMs = CAPACITY_READ_TIMEOUT_MS,
+}) {
+  try {
+    const minimum = BigInt(configuredMinimumAtomic);
+    const configured = BigInt(configuredMaximumAtomic);
+    if (minimum < 0n || configured < minimum) throw new Error("configured_capacity_invalid");
+    const activeLedger = ledger || createLedger();
+    const activeChain = chain || createChainService();
+    const [stats, balance] = await withTimeout(Promise.all([
+      activeLedger.stats(),
+      activeChain.getReserveBalance(),
+    ]), timeoutMs);
+    const committed = BigInt(stats.committedAtomic);
+    const reserve = BigInt(balance);
+    if (committed < 0n || reserve < 0n) throw new Error("capacity_read_invalid");
+    const available = reserve > committed ? reserve - committed : 0n;
+    return {
+      minimumAtomic: minimum,
+      maximumAtomic: available < configured ? available : configured,
+      status: "verified",
+    };
+  } catch {
+    // Discovery must remain available during an RPC or ledger outage, but it
+    // must not advertise unverified capacity. Quote issuance performs its own
+    // authoritative solvency check and remains the final decision point.
+    return {
+      minimumAtomic: 0n,
+      maximumAtomic: 0n,
+      status: "unavailable",
+    };
+  }
+}
 
 function providerManifest(policy) {
   return {
@@ -25,11 +86,25 @@ function providerManifest(policy) {
 export function createManifestHandler({
   now = () => Date.now(),
   universalHandler = createUniversalManifestHandler(),
+  ledger: injectedLedger,
+  chain: injectedChain,
+  configuredMinimumAtomic = COVERAGE.minAtomic,
+  configuredMaximumAtomic = COVERAGE.maxAtomic,
+  capacityReadTimeoutMs = CAPACITY_READ_TIMEOUT_MS,
 } = {}) {
   return async function handler(req, res) {
     if (req.query?.surface === "universal") return universalHandler(req, res);
     if (req.method === "HEAD") return res.status(200).end();
     if (req.method !== "GET") return sendJson(res, 405, { ok: false, error: "method_not_allowed" });
+    const capacity = await sellableCeilingAtomic({
+      ledger: injectedLedger,
+      chain: injectedChain,
+      configuredMinimumAtomic,
+      configuredMaximumAtomic,
+      timeoutMs: capacityReadTimeoutMs,
+    });
+    const acceptingNewCoverage = capacity.status === "verified"
+      && capacity.maximumAtomic >= capacity.minimumAtomic;
     return sendJson(res, 200, {
       ok: true,
       protocol: "PolicyPool Agent Coverage",
@@ -64,8 +139,16 @@ export function createManifestHandler({
       },
       coverage: {
         reserveWallet: COVERAGE.reserveWallet,
-        minimumAtomic: COVERAGE.minAtomic,
-        maximumAtomic: COVERAGE.maxAtomic,
+        minimumAtomic: capacity.minimumAtomic.toString(),
+        maximumAtomic: capacity.maximumAtomic.toString(),
+        maximumUSDT: formatUsdtAtomic(capacity.maximumAtomic, PAYMENT.decimals),
+        minimumConfiguredAtomic: configuredMinimumAtomic,
+        maximumConfiguredAtomic: configuredMaximumAtomic,
+        maximumBasis: capacity.status === "verified"
+          ? "lesser_of_configured_ceiling_and_uncommitted_reserve"
+          : "unavailable_fail_closed",
+        capacityStatus: capacity.status,
+        acceptingNewCoverage,
         objectiveBreachRules: ["accepted_job_still_undelivered_after_deadline"],
         reserveSettlement: "operator_approved_and_independently_verified",
       },
@@ -79,6 +162,7 @@ export function createManifestHandler({
         ambiguityBehavior: "fail_closed_without_settlement",
       },
       input: {
+        appliesTo: "https://policypool.vercel.app/api/covered-job-receipt",
         required: [
           "targetAgent",
           "targetJobId",
@@ -88,6 +172,33 @@ export function createManifestHandler({
         ],
         optional: ["requestedCoverageUSDT", "quoteId"],
         legacyFullBodyAccepted: true,
+      },
+      // The preflight is advertised as its own endpoint and does not share the
+      // paid service's contract. It accepts a job by public marketplace
+      // reference or by direct on-chain evidence, and direct mode additionally
+      // requires the buyer wallet so the evidence can be bound to the payer.
+      preflightInput: {
+        appliesTo: "https://policypool.vercel.app/api/coverage-preflight",
+        modes: {
+          publicReference: {
+            required: ["targetAgent", "taskReference"],
+            available: false,
+            unavailableReason: "okx_public_task_evidence_withdrawn",
+          },
+          directEvidence: {
+            available: true,
+            required: [
+              "targetAgent",
+              "targetJobId",
+              "targetCreationTxHash",
+              "targetAcceptanceTxHash",
+              "targetBuyer",
+              "jobDescription",
+            ],
+          },
+        },
+        optional: ["requestedCoverageUSDT", "targetServiceId"],
+        charged: false,
       },
       states: {
         coverage: ["active", "released", "payout_due", "paid"],
