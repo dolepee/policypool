@@ -76,6 +76,18 @@ assert.equal(active.covered, true);
 assert.equal(active.paymentMade, true);
 assert.equal(active.receiptIssued, true);
 
+const declined = enrich({
+  ok: true,
+  receiptId: "ppc-declined",
+  state: "declined",
+  receipt: { receiptId: "ppc-declined" },
+});
+assert.equal(declined.coverageState, COVERAGE_STATES.COVERAGE_DECLINED);
+assert.equal(declined.covered, false, "a declined receipt creates no coverage liability");
+assert.equal(declined.paymentMade, true, "the decline receipt is produced after service-fee settlement");
+assert.equal(declined.receiptIssued, true);
+assert.equal(declined.nextAction, "NONE_COVERAGE_NOT_ISSUED");
+
 // Finalisation can fail after settlement, leaving a record whose state is later
 // synchronised to a purchased value while it still carries no receipt document.
 // The state must not manufacture a receipt an agent would then go looking for.

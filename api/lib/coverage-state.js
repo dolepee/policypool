@@ -20,6 +20,7 @@ export const COVERAGE_STATES = Object.freeze({
   // Fee settled and receipt issued, but the relay clock has not started yet.
   AWAITING_CLOCK_START: "AWAITING_CLOCK_START",
   COVERAGE_ACTIVE: "COVERAGE_ACTIVE",
+  COVERAGE_DECLINED: "COVERAGE_DECLINED",
   COVERAGE_RELEASED: "COVERAGE_RELEASED",
   PAYOUT_DUE: "PAYOUT_DUE",
   PAID_OUT: "PAID_OUT",
@@ -37,6 +38,10 @@ const RECEIPT_STATE_TO_COVERAGE_STATE = Object.freeze({
   pending_start: COVERAGE_STATES.AWAITING_CLOCK_START,
   pending: COVERAGE_STATES.PAYMENT_NOT_SETTLED,
   active: COVERAGE_STATES.COVERAGE_ACTIVE,
+  // The paid service can return a terminal decline receipt after settlement.
+  // No reserve liability is created, but the service fee was paid and the
+  // receipt remains a valid historical decision.
+  declined: COVERAGE_STATES.COVERAGE_DECLINED,
   released: COVERAGE_STATES.COVERAGE_RELEASED,
   payout_due: COVERAGE_STATES.PAYOUT_DUE,
   // Not a payout. `compensation_required` is the cleanup state written when
@@ -62,6 +67,7 @@ const NEXT_ACTION_BY_STATE = Object.freeze({
   [COVERAGE_STATES.PAYMENT_NOT_SETTLED]: "COMPLETE_PAYMENT",
   [COVERAGE_STATES.AWAITING_CLOCK_START]: "AWAIT_PROVIDER_CLOCK_START",
   [COVERAGE_STATES.COVERAGE_ACTIVE]: "NONE_COVERAGE_IN_FORCE",
+  [COVERAGE_STATES.COVERAGE_DECLINED]: "NONE_COVERAGE_NOT_ISSUED",
   // Neutral on purpose. A covenant also reaches released through expiry of an
   // unstarted relay clock and through recovery without payout, where the
   // provider did not deliver inside the SLA. The record's own reason is the
@@ -89,6 +95,7 @@ const IN_FORCE_STATES = new Set([
 const PURCHASED_STATES = new Set([
   COVERAGE_STATES.AWAITING_CLOCK_START,
   COVERAGE_STATES.COVERAGE_ACTIVE,
+  COVERAGE_STATES.COVERAGE_DECLINED,
   COVERAGE_STATES.COVERAGE_RELEASED,
   COVERAGE_STATES.PAYOUT_DUE,
   COVERAGE_STATES.PAID_OUT,
