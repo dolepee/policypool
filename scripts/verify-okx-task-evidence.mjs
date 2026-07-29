@@ -131,6 +131,16 @@ assert.match(proof.createdAt, /^2026-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/);
 assert.match(proof.acceptedAt, /^2026-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/);
 assert.ok(Date.parse(proof.acceptedAt) >= Date.parse(proof.createdAt));
 
+const resolvedFromCreationHint = await chain.resolveTargetOrderEvidenceFromHints({
+  jobId: proof.jobId,
+  createdAt: "2026-07-10T07:18:09.000Z",
+});
+assert.equal(resolvedFromCreationHint.creationTxHash, proof.creationTxHash);
+assert.equal(resolvedFromCreationHint.acceptanceTxHash, proof.acceptanceTxHash);
+assert.equal(resolvedFromCreationHint.buyer.toLowerCase(), proof.buyer.toLowerCase());
+assert.equal(resolvedFromCreationHint.creationBlock, proof.creationBlock);
+assert.equal(resolvedFromCreationHint.acceptanceBlock, proof.acceptanceBlock);
+
 await assert.rejects(
   chain.verifyTargetOrder({
     jobId: proof.jobId,

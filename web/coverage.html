@@ -62,11 +62,12 @@
             <div class="card-heading"><span>01</span><div><p>Coverage request</p><h2>Identify the accepted job.</h2></div></div>
             <div class="evidence-notice" role="note">
               <p class="evidence-notice-label">EVIDENCE PATH UPDATE</p>
-              <p><b>Coverage is still available below for most providers using verified X Layer evidence.</b> The public task URL/ID shortcut is unavailable in either form because OKX.AI no longer publishes the two fields that bind its task page to the on-chain job.</p>
+              <p><b>Coverage is still available below for most providers using indexed X Layer evidence.</b> Bring the on-chain job ID and its approximate creation time; PolicyPool resolves the transactions and buyer from the task escrow before quoting. The public task URL/ID shortcut remains unavailable in either form because OKX.AI no longer publishes the fields that bind its task page to the on-chain job.</p>
               <details>
                 <summary>What changed, what is verified, and which providers are affected</summary>
                 <p>Nothing already covered is affected. Every PolicyPool claim binds to X Layer rather than to a marketplace page, so existing receipts stay independently replayable. Providers enrolled on the v0.4 stack with an A2A service are the exception and are shown unavailable: their covenants are reconciled from the same withdrawn page, so PolicyPool will not sell what it cannot settle.</p>
-                <p><b>Proved against the task escrow:</b> <code>targetJobId</code>, <code>targetCreationTxHash</code>, <code>targetAcceptanceTxHash</code> and the buyer wallet, along with the provider wallet, agent id, asset and amount read from the accepted order. A wallet that does not own the job is refused before any payment.</p>
+                <p><b>Resolver input:</b> <code>targetJobId</code> and <code>targetCreatedAt</code>. The time value is a search hint only and never replaces an indexed event.</p>
+                <p><b>Proved against the task escrow:</b> the job ID, resolved creation and acceptance transactions, and buyer wallet, along with the provider wallet, agent id, asset and amount read from the accepted order. A wallet that does not own the job is refused before any payment.</p>
                 <p><b>Required but taken on trust:</b> your <code>jobDescription</code>, and which <code>targetAgent</code> policy you select. These are checked against the policy's published scope, but OKX publishes no authenticated mapping from an accepted order to a listed service.</p>
                 <p><a href="https://github.com/dolepee/policypool#why-evidence-binds-to-chain">Read the full evidence boundary ↗</a></p>
               </details>
@@ -74,8 +75,12 @@
             <fieldset class="mode-switch" id="coverage-mode">
               <legend>How will you identify the accepted job?</legend>
               <label class="mode-option">
-                <input type="radio" name="evidenceMode" value="verified_onchain_evidence" checked />
-                <span><b>Verified X Layer evidence</b><small>You supply the transactions. PolicyPool proves them on chain.</small></span>
+                <input type="radio" name="evidenceMode" value="resolved_onchain_events" checked />
+                <span><b>Resolve from X Layer events</b><small>Bring the job ID and creation time; PolicyPool finds and verifies the transactions.</small></span>
+              </label>
+              <label class="mode-option">
+                <input type="radio" name="evidenceMode" value="verified_onchain_evidence" />
+                <span><b>Supply exact transactions</b><small>Advanced fallback when you already have both transaction hashes.</small></span>
               </label>
               <label class="mode-option is-unavailable">
                 <input type="radio" name="evidenceMode" value="public_task_reference" disabled />
@@ -108,27 +113,42 @@
                 <label for="coverage-custom-service">OKX.AI service ID</label>
                 <input id="coverage-custom-service" inputmode="numeric" autocomplete="off" placeholder="33461" />
               </div>
-              <div class="field-block field-wide direct-evidence-field">
+              <div class="field-block field-wide onchain-evidence-field">
                 <label for="coverage-job-id">Target job ID <span class="field-hint">on-chain, from the OKX task escrow</span></label>
                 <input id="coverage-job-id" name="targetJobId" type="text" autocomplete="off" spellcheck="false" placeholder="0x…64 hex characters" required aria-describedby="coverage-job-id-help coverage-form-status" />
                 <p id="coverage-job-id-help">The <code>bytes32</code> job identifier the escrow emitted, not the public task number.</p>
               </div>
-              <div class="field-block direct-evidence-field">
+              <div class="field-block event-hint-field">
+                <label for="coverage-created-at">Approximate job creation time</label>
+                <input id="coverage-created-at" name="targetCreatedAt" type="datetime-local" step="1" required aria-describedby="coverage-created-at-help coverage-form-status" />
+                <p id="coverage-created-at-help">A search hint within about two minutes. The indexed creation event, not this time, supplies the proof.</p>
+              </div>
+              <div class="field-block event-hint-field">
+                <label for="coverage-accepted-at">Approximate acceptance time <span class="field-hint">optional</span></label>
+                <input id="coverage-accepted-at" name="targetAcceptedAt" type="datetime-local" step="1" data-optional="true" aria-describedby="coverage-accepted-at-help coverage-form-status" />
+                <p id="coverage-accepted-at-help">Leave blank unless the provider accepted more than 30 minutes after job creation.</p>
+              </div>
+              <div class="field-block field-wide event-hint-field">
+                <label for="coverage-event-buyer">Your wallet <span class="field-hint">optional assertion</span></label>
+                <input id="coverage-event-buyer" name="targetBuyer" type="text" autocomplete="off" spellcheck="false" placeholder="0x…" data-optional="true" aria-describedby="coverage-event-buyer-help coverage-form-status" />
+                <p id="coverage-event-buyer-help">PolicyPool derives the buyer from the creation event. If supplied, this wallet must match it and must pay for coverage.</p>
+              </div>
+              <div class="field-block direct-evidence-field" hidden>
                 <label for="coverage-creation-tx">Job creation transaction</label>
                 <input id="coverage-creation-tx" name="targetCreationTxHash" type="text" autocomplete="off" spellcheck="false" placeholder="0x…" required aria-describedby="coverage-creation-tx-help coverage-form-status" />
                 <p id="coverage-creation-tx-help">Must contain the escrow's job-created event for this job.</p>
               </div>
-              <div class="field-block direct-evidence-field">
+              <div class="field-block direct-evidence-field" hidden>
                 <label for="coverage-acceptance-tx">Job acceptance transaction</label>
                 <input id="coverage-acceptance-tx" name="targetAcceptanceTxHash" type="text" autocomplete="off" spellcheck="false" placeholder="0x…" required aria-describedby="coverage-acceptance-tx-help coverage-form-status" />
                 <p id="coverage-acceptance-tx-help">Must move the job from created to accepted and name the provider.</p>
               </div>
-              <div class="field-block field-wide direct-evidence-field">
+              <div class="field-block field-wide direct-evidence-field" hidden>
                 <label for="coverage-buyer">Your wallet <span class="field-hint">must own the target job</span></label>
                 <input id="coverage-buyer" name="targetBuyer" type="text" autocomplete="off" spellcheck="false" placeholder="0x…" required aria-describedby="coverage-buyer-help coverage-form-status" />
                 <p id="coverage-buyer-help">Checked against the job's creation event. A wallet that does not own the job is refused here, before any payment, and must be the payer on the paid call.</p>
               </div>
-              <div class="field-block field-wide direct-evidence-field">
+              <div class="field-block field-wide onchain-evidence-field">
                 <label for="coverage-job-description">Job description</label>
                 <textarea id="coverage-job-description" name="jobDescription" rows="2" autocomplete="off" placeholder="What the covered job was asked to deliver." required aria-describedby="coverage-job-description-help coverage-form-status"></textarea>
                 <p id="coverage-job-description-help">Checked against the provider's published scope.</p>

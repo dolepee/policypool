@@ -13,7 +13,7 @@ import {
   WaitForTransactionReceiptTimeoutError,
   toHex,
 } from "viem";
-import { COVERAGE, OKX_TASK, PAYMENT, XLAYER } from "./config.js";
+import { COVERAGE, EVIDENCE_RESOLVER, OKX_TASK, PAYMENT, XLAYER } from "./config.js";
 import { isBytes32 } from "./utils.js";
 
 const ERC20_ABI = parseAbi([
@@ -31,6 +31,8 @@ const MAX_PROVIDER_SETTLEMENT_SEARCH_SECONDS = 20 * 60;
 // X Layer's public RPC rejects eth_getLogs ranges larger than 100 blocks.
 // Keep the scan portable across providers while preserving the exact bounded window.
 const MAX_LOG_SCAN_BLOCKS = 100n;
+const MAX_ACCEPTANCE_SCAN_BLOCKS = BigInt(EVIDENCE_RESOLVER.maxAutomaticAcceptanceScanBlocks);
+const LOG_SCAN_CONCURRENCY = 4;
 
 export class EvidenceError extends Error {
   constructor(code, message) {
@@ -177,56 +179,151 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
     return low;
   }
 
-  async function estimateBlocksAtTimestamps(timestamps) {
+  async function calibrateBlockTiming() {
     const latestBlock = await publicClient.getBlock();
     if (latestBlock.number === null) throw new EvidenceError("target_block_calibration_failed");
-    const latestNumber = latestBlock.number;
     return {
-      latestNumber,
-      estimates: timestamps.map((timestampSeconds) => {
-        const ageSeconds = Number(latestBlock.timestamp) - timestampSeconds;
-        // X Layer currently advances one sequencer block per second. A bounded
-        // event scan verifies the estimate; the binary-search fallback preserves
-        // correctness if that cadence changes.
-        const offset = BigInt(Math.max(0, ageSeconds));
-        return offset < latestNumber ? latestNumber - offset : 0n;
-      }),
+      latestNumber: latestBlock.number,
+      latestTimestamp: latestBlock.timestamp,
     };
+  }
+
+  function eventLogRanges(fromBlock, toBlock) {
+    if (toBlock < fromBlock) throw new EvidenceError("target_event_search_window_invalid");
+    const ranges = [];
+    for (let start = fromBlock; start <= toBlock; start += MAX_LOG_SCAN_BLOCKS) {
+      ranges.push({
+        fromBlock: start,
+        toBlock: start + MAX_LOG_SCAN_BLOCKS - 1n < toBlock
+          ? start + MAX_LOG_SCAN_BLOCKS - 1n
+          : toBlock,
+      });
+    }
+    return ranges;
+  }
+
+  async function requestEventLogBatch({ eventTopic, jobId, ranges }) {
+    try {
+      const responses = await Promise.all(ranges.map((range) => publicClient.request({
+        method: "eth_getLogs",
+        params: [{
+          address: OKX_TASK.escrow,
+          fromBlock: toHex(range.fromBlock),
+          toBlock: toHex(range.toBlock),
+          topics: [eventTopic, jobId],
+        }],
+      })));
+      return responses.flat().filter((log) => log?.removed !== true);
+    } catch (error) {
+      throw new EvidenceError("target_event_lookup_failed", error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function eventLogsInRange({ eventTopic, jobId, fromBlock, toBlock }) {
+    const ranges = eventLogRanges(fromBlock, toBlock);
+    const matches = [];
+    for (let offset = 0; offset < ranges.length; offset += LOG_SCAN_CONCURRENCY) {
+      matches.push(...await requestEventLogBatch({
+        eventTopic,
+        jobId,
+        ranges: ranges.slice(offset, offset + LOG_SCAN_CONCURRENCY),
+      }));
+    }
+    return matches;
+  }
+
+  // Job acceptance is the escrow's one-way 0 -> 1 transition. Stop after the
+  // first matching batch instead of querying the remaining 30-minute window;
+  // verifyTargetOrder then fetches that transaction receipt and independently
+  // proves both the transition and current accepted state. Multiple matches in
+  // the same batch still fail closed.
+  async function firstEventInRange({ eventTopic, jobId, fromBlock, toBlock }) {
+    const ranges = eventLogRanges(fromBlock, toBlock);
+    for (let offset = 0; offset < ranges.length; offset += LOG_SCAN_CONCURRENCY) {
+      const matches = await requestEventLogBatch({
+        eventTopic,
+        jobId,
+        ranges: ranges.slice(offset, offset + LOG_SCAN_CONCURRENCY),
+      });
+      if (matches.length > 1) throw new EvidenceError("target_event_ambiguous");
+      if (matches.length === 1) return matches[0];
+    }
+    return null;
   }
 
   async function findEventNearBlock({ eventTopic, jobId, centerBlock, latest, radius = 8n }) {
     const start = centerBlock > radius ? centerBlock - radius : 0n;
     const end = centerBlock + radius < latest ? centerBlock + radius : latest;
-    const requests = [];
-    for (let fromBlock = start; fromBlock <= end; fromBlock += 100n) {
-      const toBlock = fromBlock + 99n < end ? fromBlock + 99n : end;
-      requests.push(publicClient.request({
-        method: "eth_getLogs",
-        params: [{
-          address: OKX_TASK.escrow,
-          fromBlock: toHex(fromBlock),
-          toBlock: toHex(toBlock),
-          topics: [eventTopic, jobId],
-        }],
-      }));
-    }
-    let matches;
-    try {
-      matches = (await Promise.all(requests)).flat();
-    } catch (error) {
-      throw new EvidenceError("target_event_lookup_failed", error instanceof Error ? error.message : String(error));
-    }
+    const matches = await eventLogsInRange({
+      eventTopic,
+      jobId,
+      fromBlock: start,
+      toBlock: end,
+    });
     if (matches.length !== 1) {
       throw new EvidenceError(matches.length ? "target_event_ambiguous" : "target_event_not_found");
     }
     return matches[0];
   }
 
-  async function resolveTargetOrderEvidence({ jobId, createdAt, acceptedAt }) {
+  async function eventAtTimestamp({ eventTopic, jobId, timestampSeconds, calibration, radius = 8n }) {
+    const ageSeconds = Number(calibration.latestTimestamp) - timestampSeconds;
+    // X Layer currently advances roughly one sequencer block per second. The
+    // bounded scan verifies this estimate; binary search below preserves
+    // correctness if the cadence drifts.
+    const offset = BigInt(Math.max(0, ageSeconds));
+    const estimatedBlock = offset < calibration.latestNumber
+      ? calibration.latestNumber - offset
+      : 0n;
+    try {
+      return await findEventNearBlock({
+        eventTopic,
+        jobId,
+        centerBlock: estimatedBlock,
+        latest: calibration.latestNumber,
+        radius,
+      });
+    } catch (error) {
+      if (!(error instanceof EvidenceError) || error.code !== "target_event_not_found") throw error;
+      const exactBlock = await firstBlockAtOrAfter(timestampSeconds);
+      return findEventNearBlock({
+        eventTopic,
+        jobId,
+        centerBlock: exactBlock,
+        latest: calibration.latestNumber,
+        radius,
+      });
+    }
+  }
+
+  function evidenceFromTaskLogs(jobId, createdLog, acceptedLog) {
+    if (createdLog.topics.length < 3) throw new EvidenceError("target_creation_evidence_missing");
+    if (acceptedLog.topics.length < 3) throw new EvidenceError("target_acceptance_evidence_missing");
+    if (!isBytes32(createdLog.transactionHash)) throw new EvidenceError("target_creation_transaction_missing");
+    if (!isBytes32(acceptedLog.transactionHash)) throw new EvidenceError("target_acceptance_transaction_missing");
+    const creationBlock = BigInt(createdLog.blockNumber);
+    const acceptanceBlock = BigInt(acceptedLog.blockNumber);
+    if (acceptanceBlock < creationBlock) throw new EvidenceError("target_event_timeline_invalid");
+    return {
+      jobId,
+      buyer: topicAddress(createdLog.topics[2]),
+      creationTxHash: createdLog.transactionHash,
+      acceptanceTxHash: acceptedLog.transactionHash,
+      creationBlock: creationBlock.toString(),
+      acceptanceBlock: acceptanceBlock.toString(),
+    };
+  }
+
+  async function resolveTargetOrderEvidenceAtTimes({ jobId, createdAt, acceptedAt }, radius) {
     if (!isBytes32(jobId)) throw new EvidenceError("invalid_target_job_id");
     const createdAtSeconds = Math.floor(Date.parse(createdAt) / 1000);
     const acceptedAtSeconds = Math.floor(Date.parse(acceptedAt) / 1000);
-    if (!Number.isSafeInteger(createdAtSeconds) || !Number.isSafeInteger(acceptedAtSeconds)) {
+    if (
+      !Number.isSafeInteger(createdAtSeconds)
+      || !Number.isSafeInteger(acceptedAtSeconds)
+      || createdAtSeconds <= 0
+      || acceptedAtSeconds <= 0
+    ) {
       throw new EvidenceError("target_event_timestamp_invalid");
     }
     if (acceptedAtSeconds < createdAtSeconds) {
@@ -235,45 +332,92 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
 
     let calibration;
     try {
-      calibration = await estimateBlocksAtTimestamps([createdAtSeconds, acceptedAtSeconds]);
+      calibration = await calibrateBlockTiming();
     } catch (error) {
       if (error instanceof EvidenceError) throw error;
       throw new EvidenceError("target_block_calibration_failed", error instanceof Error ? error.message : String(error));
     }
-
-    async function resolveEvent(eventTopic, estimatedBlock, timestampSeconds) {
-      try {
-        return await findEventNearBlock({
-          eventTopic,
-          jobId,
-          centerBlock: estimatedBlock,
-          latest: calibration.latestNumber,
-        });
-      } catch (error) {
-        if (!(error instanceof EvidenceError) || error.code !== "target_event_not_found") throw error;
-        const exactBlock = await firstBlockAtOrAfter(timestampSeconds);
-        return findEventNearBlock({
-          eventTopic,
-          jobId,
-          centerBlock: exactBlock,
-          latest: calibration.latestNumber,
-        });
-      }
+    const latestTimestamp = Number(calibration.latestTimestamp);
+    if (createdAtSeconds > latestTimestamp + 120) {
+      throw new EvidenceError("target_creation_time_hint_in_future");
+    }
+    if (acceptedAtSeconds > latestTimestamp + 120) {
+      throw new EvidenceError("target_acceptance_time_hint_in_future");
     }
 
     const [createdLog, acceptedLog] = await Promise.all([
-      resolveEvent(OKX_TASK.createdTopic, calibration.estimates[0], createdAtSeconds),
-      resolveEvent(OKX_TASK.acceptedTopic, calibration.estimates[1], acceptedAtSeconds),
+      eventAtTimestamp({
+        eventTopic: OKX_TASK.createdTopic,
+        jobId,
+        timestampSeconds: createdAtSeconds,
+        calibration,
+        radius,
+      }),
+      eventAtTimestamp({
+        eventTopic: OKX_TASK.acceptedTopic,
+        jobId,
+        timestampSeconds: acceptedAtSeconds,
+        calibration,
+        radius,
+      }),
     ]);
-    if (createdLog.topics.length < 3) throw new EvidenceError("target_creation_evidence_missing");
-    return {
+    return evidenceFromTaskLogs(jobId, createdLog, acceptedLog);
+  }
+
+  async function resolveTargetOrderEvidence(args) {
+    return resolveTargetOrderEvidenceAtTimes(args, 8n);
+  }
+
+  async function resolveTargetOrderEvidenceFromHints({ jobId, createdAt, acceptedAt = "" }) {
+    if (acceptedAt) {
+      return resolveTargetOrderEvidenceAtTimes(
+        { jobId, createdAt, acceptedAt },
+        BigInt(EVIDENCE_RESOLVER.creationHintRadiusBlocks),
+      );
+    }
+    if (!isBytes32(jobId)) throw new EvidenceError("invalid_target_job_id");
+    const createdAtSeconds = Math.floor(Date.parse(createdAt) / 1000);
+    if (!Number.isSafeInteger(createdAtSeconds) || createdAtSeconds <= 0) {
+      throw new EvidenceError("target_event_timestamp_invalid");
+    }
+
+    let latestBlock;
+    try {
+      latestBlock = await publicClient.getBlock();
+    } catch (error) {
+      throw new EvidenceError("target_block_calibration_failed", error instanceof Error ? error.message : String(error));
+    }
+    if (latestBlock.number === null) throw new EvidenceError("target_block_calibration_failed");
+    if (createdAtSeconds > Number(latestBlock.timestamp) + 120) {
+      throw new EvidenceError("target_creation_time_hint_in_future");
+    }
+
+    const createdLog = await eventAtTimestamp({
+      eventTopic: OKX_TASK.createdTopic,
       jobId,
-      buyer: topicAddress(createdLog.topics[2]),
-      creationTxHash: createdLog.transactionHash,
-      acceptanceTxHash: acceptedLog.transactionHash,
-      creationBlock: BigInt(createdLog.blockNumber).toString(),
-      acceptanceBlock: BigInt(acceptedLog.blockNumber).toString(),
-    };
+      timestampSeconds: createdAtSeconds,
+      calibration: {
+        latestNumber: latestBlock.number,
+        latestTimestamp: latestBlock.timestamp,
+      },
+      radius: BigInt(EVIDENCE_RESOLVER.creationHintRadiusBlocks),
+    });
+    const creationBlock = BigInt(createdLog.blockNumber);
+    const scanEnd = creationBlock + MAX_ACCEPTANCE_SCAN_BLOCKS - 1n < latestBlock.number
+      ? creationBlock + MAX_ACCEPTANCE_SCAN_BLOCKS - 1n
+      : latestBlock.number;
+    const acceptedLog = await firstEventInRange({
+      eventTopic: OKX_TASK.acceptedTopic,
+      jobId,
+      fromBlock: creationBlock,
+      toBlock: scanEnd,
+    });
+    if (!acceptedLog) {
+      const status = await getJobStatus(jobId);
+      if (status === 0) throw new EvidenceError("target_job_not_accepted:0");
+      throw new EvidenceError("target_acceptance_time_hint_required");
+    }
+    return evidenceFromTaskLogs(jobId, createdLog, acceptedLog);
   }
 
   async function verifyTargetOrder({
@@ -574,6 +718,7 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
     getReserveBalance,
     findProviderSettlement,
     resolveTargetOrderEvidence,
+    resolveTargetOrderEvidenceFromHints,
     verifyProviderPaymentAuthorization,
     verifySettlement: ({ txHash, payer, amountAtomic }) => verifyTransfer({
       txHash,

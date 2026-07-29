@@ -55,17 +55,19 @@ PolicyPool never reads a marketplace page to decide what it owes. Every covered 
 
 OKX.AI removed two fields from its public task page with no notice and no API replacement: `timeline` became `null` and `acceptCommands` was deleted. Between them they carried a job's acceptance instant and its on-chain task id. Six task ids across statuses `0`, `6`, and `7` return the same shape, so this is platform-wide rather than one stale task.
 
-Nothing covered was affected. `chain.verifyTargetOrder` still binds buyer, job, provider wallet, agent id, token, amount, service type, and accepted-service hash, and every receipt issued before that date stays independently replayable. What is unavailable is quoting from a public task reference in either form, since a bare task id resolves to the same page as a URL and the fields tying either to a job are gone. The paid endpoint never read that page and still works. It requires `targetAgent`, `jobDescription`, `targetJobId`, `targetCreationTxHash`, and `targetAcceptanceTxHash`, with `requestedCoverageUSDT` optional.
+Nothing covered was affected. `chain.verifyTargetOrder` still binds buyer, job, provider wallet, agent id, token, amount, service type, and accepted-service hash, and every receipt issued before that date stays independently replayable. What is unavailable is quoting from a public task reference in either form, since a bare task id resolves to the same page as a URL and the fields tying either to a job are gone.
+
+The free preflight now provides a bounded event resolver. Supply `targetAgent`, `targetJobId`, `targetCreatedAt`, and `jobDescription`. The creation time is an untrusted search hint within roughly two minutes; PolicyPool locates the unique indexed creation event, derives the buyer, scans at most 1,800 X Layer blocks for acceptance, derives both transaction hashes, and then runs the same receipt verifier. `targetAcceptedAt` is needed only when acceptance happened more than 30 minutes after creation, and `targetBuyer` is an optional assertion that must match the derived buyer. Exact creation and acceptance transaction hashes remain the fail-closed fallback.
 
 One part of the first response was wrong and is worth recording: the failure was classified `retryable` with a ten-second delay, a condition that could never clear. The release gate caught it the same day and it is now a non-retryable `PUBLIC_TASK_EVIDENCE_UNAVAILABLE` naming the working fields. No payment was taken and no receipt was issued for any request that failed this way.
 
-PolicyPool will not fuzzy-match a public task to an on-chain job from a creation time, an amount, and an agent id. Exact verified binding is the product.
+PolicyPool does not match by amount, agent name, or time alone. The caller must provide the indexed `bytes32` job ID; time only narrows a bounded block search, and no unique escrow event means no quote. Exact verified binding remains the product.
 
 ## Agent Coverage Loop
 
 1. The target agent must have a versioned policy snapshot in `api/lib/policy-registry.js`.
-2. The free preflight accepts an OKX.AI task URL or public task ID, reads the public task state, resolves its onchain evidence, and returns a signed short-lived quote bound to that job and buyer. Advanced callers may still supply the resolved evidence directly to the paid endpoint. **Since 2026-07-25 the entire public-task-reference path in this step is unavailable, for a bare task id exactly as for a URL**, since both normalise to the same withdrawn page for the reason recorded above. The direct-evidence path to the paid endpoint is unaffected.
-3. `api/lib/chain.js` verifies both transactions against the public task escrow and binds buyer, job, provider wallet, agent ID, token, paid amount, service type, and the exact accepted-service hash. The coverage payer must own the target job.
+2. The free preflight resolves indexed X Layer events from a job ID and creation-time hint, then returns a signed short-lived quote bound to the verified job and buyer. Exact transaction hashes remain an advanced fallback. **Since 2026-07-25 the entire public-task-reference path in this step is unavailable, for a bare task id exactly as for a URL**, since both normalise to the same withdrawn page.
+3. `api/lib/chain.js` derives or accepts both transaction hashes, then verifies them against the task escrow and binds buyer, job, provider wallet, agent ID, token, paid amount, service type, and the exact accepted-service hash. The coverage payer must own the target job.
 4. The paid endpoint recovers the canonical request from the quote URL, x402 requirements, request body, or exactly one open quote for the verified payer. Zero or multiple payer matches fail without settlement. Direct full-body requests reject a visibly non-accepted task before returning a payment challenge, and the full eligibility pass runs again before a valid signed service payment is settled.
 5. The durable ledger atomically checks that active, pending, and payout-due liabilities plus the new cap do not exceed the live reserve.
 6. Each provider policy publishes an enrollment window. The deadline is derived from the verified acceptance block plus the registered target-policy SLA; callers cannot shorten or extend either clock.
@@ -182,6 +184,20 @@ npm run agent:gate
 The coverage preflight is free and read-only. It never reserves capacity or signs a payment. A green result returns a signed quote and a backward-compatible canonical body. Use `paidRequest.endpoint` as returned; the paid request must come from the target job's verified buyer wallet. The endpoint rechecks job state, policy version, enrollment window, SLA, target-job value, and reserve capacity before settlement, even when a marketplace drops the replay body.
 
 ```bash
+curl -sS https://policypool.vercel.app/api/coverage-preflight \
+  -H 'content-type: application/json' \
+  -d '{
+    "targetAgent": "GlassDesk#3465",
+    "targetJobId": "0x...",
+    "targetCreatedAt": "2026-07-29T12:00:00.000Z",
+    "jobDescription": "Verify a public token market claim with evidence and source links.",
+    "requestedCoverageUSDT": "0.5"
+  }'
+```
+
+`targetCreatedAt` is a locator, not evidence. The response is eligible only after the indexed events and both resulting transactions pass the authoritative verifier.
+
+```bash
 npm run agent:verify-live
 ```
 
@@ -193,7 +209,7 @@ Required production configuration is documented in `.env.example`. The paid rout
 
 ```text
 api/covered-job-receipt.js       # paid guard + coverage decision
-api/coverage-preflight.js        # free OKX task URL resolver + eligibility check
+api/coverage-preflight.js        # free bounded X Layer event resolver + eligibility check
 api/coverage-ledger.js           # public reserve and liability ledger
 api/coverage-status.js           # one receipt plus live target-job status
 api/reconcile-coverage.js        # authenticated objective-state reconciler

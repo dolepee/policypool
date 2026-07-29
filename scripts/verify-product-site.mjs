@@ -125,16 +125,13 @@ assert.match(coverage, /name="targetServiceId"/, "coverage form must bind dynami
 // the gate green, which is the failure mode these checks exist to prevent.
 const evidenceNotice = coverage.match(/<div class="evidence-notice"[\s\S]*?<\/div>/)?.[0] || "";
 assert.ok(evidenceNotice, "coverage form must disclose the withdrawn public task evidence");
-// Every field the paid endpoint actually requires, verified against production:
-// omitting targetAgent returns target_agent_required and omitting jobDescription
-// returns job_description_required, so a notice listing only the three evidence
-// hashes sends a visitor into a rejection.
+// Every field the default event resolver requires. Exact transaction hashes are
+// still available in the form, but they are no longer the minimum viable input.
 for (const field of [
   "targetAgent",
   "jobDescription",
   "targetJobId",
-  "targetCreationTxHash",
-  "targetAcceptanceTxHash",
+  "targetCreatedAt",
 ]) {
   assert.match(evidenceNotice, new RegExp(`<code>${field}</code>`), `the notice must name ${field} as a required input`);
 }
@@ -249,6 +246,7 @@ const coverageForm = coverage.match(/<form class="coverage-form-card"[\s\S]*?<\/
 assert.ok(coverageForm, "the coverage page must still carry the preflight form");
 for (const field of [
   "targetJobId",
+  "targetCreatedAt",
   "targetCreationTxHash",
   "targetAcceptanceTxHash",
   "targetBuyer",
@@ -257,7 +255,7 @@ for (const field of [
   assert.match(
     coverageForm,
     new RegExp(`name="${field}"`),
-    `the form must collect ${field} so direct evidence is usable without hand-writing a request`,
+    `the form must collect ${field} so both on-chain evidence modes are usable without hand-writing a request`,
   );
 }
 
@@ -267,8 +265,13 @@ const modeSwitch = coverageForm.match(/<fieldset class="mode-switch"[\s\S]*?<\/f
 assert.ok(modeSwitch, "the form must let a visitor see which evidence modes exist");
 assert.match(
   modeSwitch,
-  /value="verified_onchain_evidence"[^>]*checked/,
-  "the working mode must be the default",
+  /value="resolved_onchain_events"[^>]*checked/,
+  "the lower-friction event resolver must be the default",
+);
+assert.match(
+  modeSwitch,
+  /value="verified_onchain_evidence"/,
+  "exact transactions must remain available as the advanced fallback",
 );
 assert.match(
   modeSwitch,
@@ -307,9 +310,14 @@ assert.match(
   /public task reference in either form/,
   "the withdrawal record must state that a bare task id is equally unavailable",
 );
-for (const field of ["targetAgent", "jobDescription", "targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash"]) {
-  assert.match(withdrawalRecord, new RegExp(`\`${field}\``), `the README fallback must name ${field}`);
+for (const field of ["targetAgent", "jobDescription", "targetJobId", "targetCreatedAt"]) {
+  assert.match(withdrawalRecord, new RegExp(`\`${field}\``), `the README event fallback must name ${field}`);
 }
+assert.match(
+  withdrawalRecord,
+  /exact creation and acceptance transaction hashes/i,
+  "the README must retain exact transactions as the fallback when hint resolution is insufficient",
+);
 
 for (const [file, route] of subordinatePages) {
   const html = await readFile(new URL(`../web/${file}`, import.meta.url), "utf8");

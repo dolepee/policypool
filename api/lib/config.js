@@ -48,6 +48,11 @@ export const OKX_TASK = {
   acceptedTopic: "0x49c131ab4997b3c3791e5e208b585c027c75b36373559faece1d17bb38a1cac7",
 };
 
+export const EVIDENCE_RESOLVER = {
+  creationHintRadiusBlocks: 120,
+  maxAutomaticAcceptanceScanBlocks: 1_800,
+};
+
 export const OBJECTIVE_BREACH_RULES = [
   "accepted_job_still_undelivered_after_deadline",
 ];

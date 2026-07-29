@@ -17,7 +17,28 @@ pilot policy, which was retired on 21 July after its controlled call stopped
 before provider payment and clock start. Warden is not enrolled on the canonical
 v0.4 stack, and no covered Warden job completed.
 
-Input:
+## Free Preflight
+
+The default free path no longer requires a buyer to discover two transaction hashes:
+
+```json
+{
+  "targetAgent": "GlassDesk#3465",
+  "targetJobId": "0x...",
+  "targetCreatedAt": "2026-07-29T12:00:00.000Z",
+  "jobDescription": "Verify a public token market claim with evidence and source links.",
+  "requestedCoverageUSDT": "0.5"
+}
+```
+
+`targetCreatedAt` is an untrusted ISO-8601 search hint, not proof. PolicyPool searches a bounded window around it for the unique indexed creation event, derives the buyer, then scans at most 1,800 blocks after creation for the acceptance event. Both resulting transactions still pass the full target-order verifier. Supply optional `targetAcceptedAt` when acceptance occurred more than 30 minutes after creation; optional `targetBuyer` is checked against the derived buyer.
+
+The exact-evidence mode remains available when the caller already has
+`targetCreationTxHash`, `targetAcceptanceTxHash`, and `targetBuyer`. The public
+task URL/ID mode is unavailable while OKX.AI withholds the acceptance timeline
+and on-chain job ID.
+
+## Paid Endpoint Input
 
 ```json
 {
@@ -33,7 +54,7 @@ Input:
 
 `quoteId` is optional for legacy full-body clients. The free preflight returns a signed, short-lived quote in the paid URL, x402 accepted requirements, and canonical body. If OKX drops the replay body, PolicyPool can recover only when the verified payer has exactly one canonical open quote; zero or multiple matches fail without settlement.
 
-For direct full-body clients, PolicyPool checks the public target-job status before returning a payment challenge and declines tasks that are already submitted or terminal. This early check only removes an unnecessary signing round-trip; payer ownership and the complete target evidence are still reverified after authorization and before settlement.
+For direct full-body clients, PolicyPool checks the on-chain target-job status before returning a payment challenge and declines tasks that are already submitted or terminal. This early check only removes an unnecessary signing round-trip; payer ownership and the complete target evidence are still reverified after authorization and before settlement.
 
 The target job must still be in accepted state. PolicyPool verifies the creation and acceptance transactions against the public OKX task escrow and binds the buyer wallet, job ID, provider wallet, target agent ID, payment token, target-job value, service type, exact accepted-service hash, and acceptance timestamp. The coverage payer must be the target-job buyer.
 

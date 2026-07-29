@@ -1,5 +1,5 @@
 import { createChainService } from "./lib/chain.js";
-import { COVERAGE, MARKETPLACE, PAYMENT, XLAYER } from "./lib/config.js";
+import { COVERAGE, EVIDENCE_RESOLVER, MARKETPLACE, PAYMENT, XLAYER } from "./lib/config.js";
 import { createLedger } from "./lib/ledger.js";
 import { listPublishedPolicies, policyCoverageCapAtomic } from "./lib/policy-registry.js";
 import { formatUsdtAtomic, sendJson } from "./lib/utils.js";
@@ -175,8 +175,7 @@ export function createManifestHandler({
       },
       // The preflight is advertised as its own endpoint and does not share the
       // paid service's contract. It accepts a job by public marketplace
-      // reference or by direct on-chain evidence, and direct mode additionally
-      // requires the buyer wallet so the evidence can be bound to the payer.
+      // reference, exact transactions, or bounded event-hint resolution.
       preflightInput: {
         appliesTo: "https://policypool.vercel.app/api/coverage-preflight",
         modes: {
@@ -197,6 +196,19 @@ export function createManifestHandler({
               "targetBuyer",
               "jobDescription",
             ],
+          },
+          resolvedEventEvidence: {
+            available: true,
+            required: [
+              "targetAgent",
+              "targetJobId",
+              "targetCreatedAt",
+              "jobDescription",
+            ],
+            optional: ["targetAcceptedAt", "targetBuyer"],
+            trustModel: "time_values_are_search_hints_only; indexed_task_escrow_events_supply_the_buyer_and_transaction_hashes",
+            creationHintRadiusBlocks: EVIDENCE_RESOLVER.creationHintRadiusBlocks,
+            maximumAutomaticAcceptanceScanBlocks: EVIDENCE_RESOLVER.maxAutomaticAcceptanceScanBlocks,
           },
         },
         optional: ["requestedCoverageUSDT", "targetServiceId"],

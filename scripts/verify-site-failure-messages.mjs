@@ -231,20 +231,31 @@ const field = (className, controls) => ({
   querySelectorAll: () => controls,
 });
 const buildForm = () => {
-  const directControls = [
+  const onchainControls = [
     control("targetJobId"),
+    control("jobDescription"),
+  ];
+  const directControls = [
     control("targetCreationTxHash"),
     control("targetAcceptanceTxHash"),
     control("targetBuyer"),
-    control("jobDescription"),
+  ];
+  const eventControls = [
+    control("targetCreatedAt"),
+    control("targetAcceptedAt", { dataset: { optional: "true" } }),
+    control("targetBuyer", { dataset: { optional: "true" } }),
   ];
   const publicControls = [control("taskReference")];
   const fields = [
+    field("onchain-evidence-field", onchainControls),
     field("direct-evidence-field", directControls),
+    field("event-hint-field", eventControls),
     field("public-reference-field", publicControls),
   ];
   return {
+    onchainControls,
     directControls,
+    eventControls,
     publicControls,
     fields,
     querySelectorAll(selector) {
@@ -254,26 +265,35 @@ const buildForm = () => {
 };
 
 const directForm = buildForm();
-applyEvidenceMode(directForm, true);
+applyEvidenceMode(directForm, "verified_onchain_evidence");
 assert.ok(directForm.publicControls.every((c) => c.disabled === true),
   "the public field must be disabled in direct mode so FormData cannot carry it");
 assert.ok(directForm.publicControls.every((c) => c.required === false),
   "a hidden field must not be required, or validation blocks on an invisible input");
 assert.ok(directForm.directControls.every((c) => c.disabled === false));
+assert.ok(directForm.onchainControls.every((c) => c.disabled === false));
+assert.ok(directForm.eventControls.every((c) => c.disabled === true));
 assert.equal(directForm.fields.find((f) => f.className === "public-reference-field").hidden, true);
 
 const publicForm = buildForm();
-applyEvidenceMode(publicForm, false);
+applyEvidenceMode(publicForm, "public_task_reference");
 assert.ok(publicForm.publicControls.every((c) => c.disabled === false),
   "restoring public mode must enable the task field, or the request carries no reference");
 assert.ok(publicForm.publicControls.every((c) => c.required === true),
   "the task reference is the whole input of the public path, so it must be required there");
 assert.ok(publicForm.directControls.every((c) => c.disabled === true),
   "direct fields must not be submitted alongside a public reference");
+assert.ok(publicForm.onchainControls.every((c) => c.disabled === true));
+assert.ok(publicForm.eventControls.every((c) => c.disabled === true));
 assert.equal(publicForm.fields.find((f) => f.className === "direct-evidence-field").hidden, true);
 
-// An input marked optional stays optional in its own mode.
-const optionalForm = buildForm();
-optionalForm.directControls[0].dataset.optional = "true";
-applyEvidenceMode(optionalForm, true);
-assert.equal(optionalForm.directControls[0].required, false, "an optional field must never be demanded");
+const eventForm = buildForm();
+applyEvidenceMode(eventForm, "resolved_onchain_events");
+assert.ok(eventForm.onchainControls.every((c) => c.disabled === false));
+assert.ok(eventForm.onchainControls.every((c) => c.required === true));
+assert.ok(eventForm.eventControls.every((c) => c.disabled === false));
+assert.equal(eventForm.eventControls[0].required, true, "the creation-time hint is required");
+assert.equal(eventForm.eventControls[1].required, false, "the acceptance-time hint is optional");
+assert.equal(eventForm.eventControls[2].required, false, "the buyer assertion is optional");
+assert.ok(eventForm.directControls.every((c) => c.disabled === true));
+assert.ok(eventForm.publicControls.every((c) => c.disabled === true));

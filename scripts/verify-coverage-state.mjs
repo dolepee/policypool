@@ -62,20 +62,68 @@ for (const error of ["okx_task_timeline_unavailable", "okx_task_onchain_id_unava
   assert.match(withdrawn.nextAction, /no task should be recreated/);
   // A dead end would be honest but useless. The paid endpoint accepts resolved
   // on-chain evidence and never reads the public task page, so that path is
-    // unaffected and is the one a caller should be sent to. Name the exact fields
-    // rather than gesturing at "on-chain evidence".
+    // unaffected and is the one a caller should be sent to. Lead with the bounded
+    // event resolver, while retaining exact transactions as the fallback.
     for (const field of [
       "targetAgent",
       "targetJobId",
-      "targetCreationTxHash",
-      "targetAcceptanceTxHash",
-      "targetBuyer",
+      "targetCreatedAt",
       "jobDescription",
     ]) {
       assert.match(withdrawn.nextAction, new RegExp(field), `${error} must name ${field}`);
     }
+    assert.match(withdrawn.nextAction, /exact creation and acceptance transactions/i);
     assert.match(withdrawn.nextAction, /free \/api\/coverage-preflight/);
   }
+
+const incompleteEventHint = enrich({
+  ok: false,
+  error: "event_hint_evidence_incomplete",
+  charged: false,
+  required: ["targetAgent", "targetJobId", "targetCreatedAt", "jobDescription"],
+});
+assert.equal(incompleteEventHint.code, "EVENT_HINT_EVIDENCE_INCOMPLETE");
+assert.equal(incompleteEventHint.retryable, false);
+assert.match(incompleteEventHint.nextAction, /targetAcceptedAt/);
+
+for (const [error, code, field] of [
+  ["target_creation_time_hint_in_future", "CREATION_TIME_HINT_IN_FUTURE", "targetCreatedAt"],
+  ["target_acceptance_time_hint_in_future", "ACCEPTANCE_TIME_HINT_IN_FUTURE", "targetAcceptedAt"],
+  ["target_event_timestamp_invalid", "EVENT_TIME_HINT_INVALID", "ISO-8601"],
+  ["target_event_timeline_invalid", "EVENT_TIMELINE_INVALID", "event-time hints"],
+]) {
+  const invalidHint = enrich({ ok: true, eligible: false, reason: error, charged: false });
+  assert.equal(invalidHint.code, code);
+  assert.equal(invalidHint.retryable, false);
+  assert.match(invalidHint.nextAction, new RegExp(field));
+}
+
+const lateAcceptance = enrich({
+  ok: true,
+  eligible: false,
+  reason: "target_acceptance_time_hint_required",
+  charged: false,
+});
+assert.equal(lateAcceptance.code, "ACCEPTANCE_TIME_HINT_REQUIRED");
+assert.equal(lateAcceptance.retryable, false);
+assert.match(lateAcceptance.nextAction, /targetAcceptedAt/);
+
+for (const [error, code] of [
+  ["target_event_not_found", "TARGET_EVENT_NOT_FOUND"],
+  ["target_event_ambiguous", "TARGET_EVENT_AMBIGUOUS"],
+]) {
+  const eventFailure = enrich({ ok: true, eligible: false, reason: error, charged: false });
+  assert.equal(eventFailure.code, code);
+  assert.equal(eventFailure.retryable, false);
+}
+
+for (const error of ["target_block_calibration_failed", "target_event_search_window_invalid"]) {
+  const resolverOutage = enrich({ ok: false, error, charged: false }, { httpStatus: 503 });
+  assert.equal(resolverOutage.code, "CHAIN_EVIDENCE_PENDING");
+  assert.equal(resolverOutage.retryable, true);
+  assert.equal(resolverOutage.retryAfterSeconds, 15);
+  assert.match(resolverOutage.nextAction, /do not change the input/i);
+}
 
 const unregistered = enrich({
   ok: false,
