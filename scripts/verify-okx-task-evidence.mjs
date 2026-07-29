@@ -13,6 +13,7 @@ const transferProbe = (client) => createChainService({ client }).verifySettlemen
   amountAtomic: "1",
 });
 
+let missingHashPolls = 0;
 await assert.rejects(
   transferProbe({
     async getTransactionReceipt() {
@@ -21,10 +22,15 @@ await assert.rejects(
     async getTransaction() {
       throw { name: "TransactionNotFoundError" };
     },
+    async waitForTransactionReceipt() {
+      missingHashPolls += 1;
+      throw { name: "WaitForTransactionReceiptTimeoutError" };
+    },
   }),
   (error) => error?.code === "transaction_not_found",
-  "a hash absent from both receipt and transaction lookup is caller evidence error, not pending",
+  "a hash absent after the polling grace period is caller evidence error, not pending",
 );
+assert.equal(missingHashPolls, 1, "an absent hash must receive the full receipt-polling grace period");
 await assert.rejects(
   transferProbe({
     async getTransactionReceipt() {
@@ -32,6 +38,9 @@ await assert.rejects(
     },
     async getTransaction() {
       return null;
+    },
+    async waitForTransactionReceipt() {
+      throw { name: "WaitForTransactionReceiptTimeoutError" };
     },
   }),
   (error) => error?.code === "transaction_not_found",
@@ -41,6 +50,25 @@ const missingContract = describeFailure("transaction_not_found", 200);
 assert.equal(missingContract.code, "TRANSACTION_NOT_FOUND");
 assert.equal(missingContract.retryable, false);
 assert.match(missingContract.nextAction, /check the transaction hash and chain/i);
+
+let propagationPolls = 0;
+await assert.rejects(
+  transferProbe({
+    async getTransactionReceipt() {
+      throw { name: "TransactionReceiptNotFoundError" };
+    },
+    async getTransaction() {
+      throw { name: "TransactionNotFoundError" };
+    },
+    async waitForTransactionReceipt() {
+      propagationPolls += 1;
+      return { status: "success", logs: [] };
+    },
+  }),
+  (error) => error?.code === "verified_transfer_event_missing",
+  "a receipt that appears during the grace period must be verified rather than rejected as absent",
+);
+assert.equal(propagationPolls, 1);
 
 await assert.rejects(
   transferProbe({
