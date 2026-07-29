@@ -36,6 +36,18 @@ const MAX_ACCEPTANCE_SCAN_BLOCKS = BigInt(EVIDENCE_RESOLVER.maxAutomaticAcceptan
 // CI runs the push and pull-request workflows together. One request at a time
 // trades a little latency for deterministic availability.
 const LOG_SCAN_CONCURRENCY = 1;
+let eventLogRequestTail = Promise.resolve();
+
+function enqueueEventLogRequest(request) {
+  const result = eventLogRequestTail.then(request, request);
+  // A failed RPC call must reject its own resolver without poisoning the queue
+  // for every later request in this server process.
+  eventLogRequestTail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
 
 export class EvidenceError extends Error {
   constructor(code, message) {
@@ -207,15 +219,17 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
 
   async function requestEventLogBatch({ eventTopic, jobId, ranges }) {
     try {
-      const responses = await Promise.all(ranges.map((range) => publicClient.request({
-        method: "eth_getLogs",
-        params: [{
-          address: OKX_TASK.escrow,
-          fromBlock: toHex(range.fromBlock),
-          toBlock: toHex(range.toBlock),
-          topics: [eventTopic, jobId],
-        }],
-      })));
+      const responses = await Promise.all(ranges.map((range) => enqueueEventLogRequest(
+        () => publicClient.request({
+          method: "eth_getLogs",
+          params: [{
+            address: OKX_TASK.escrow,
+            fromBlock: toHex(range.fromBlock),
+            toBlock: toHex(range.toBlock),
+            topics: [eventTopic, jobId],
+          }],
+        }),
+      )));
       return responses.flat().filter((log) => log?.removed !== true);
     } catch (error) {
       throw new EvidenceError("target_event_lookup_failed", error instanceof Error ? error.message : String(error));

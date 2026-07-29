@@ -51,6 +51,7 @@ function resolverClient({
   secondsPerBlock = 1n,
   failLogLookup = false,
   requestDelayMs = 0,
+  requestTracker,
 } = {}) {
   const requests = [];
   let statusReads = 0;
@@ -81,6 +82,10 @@ function resolverClient({
       requests.push(filter);
       activeLogRequests += 1;
       peakLogRequests = Math.max(peakLogRequests, activeLogRequests);
+      if (requestTracker) {
+        requestTracker.active += 1;
+        requestTracker.peak = Math.max(requestTracker.peak, requestTracker.active);
+      }
       try {
         if (requestDelayMs > 0) {
           await new Promise((resolve) => setTimeout(resolve, requestDelayMs));
@@ -102,6 +107,7 @@ function resolverClient({
         return [];
       } finally {
         activeLogRequests -= 1;
+        if (requestTracker) requestTracker.active -= 1;
       }
     },
     async readContract() {
@@ -258,6 +264,27 @@ assert.equal(
   "creation and late-acceptance hint scans must remain serial on the rate-limited public RPC",
 );
 
+const sharedRequestTracker = { active: 0, peak: 0 };
+const concurrentClientA = resolverClient({ requestDelayMs: 2, requestTracker: sharedRequestTracker });
+const concurrentClientB = resolverClient({ requestDelayMs: 2, requestTracker: sharedRequestTracker });
+const [concurrentA, concurrentB] = await Promise.all([
+  createChainService({ client: concurrentClientA }).resolveTargetOrderEvidenceFromHints({
+    jobId: JOB_ID,
+    createdAt: CREATION_HINT_AT,
+  }),
+  createChainService({ client: concurrentClientB }).resolveTargetOrderEvidenceFromHints({
+    jobId: JOB_ID,
+    createdAt: CREATION_HINT_AT,
+  }),
+]);
+assert.equal(concurrentA.acceptanceTxHash, ACCEPTANCE_TX);
+assert.equal(concurrentB.acceptanceTxHash, ACCEPTANCE_TX);
+assert.equal(
+  sharedRequestTracker.peak,
+  1,
+  "concurrent resolver instances in one process must share the bounded event-log request queue",
+);
+
 const outageClient = resolverClient({ failLogLookup: true });
 await assert.rejects(
   createChainService({ client: outageClient }).resolveTargetOrderEvidenceFromHints({
@@ -266,6 +293,17 @@ await assert.rejects(
   }),
   (error) => error?.code === "target_event_lookup_failed",
   "RPC lookup failures must remain retryable infrastructure errors",
+);
+
+const afterOutageClient = resolverClient();
+const afterOutage = await createChainService({ client: afterOutageClient }).resolveTargetOrderEvidenceFromHints({
+  jobId: JOB_ID,
+  createdAt: CREATION_HINT_AT,
+});
+assert.equal(
+  afterOutage.acceptanceTxHash,
+  ACCEPTANCE_TX,
+  "one failed queued lookup must not poison later resolver requests",
 );
 
 console.log("PolicyPool evidence resolver passed: untrusted time hints locate unique escrow events in bounded 100-block RPC chunks, derive buyer and transaction hashes, ignore removed logs, and fail closed on ambiguity, late acceptance, future hints, or RPC failure.");
