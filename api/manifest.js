@@ -1,5 +1,12 @@
 import { createChainService } from "./lib/chain.js";
-import { COVERAGE, EVIDENCE_RESOLVER, MARKETPLACE, PAYMENT, XLAYER } from "./lib/config.js";
+import {
+  COVERAGE,
+  EVIDENCE_RESOLVER,
+  MARKETPLACE,
+  ONCHAIN_EVIDENCE_LIMITATIONS,
+  PAYMENT,
+  XLAYER,
+} from "./lib/config.js";
 import { createLedger } from "./lib/ledger.js";
 import { listPublishedPolicies, policyCoverageCapAtomic } from "./lib/policy-registry.js";
 import { formatUsdtAtomic, sendJson } from "./lib/utils.js";
@@ -188,6 +195,7 @@ export function createManifestHandler({
           },
           directEvidence: {
             available: true,
+            notAvailableFor: ONCHAIN_EVIDENCE_LIMITATIONS,
             required: [
               "targetAgent",
               "targetJobId",
@@ -199,6 +207,7 @@ export function createManifestHandler({
           },
           resolvedEventEvidence: {
             available: true,
+            notAvailableFor: ONCHAIN_EVIDENCE_LIMITATIONS,
             required: [
               "targetAgent",
               "targetJobId",

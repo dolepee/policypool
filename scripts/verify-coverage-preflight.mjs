@@ -994,6 +994,14 @@ const notAvailable = (onchainMode.notAvailableFor || [])
   .find((entry) => entry.reason === "direct_evidence_unavailable_for_universal_a2a");
 assert.ok(notAvailable, "discovery must state where direct evidence is refused");
 assert.match(notAvailable.whenPolicy, /A2A/, "the exclusion must name when it applies");
+const eventNotAvailable = (eventMode.notAvailableFor || [])
+  .find((entry) => entry.reason === "direct_evidence_unavailable_for_universal_a2a");
+assert.ok(eventNotAvailable, "discovery must state where resolved event evidence is refused");
+assert.deepEqual(
+  eventMode.notAvailableFor,
+  onchainMode.notAvailableFor,
+  "both on-chain evidence modes must publish the same v0.4 A2A exclusion",
+);
 assert.ok(
   !(onchainMode.required || []).includes("taskReference"),
   "a direct covenant must never be asked for a reference it must not store",

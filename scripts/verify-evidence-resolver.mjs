@@ -50,13 +50,19 @@ function resolverClient({
   latestTimestamp = LATEST_TIMESTAMP,
   secondsPerBlock = 1n,
   failLogLookup = false,
+  requestDelayMs = 0,
 } = {}) {
   const requests = [];
   let statusReads = 0;
+  let activeLogRequests = 0;
+  let peakLogRequests = 0;
   return {
     requests,
     get statusReads() {
       return statusReads;
+    },
+    get peakLogRequests() {
+      return peakLogRequests;
     },
     async getBlock(args) {
       if (!args) return { number: latestBlock, timestamp: latestTimestamp };
@@ -73,21 +79,30 @@ function resolverClient({
       assert.equal(method, "eth_getLogs");
       const [filter] = params;
       requests.push(filter);
-      if (failLogLookup) throw new Error("rpc log lookup failed");
-      const fromBlock = BigInt(filter.fromBlock);
-      const toBlock = BigInt(filter.toBlock);
-      assert.ok(toBlock >= fromBlock);
-      assert.ok(
-        toBlock - fromBlock + 1n <= 100n,
-        `eth_getLogs range exceeded X Layer's 100-block limit: ${fromBlock}-${toBlock}`,
-      );
-      if (filter.topics[0] === OKX_TASK.createdTopic && inside(CREATION_BLOCK, fromBlock, toBlock)) {
-        return [creationLog];
+      activeLogRequests += 1;
+      peakLogRequests = Math.max(peakLogRequests, activeLogRequests);
+      try {
+        if (requestDelayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, requestDelayMs));
+        }
+        if (failLogLookup) throw new Error("rpc log lookup failed");
+        const fromBlock = BigInt(filter.fromBlock);
+        const toBlock = BigInt(filter.toBlock);
+        assert.ok(toBlock >= fromBlock);
+        assert.ok(
+          toBlock - fromBlock + 1n <= 100n,
+          `eth_getLogs range exceeded X Layer's 100-block limit: ${fromBlock}-${toBlock}`,
+        );
+        if (filter.topics[0] === OKX_TASK.createdTopic && inside(CREATION_BLOCK, fromBlock, toBlock)) {
+          return [creationLog];
+        }
+        if (filter.topics[0] === OKX_TASK.acceptedTopic) {
+          return acceptanceLogs.filter((entry) => inside(BigInt(entry.blockNumber), fromBlock, toBlock));
+        }
+        return [];
+      } finally {
+        activeLogRequests -= 1;
       }
-      if (filter.topics[0] === OKX_TASK.acceptedTopic) {
-        return acceptanceLogs.filter((entry) => inside(BigInt(entry.blockNumber), fromBlock, toBlock));
-      }
-      return [];
     },
     async readContract() {
       statusReads += 1;
@@ -216,7 +231,7 @@ await assert.rejects(
 );
 assert.equal(futureAcceptanceClient.requests.length, 0);
 
-const explicitHintClient = resolverClient();
+const explicitHintClient = resolverClient({ requestDelayMs: 2 });
 const explicit = await createChainService({ client: explicitHintClient }).resolveTargetOrderEvidenceFromHints({
   jobId: JOB_ID,
   createdAt: CREATION_HINT_AT,
@@ -236,6 +251,11 @@ assert.ok(
   explicitAcceptanceRequests.some((request) => (
     inside(ACCEPTANCE_BLOCK, request.fromBlock, request.toBlock)
   )),
+);
+assert.equal(
+  explicitHintClient.peakLogRequests,
+  1,
+  "creation and late-acceptance hint scans must remain serial on the rate-limited public RPC",
 );
 
 const outageClient = resolverClient({ failLogLookup: true });

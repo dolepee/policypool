@@ -1,4 +1,10 @@
-import { COVERAGE, MARKETPLACE, PAYMENT, XLAYER } from "./lib/config.js";
+import {
+  COVERAGE,
+  MARKETPLACE,
+  ONCHAIN_EVIDENCE_LIMITATIONS,
+  PAYMENT,
+  XLAYER,
+} from "./lib/config.js";
 import { createChainService, EvidenceError } from "./lib/chain.js";
 import { createLedger } from "./lib/ledger.js";
 import { fetchOkxTaskPage, OkxTaskPageError } from "./lib/okx-task-page.js";
@@ -279,13 +285,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
             // Reconciliation for an enrolled v0.4 A2A covenant reads the public
             // task page, which is withdrawn, so such a covenant could be sold and
             // then never settle. The mode is refused there rather than quoted.
-            notAvailableFor: [
-              {
-                whenPolicy: "serviceType is A2A and the policy is enrolled on the v0.4 stack",
-                reason: "direct_evidence_unavailable_for_universal_a2a",
-                note: "Reconciliation for these covenants reads the withdrawn public task page, so coverage bought this way could not release or pay out. It is refused rather than sold.",
-              },
-            ],
+            notAvailableFor: ONCHAIN_EVIDENCE_LIMITATIONS,
             available: true,
             note: "You supply the exact X Layer transactions; PolicyPool verifies them against the task escrow rather than trusting them. targetBuyer must be the wallet that created the target job, and must be the payer on the paid call. The job description is checked against the policy's published scope but is not proved on chain.",
           },
@@ -293,6 +293,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
             mode: "resolved_onchain_events",
             required: ["targetAgent", ...EVENT_HINT_FIELDS],
             optional: ["targetAcceptedAt", "targetBuyer"],
+            notAvailableFor: ONCHAIN_EVIDENCE_LIMITATIONS,
             available: true,
             note: "You supply the job id and an approximate creation time. PolicyPool treats the time as an untrusted search hint, derives both transaction hashes and the buyer from indexed X Layer escrow events, and then runs the same verifier. Add targetAcceptedAt only when the provider accepted more than 30 minutes after creation.",
           },

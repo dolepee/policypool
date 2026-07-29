@@ -348,22 +348,24 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
       throw new EvidenceError("target_acceptance_time_hint_in_future");
     }
 
-    const [createdLog, acceptedLog] = await Promise.all([
-      eventAtTimestamp({
-        eventTopic: OKX_TASK.createdTopic,
-        jobId,
-        timestampSeconds: createdAtSeconds,
-        calibration,
-        radius,
-      }),
-      eventAtTimestamp({
-        eventTopic: OKX_TASK.acceptedTopic,
-        jobId,
-        timestampSeconds: acceptedAtSeconds,
-        calibration,
-        radius,
-      }),
-    ]);
+    // The public X Layer endpoint rate-limits concurrent eth_getLogs calls.
+    // Keep the two independently hinted searches serial as well as each search's
+    // internal batches, otherwise the late-acceptance fallback can still fail
+    // even though LOG_SCAN_CONCURRENCY is one.
+    const createdLog = await eventAtTimestamp({
+      eventTopic: OKX_TASK.createdTopic,
+      jobId,
+      timestampSeconds: createdAtSeconds,
+      calibration,
+      radius,
+    });
+    const acceptedLog = await eventAtTimestamp({
+      eventTopic: OKX_TASK.acceptedTopic,
+      jobId,
+      timestampSeconds: acceptedAtSeconds,
+      calibration,
+      radius,
+    });
     return evidenceFromTaskLogs(jobId, createdLog, acceptedLog);
   }
 
