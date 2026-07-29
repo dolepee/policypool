@@ -60,6 +60,14 @@ function supportedTargets() {
   }));
 }
 
+function targetOptions() {
+  const targets = supportedTargets();
+  return {
+    supportedTargets: targets,
+    coverableTargets: targets.filter((target) => target.coverableNow),
+  };
+}
+
 function readInput(req) {
   const source = req.method === "POST" ? req.body : req.query;
   const body = source && typeof source === "object" && !Array.isArray(source) ? source : {};
@@ -160,6 +168,7 @@ function evidenceUnavailable(error) {
     "target_block_lookup_failed",
     "target_event_lookup_failed",
     "transaction_unconfirmed",
+    "transaction_lookup_unavailable",
     "target_job_status_unavailable",
   ].includes(error?.code);
 }
@@ -180,6 +189,8 @@ export function createCoveragePreflightHandler(dependencies = {}) {
   let runtimeQuoteService = dependencies.quoteService;
   let runtimePolicyResolver = dependencies.policyResolver;
   const taskFetcher = dependencies.taskFetcher || fetchOkxTaskPage;
+  const publicTaskEvidenceAvailable = dependencies.publicTaskEvidenceAvailable
+    ?? MARKETPLACE.publicTaskEvidenceAvailable;
   const limiter = dependencies.limiter || createRateLimiter();
   const now = dependencies.now || (() => Date.now());
   const getChain = () => (runtimeChain ||= createChainService());
@@ -230,8 +241,10 @@ export function createCoveragePreflightHandler(dependencies = {}) {
           {
             mode: "public_task_reference",
             required: ["targetAgent", "taskReference"],
-            available: false,
-            unavailableReason: "okx_public_task_evidence_withdrawn",
+            available: publicTaskEvidenceAvailable,
+            ...(publicTaskEvidenceAvailable
+              ? {}
+              : { unavailableReason: MARKETPLACE.publicTaskEvidenceUnavailableReason }),
             note: "OKX.AI stopped publishing the acceptance timeline and on-chain task id on the public task page, so a task URL or bare task id can no longer be bound to its job.",
           },
           {
@@ -251,7 +264,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
             note: "You supply the exact X Layer transactions; PolicyPool verifies them against the task escrow rather than trusting them. targetBuyer must be the wallet that created the target job, and must be the payer on the paid call. The job description is checked against the policy's published scope but is not proved on chain.",
           },
         ],
-        supportedTargets: supportedTargets(),
+        ...targetOptions(),
       });
     }
     if (!input.targetAgent) {
@@ -259,11 +272,8 @@ export function createCoveragePreflightHandler(dependencies = {}) {
         ok: false,
         error: "target_agent_required",
         charged: false,
-        supportedTargets: supportedTargets(),
+        ...targetOptions(),
       });
-    }
-    if (!input.taskReference && !directEvidence) {
-      return sendJson(res, 400, { ok: false, error: "okx_task_reference_required", charged: false });
     }
     // A partially filled direct request must say which field is missing rather
     // than fall through to a generic refusal the caller cannot act on.
@@ -301,7 +311,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
         ok: false,
         error: "target_policy_not_registered",
         charged: false,
-        supportedTargets: supportedTargets(),
+        ...targetOptions(),
       });
     }
     if (policy.coverageStatus && policy.coverageStatus !== "active") {
@@ -318,6 +328,19 @@ export function createCoveragePreflightHandler(dependencies = {}) {
           exclusions: policy.exclusions || [],
         },
       });
+    }
+    if (!directEvidence && !publicTaskEvidenceAvailable) {
+      return sendJson(res, 422, {
+        ok: false,
+        error: "okx_task_timeline_unavailable",
+        charged: false,
+        evidenceMode,
+        requiredDirectEvidence: ["targetAgent", ...DIRECT_EVIDENCE_FIELDS],
+        ...targetOptions(),
+      });
+    }
+    if (!input.taskReference && !directEvidence) {
+      return sendJson(res, 400, { ok: false, error: "okx_task_reference_required", charged: false });
     }
 
     // An enrolled v0.4 A2A covenant is reconciled through a2aObservation, which

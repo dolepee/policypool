@@ -8,6 +8,9 @@ import {
   http,
   parseAbi,
   parseAbiItem,
+  TransactionNotFoundError,
+  TransactionReceiptNotFoundError,
+  WaitForTransactionReceiptTimeoutError,
   toHex,
 } from "viem";
 import { COVERAGE, OKX_TASK, PAYMENT, XLAYER } from "./config.js";
@@ -35,6 +38,10 @@ export class EvidenceError extends Error {
     this.name = "EvidenceError";
     this.code = code;
   }
+}
+
+function errorIs(error, ErrorType, name) {
+  return error instanceof ErrorType || error?.name === name;
 }
 
 function topicAddress(value) {
@@ -76,10 +83,47 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
   const publicClient = client || createPublicClient({ chain, transport: http(rpcUrl) });
 
   async function getReceipt(hash) {
+    // Test doubles created before receipt classification exposed only the
+    // waiter. Preserve that narrow injection contract while production clients
+    // use the explicit lookup path below.
+    if (
+      typeof publicClient.getTransactionReceipt !== "function"
+      || typeof publicClient.getTransaction !== "function"
+    ) {
+      try {
+        return await publicClient.waitForTransactionReceipt({ hash, confirmations: 1, timeout: 15_000 });
+      } catch (error) {
+        throw new EvidenceError("transaction_unconfirmed", error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    try {
+      const receipt = await publicClient.getTransactionReceipt({ hash });
+      if (receipt) return receipt;
+    } catch (error) {
+      if (!errorIs(error, TransactionReceiptNotFoundError, "TransactionReceiptNotFoundError")) {
+        throw new EvidenceError("transaction_lookup_unavailable", error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    let transaction;
+    try {
+      transaction = await publicClient.getTransaction({ hash });
+    } catch (error) {
+      if (errorIs(error, TransactionNotFoundError, "TransactionNotFoundError")) {
+        throw new EvidenceError("transaction_not_found");
+      }
+      throw new EvidenceError("transaction_lookup_unavailable", error instanceof Error ? error.message : String(error));
+    }
+    if (!transaction) throw new EvidenceError("transaction_not_found");
+
     try {
       return await publicClient.waitForTransactionReceipt({ hash, confirmations: 1, timeout: 15_000 });
     } catch (error) {
-      throw new EvidenceError("transaction_unconfirmed", error instanceof Error ? error.message : String(error));
+      if (errorIs(error, WaitForTransactionReceiptTimeoutError, "WaitForTransactionReceiptTimeoutError")) {
+        throw new EvidenceError("transaction_unconfirmed", error instanceof Error ? error.message : String(error));
+      }
+      throw new EvidenceError("transaction_lookup_unavailable", error instanceof Error ? error.message : String(error));
     }
   }
 

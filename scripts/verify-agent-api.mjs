@@ -326,6 +326,45 @@ assert.equal(tamperedQuote.json().charged, false);
 const discovery = await callHandler(primary.handler, { method: "GET" });
 assert.equal(discovery.statusCode, 402, "anonymous discovery must still return the payment challenge");
 
+const listingPayloadRuntime = makeRuntime();
+const listingPayload = await callHandler(listingPayloadRuntime.handler, {
+  method: "POST",
+  body: {
+    targetAgent: "GlassDesk#3465",
+    jobDescription: "Prepare an evidence pack for an accepted task.",
+    deadline: "2026-07-30T12:00:00.000Z",
+    paymentStatus: "accepted",
+    requestedCoverageUSDT: "0.5",
+  },
+});
+assert.equal(listingPayload.statusCode, 400);
+assert.equal(listingPayload.json().code, "TARGET_JOB_ID_REQUIRED");
+assert.equal(listingPayload.json().charged, false);
+assert.deepEqual(
+  listingPayload.json().requiredEvidence,
+  [
+    "targetAgent",
+    "targetJobId",
+    "targetCreationTxHash",
+    "targetAcceptanceTxHash",
+    "jobDescription",
+  ],
+);
+assert.deepEqual(
+  listingPayload.json().freePreflight.required,
+  [
+    "targetAgent",
+    "targetJobId",
+    "targetCreationTxHash",
+    "targetAcceptanceTxHash",
+    "targetBuyer",
+    "jobDescription",
+  ],
+);
+assert.equal(listingPayload.json().freePreflight.charged, false);
+assert.equal(listingPayloadRuntime.calls.verify, 0, "incomplete listing-style input must fail before payment");
+assert.equal(listingPayloadRuntime.calls.settle, 0, "incomplete listing-style input must never settle");
+
 const missingTarget = await callHandler(primary.handler, {
   method: "POST",
   headers: { "payment-signature": makePaymentHeader("missing-target") },
@@ -483,6 +522,13 @@ const unregisteredResponse = await callHandler(unregistered.handler, {
 });
 assert.equal(unregisteredResponse.statusCode, 422);
 assert.equal(unregisteredResponse.json().error, "target_policy_not_registered");
+assert.equal(unregisteredResponse.json().code, "TARGET_POLICY_NOT_REGISTERED");
+assert.deepEqual(
+  unregisteredResponse.json().coverableTargets.map((target) => target.agentId),
+  ["4348", "3465"],
+  "a rejected target must expose only policies that can currently issue coverage",
+);
+assert.match(unregisteredResponse.json().nextAction, /coverableTargets/);
 assert.equal(unregisteredResponse.json().charged, false);
 assert.equal(unregistered.calls.verify, 0, "unknown policy must not reach payment verification");
 assert.equal(unregistered.calls.settle, 0, "unknown policy must not settle payment");
@@ -561,6 +607,14 @@ const missingEvidenceResponse = await callHandler(missingEvidence.handler, {
 });
 assert.equal(missingEvidenceResponse.statusCode, 400);
 assert.equal(missingEvidenceResponse.json().error, "target_job_id_required");
+assert.equal(missingEvidenceResponse.json().code, "TARGET_JOB_ID_REQUIRED");
+assert.deepEqual(missingEvidenceResponse.json().requiredEvidence, [
+  "targetAgent",
+  "targetJobId",
+  "targetCreationTxHash",
+  "targetAcceptanceTxHash",
+  "jobDescription",
+]);
 assert.equal(missingEvidenceResponse.json().charged, false);
 assert.equal(missingEvidence.calls.verify, 0);
 assert.equal(missingEvidence.calls.settle, 0);

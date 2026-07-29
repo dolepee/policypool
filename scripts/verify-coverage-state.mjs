@@ -62,12 +62,58 @@ for (const error of ["okx_task_timeline_unavailable", "okx_task_onchain_id_unava
   assert.match(withdrawn.nextAction, /no task should be recreated/);
   // A dead end would be honest but useless. The paid endpoint accepts resolved
   // on-chain evidence and never reads the public task page, so that path is
-  // unaffected and is the one a caller should be sent to. Name the exact fields
-  // rather than gesturing at "on-chain evidence".
-  for (const field of ["targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash"]) {
-    assert.match(withdrawn.nextAction, new RegExp(field), `${error} must name ${field}`);
+    // unaffected and is the one a caller should be sent to. Name the exact fields
+    // rather than gesturing at "on-chain evidence".
+    for (const field of [
+      "targetAgent",
+      "targetJobId",
+      "targetCreationTxHash",
+      "targetAcceptanceTxHash",
+      "targetBuyer",
+      "jobDescription",
+    ]) {
+      assert.match(withdrawn.nextAction, new RegExp(field), `${error} must name ${field}`);
+    }
+    assert.match(withdrawn.nextAction, /free \/api\/coverage-preflight/);
   }
-}
+
+const unregistered = enrich({
+  ok: false,
+  error: "target_policy_not_registered",
+  charged: false,
+  coverableTargets: [{ agentId: "3465" }],
+}, { httpStatus: 422 });
+assert.equal(unregistered.code, "TARGET_POLICY_NOT_REGISTERED");
+assert.equal(unregistered.retryable, false);
+assert.match(unregistered.message, /no published coverage policy/i);
+assert.match(unregistered.nextAction, /coverableTargets/);
+assert.deepEqual(unregistered.coverableTargets, [{ agentId: "3465" }]);
+
+const missingTransaction = enrich({
+  ok: true,
+  eligible: false,
+  reason: "transaction_not_found",
+  charged: false,
+});
+assert.equal(missingTransaction.code, "TRANSACTION_NOT_FOUND");
+assert.equal(missingTransaction.retryable, false);
+assert.match(missingTransaction.nextAction, /check the transaction hash and chain/i);
+
+const pendingTransaction = enrich(
+  { ok: false, error: "transaction_unconfirmed", charged: false },
+  { httpStatus: 503 },
+);
+assert.equal(pendingTransaction.code, "CHAIN_EVIDENCE_PENDING");
+assert.equal(pendingTransaction.retryable, true);
+assert.equal(pendingTransaction.retryAfterSeconds, 15);
+
+const transactionLookupDown = enrich(
+  { ok: false, error: "transaction_lookup_unavailable", charged: false },
+  { httpStatus: 503 },
+);
+assert.equal(transactionLookupDown.code, "CHAIN_LOOKUP_UNAVAILABLE");
+assert.equal(transactionLookupDown.retryable, true);
+assert.match(transactionLookupDown.nextAction, /do not change the input/i);
 
 // Receipt lifecycle states.
 const active = enrich({ ok: true, receiptId: "ppc-active", state: "active", receipt: { receiptId: "ppc-active" } });

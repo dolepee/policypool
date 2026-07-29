@@ -182,8 +182,10 @@ export function createManifestHandler({
         modes: {
           publicReference: {
             required: ["targetAgent", "taskReference"],
-            available: false,
-            unavailableReason: "okx_public_task_evidence_withdrawn",
+            available: MARKETPLACE.publicTaskEvidenceAvailable,
+            ...(MARKETPLACE.publicTaskEvidenceAvailable
+              ? {}
+              : { unavailableReason: MARKETPLACE.publicTaskEvidenceUnavailableReason }),
           },
           directEvidence: {
             available: true,

@@ -99,6 +99,7 @@ const handler = createCoveragePreflightHandler({
   chain,
   ledger,
   taskFetcher: async () => task,
+  publicTaskEvidenceAvailable: true,
   now: () => Date.parse("2026-07-11T10:02:00.000Z"),
   quoteSecret: QUOTE_SECRET,
 });
@@ -107,6 +108,11 @@ const discovery = await callHandler(handler, { method: "GET" });
 assert.equal(discovery.statusCode, 200);
 assert.equal(discovery.json().charged, false);
 assert.equal(discovery.json().supportedTargets.length, 3);
+assert.deepEqual(
+  discovery.json().coverableTargets.map((target) => target.agentId),
+  ["4348", "3465"],
+  "discovery must separate currently coverable targets from the full policy directory",
+);
 const wardenTarget = discovery.json().supportedTargets.find((target) => target.agentId === "3808");
 assert.ok(wardenTarget, "Warden opt-in must be published in discovery");
 assert.equal(wardenTarget.serviceIds[0], "33461");
@@ -217,6 +223,7 @@ const universal = await callHandler(createCoveragePreflightHandler({
   ledger,
   policyResolver: { async resolve() { return { policy: universalPolicy, source: "v0.4_provider_enrollment_registry" }; } },
   taskFetcher: async () => task,
+  publicTaskEvidenceAvailable: true,
   now: () => Date.parse("2026-07-11T10:02:00.000Z"),
   quoteSecret: QUOTE_SECRET,
 }), {
@@ -264,7 +271,47 @@ const unknown = await callHandler(createCoveragePreflightHandler({
 });
 assert.equal(unknown.statusCode, 422);
 assert.equal(unknown.json().error, "target_policy_not_registered");
+assert.equal(unknown.json().code, "TARGET_POLICY_NOT_REGISTERED");
+assert.match(unknown.json().nextAction, /coverableTargets/);
+assert.deepEqual(unknown.json().coverableTargets.map((target) => target.agentId), ["4348", "3465"]);
 assert.equal(fetchedUnknown, false, "unknown targets must be rejected before external work");
+
+let unavailableTaskFetches = 0;
+const unavailablePublicReference = await callHandler(createCoveragePreflightHandler({
+  taskFetcher: async () => {
+    unavailableTaskFetches += 1;
+    return task;
+  },
+}), {
+  method: "POST",
+  body: { targetAgent: "GlassDesk#3465", taskReference: task.publicUrl },
+});
+assert.equal(unavailablePublicReference.statusCode, 422);
+assert.equal(unavailablePublicReference.json().code, "PUBLIC_TASK_EVIDENCE_UNAVAILABLE");
+assert.equal(unavailablePublicReference.json().retryable, false);
+assert.equal(unavailablePublicReference.json().charged, false);
+assert.equal(unavailablePublicReference.json().evidenceMode, "public_task_reference");
+assert.deepEqual(
+  unavailablePublicReference.json().requiredDirectEvidence,
+  [
+    "targetAgent",
+    "targetJobId",
+    "targetCreationTxHash",
+    "targetAcceptanceTxHash",
+    "targetBuyer",
+    "jobDescription",
+  ],
+);
+assert.deepEqual(
+  unavailablePublicReference.json().coverableTargets.map((target) => target.agentId),
+  ["4348", "3465"],
+);
+assert.match(unavailablePublicReference.json().nextAction, /free \/api\/coverage-preflight/);
+assert.equal(
+  unavailableTaskFetches,
+  0,
+  "a globally disabled public-reference path must not call an upstream page it cannot use",
+);
 
 const completed = await callHandler(createCoveragePreflightHandler({
   chain: {
@@ -274,6 +321,7 @@ const completed = await callHandler(createCoveragePreflightHandler({
     },
   },
   taskFetcher: async () => ({ ...task, status: 6 }),
+  publicTaskEvidenceAvailable: true,
 }), {
   method: "POST",
   body: { targetAgent: "GlassDesk#3465", taskReference: task.publicUrl },
