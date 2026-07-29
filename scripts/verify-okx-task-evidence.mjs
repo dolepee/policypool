@@ -5,6 +5,106 @@ import { describeFailure } from "../api/lib/coverage-state.js";
 import { fetchOkxTaskPage, OkxTaskPageError } from "../api/lib/okx-task-page.js";
 import { findPublishedPolicy } from "../api/lib/policy-registry.js";
 
+const CLASSIFICATION_TX = `0x${"f".repeat(64)}`;
+const CLASSIFICATION_PAYER = "0x1111111111111111111111111111111111111111";
+const transferProbe = (client) => createChainService({ client }).verifySettlement({
+  txHash: CLASSIFICATION_TX,
+  payer: CLASSIFICATION_PAYER,
+  amountAtomic: "1",
+});
+
+let missingHashPolls = 0;
+await assert.rejects(
+  transferProbe({
+    async getTransactionReceipt() {
+      throw { name: "TransactionReceiptNotFoundError" };
+    },
+    async getTransaction() {
+      throw { name: "TransactionNotFoundError" };
+    },
+    async waitForTransactionReceipt() {
+      missingHashPolls += 1;
+      throw { name: "WaitForTransactionReceiptTimeoutError" };
+    },
+  }),
+  (error) => error?.code === "transaction_not_found",
+  "a hash absent after the polling grace period is caller evidence error, not pending",
+);
+assert.equal(missingHashPolls, 1, "an absent hash must receive the full receipt-polling grace period");
+await assert.rejects(
+  transferProbe({
+    async getTransactionReceipt() {
+      return null;
+    },
+    async getTransaction() {
+      return null;
+    },
+    async waitForTransactionReceipt() {
+      throw { name: "WaitForTransactionReceiptTimeoutError" };
+    },
+  }),
+  (error) => error?.code === "transaction_not_found",
+  "RPC clients that return null for an unknown hash must receive the same caller-error classification",
+);
+const missingContract = describeFailure("transaction_not_found", 200);
+assert.equal(missingContract.code, "TRANSACTION_NOT_FOUND");
+assert.equal(missingContract.retryable, false);
+assert.match(missingContract.nextAction, /check the transaction hash and chain/i);
+
+let propagationPolls = 0;
+await assert.rejects(
+  transferProbe({
+    async getTransactionReceipt() {
+      throw { name: "TransactionReceiptNotFoundError" };
+    },
+    async getTransaction() {
+      throw { name: "TransactionNotFoundError" };
+    },
+    async waitForTransactionReceipt() {
+      propagationPolls += 1;
+      return { status: "success", logs: [] };
+    },
+  }),
+  (error) => error?.code === "verified_transfer_event_missing",
+  "a receipt that appears during the grace period must be verified rather than rejected as absent",
+);
+assert.equal(propagationPolls, 1);
+
+await assert.rejects(
+  transferProbe({
+    async getTransactionReceipt() {
+      throw { name: "TransactionReceiptNotFoundError" };
+    },
+    async getTransaction() {
+      return { hash: CLASSIFICATION_TX };
+    },
+    async waitForTransactionReceipt() {
+      throw { name: "WaitForTransactionReceiptTimeoutError" };
+    },
+  }),
+  (error) => error?.code === "transaction_unconfirmed",
+  "a transaction visible in the mempool but lacking a receipt remains retryable",
+);
+const pendingContract = describeFailure("transaction_unconfirmed", 503);
+assert.equal(pendingContract.code, "CHAIN_EVIDENCE_PENDING");
+assert.equal(pendingContract.retryable, true);
+
+await assert.rejects(
+  transferProbe({
+    async getTransactionReceipt() {
+      throw new Error("rpc unavailable");
+    },
+    async getTransaction() {
+      throw new Error("must not run after a receipt lookup outage");
+    },
+  }),
+  (error) => error?.code === "transaction_lookup_unavailable",
+  "an RPC outage must not blame the caller's hash",
+);
+const outageContract = describeFailure("transaction_lookup_unavailable", 503);
+assert.equal(outageContract.code, "CHAIN_LOOKUP_UNAVAILABLE");
+assert.equal(outageContract.retryable, true);
+
 const chain = createChainService();
 const proof = await chain.verifyTargetOrder({
   jobId: "0x21eae51ceb84e2154b7d3ec67ffba7c6c001560f881d917888d5fb8d45bf66fd",

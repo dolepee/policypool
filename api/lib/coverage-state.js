@@ -135,13 +135,13 @@ const ERROR_CONTRACT = Object.freeze({
     code: "PUBLIC_TASK_EVIDENCE_UNAVAILABLE",
     message: "The public task page no longer publishes the acceptance timeline this quote is bound to.",
     retryable: false,
-    nextAction: "No payment was taken and no task should be recreated. Resolve the target's on-chain evidence yourself and supply targetJobId, targetCreationTxHash, and targetAcceptanceTxHash directly to the paid endpoint, which does not read the public task page.",
+    nextAction: "No payment was taken and no task should be recreated. Submit targetAgent, targetJobId, targetCreationTxHash, targetAcceptanceTxHash, targetBuyer, and jobDescription to the free /api/coverage-preflight endpoint. Use its paid request only if it returns eligible.",
   },
   okx_task_onchain_id_unavailable: {
     code: "PUBLIC_TASK_EVIDENCE_UNAVAILABLE",
     message: "The public task page no longer publishes the on-chain task id this quote is bound to.",
     retryable: false,
-    nextAction: "No payment was taken and no task should be recreated. Resolve the target's on-chain evidence yourself and supply targetJobId, targetCreationTxHash, and targetAcceptanceTxHash directly to the paid endpoint, which does not read the public task page.",
+    nextAction: "No payment was taken and no task should be recreated. Submit targetAgent, targetJobId, targetCreationTxHash, targetAcceptanceTxHash, targetBuyer, and jobDescription to the free /api/coverage-preflight endpoint. Use its paid request only if it returns eligible.",
   },
   direct_evidence_unavailable_for_universal_a2a: {
     code: "DIRECT_EVIDENCE_UNAVAILABLE_FOR_THIS_POLICY",
@@ -160,6 +160,36 @@ const ERROR_CONTRACT = Object.freeze({
     message: "No active coverage policy is registered for this target agent and service.",
     retryable: false,
     nextAction: "Choose a target listed as coverable by the free eligibility check.",
+  },
+  target_policy_not_registered: {
+    code: "TARGET_POLICY_NOT_REGISTERED",
+    message: "PolicyPool has no published coverage policy for this target agent or service.",
+    retryable: false,
+    nextAction: "Choose an entry from coverableTargets and run the free preflight before paying.",
+  },
+  target_job_id_required: {
+    code: "TARGET_JOB_ID_REQUIRED",
+    message: "Coverage requires the accepted OKX.AI job id; a deadline or payment-status assertion is not evidence of that job.",
+    retryable: false,
+    nextAction: "Run the free preflight with the required evidence fields returned in this response before attempting payment.",
+  },
+  target_creation_transaction_required: {
+    code: "TARGET_CREATION_TRANSACTION_REQUIRED",
+    message: "Coverage requires the X Layer transaction that created the target job.",
+    retryable: false,
+    nextAction: "Run the free preflight with the required evidence fields returned in this response before attempting payment.",
+  },
+  target_acceptance_transaction_required: {
+    code: "TARGET_ACCEPTANCE_TRANSACTION_REQUIRED",
+    message: "Coverage requires the X Layer transaction that accepted the target job.",
+    retryable: false,
+    nextAction: "Run the free preflight with the required evidence fields returned in this response before attempting payment.",
+  },
+  job_description_required: {
+    code: "JOB_DESCRIPTION_REQUIRED",
+    message: "Coverage requires the target job description so its scope can be checked against the published policy.",
+    retryable: false,
+    nextAction: "Run the free preflight with the required evidence fields returned in this response before attempting payment.",
   },
   registered_policy_sla_already_elapsed: {
     code: "TARGET_SLA_ALREADY_ELAPSED",
@@ -242,6 +272,19 @@ const ERROR_CONTRACT = Object.freeze({
     retryable: true,
     retryAfterSeconds: 10,
     nextAction: "Retry the same request.",
+  },
+  transaction_not_found: {
+    code: "TRANSACTION_NOT_FOUND",
+    message: "The supplied transaction hash was not found on X Layer.",
+    retryable: false,
+    nextAction: "Check the transaction hash and chain. If it was just broadcast, wait for propagation, then submit the corrected evidence.",
+  },
+  transaction_lookup_unavailable: {
+    code: "CHAIN_LOOKUP_UNAVAILABLE",
+    message: "X Layer could not be reached while looking up the supplied transaction.",
+    retryable: true,
+    retryAfterSeconds: 10,
+    nextAction: "Retry the same request without changing the transaction hash.",
   },
   target_job_status_unavailable: {
     code: "TARGET_STATUS_UNAVAILABLE",

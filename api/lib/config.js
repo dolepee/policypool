@@ -34,6 +34,11 @@ export const MARKETPLACE = {
   agentId: process.env.POLICYPOOL_OKX_AGENT_ID || "4674",
   serviceId: process.env.POLICYPOOL_OKX_SERVICE_ID || "33290",
   agentUrl: process.env.POLICYPOOL_OKX_AGENT_URL || "https://www.okx.ai/agents/4674",
+  // OKX withdrew the anonymous task fields needed to bind a public task page
+  // to its X Layer job. Keep discovery and execution on the same fail-closed
+  // switch so callers are never told a disabled evidence path is usable.
+  publicTaskEvidenceAvailable: false,
+  publicTaskEvidenceUnavailableReason: "okx_public_task_evidence_withdrawn",
 };
 
 export const OKX_TASK = {

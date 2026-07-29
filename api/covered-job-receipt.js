@@ -63,6 +63,24 @@ const INPUT_ALIASES = {
   requestedCoverageUSDT: ["requestedCoverageUSDT", "coverageCapUSDT", "capUSDT", "coverageAmountUSDT"],
 };
 
+const REQUIRED_COVERAGE_EVIDENCE = Object.freeze([
+  "targetAgent",
+  "targetJobId",
+  "targetCreationTxHash",
+  "targetAcceptanceTxHash",
+  "jobDescription",
+]);
+const REQUIRED_PREFLIGHT_EVIDENCE = Object.freeze([
+  ...REQUIRED_COVERAGE_EVIDENCE.slice(0, 4),
+  "targetBuyer",
+  "jobDescription",
+]);
+const MISSING_EVIDENCE_REASONS = new Set([
+  "target_job_id_required",
+  "target_creation_transaction_required",
+  "target_acceptance_transaction_required",
+  "job_description_required",
+]);
 const CONTAINER_KEYS = new Set(["input", "data", "payload", "request", "parameters", "arguments", "context", "body"]);
 const MAX_FEE_AUTHORIZATION_WINDOW_SECONDS = 15 * 60;
 
@@ -142,7 +160,7 @@ const OUTPUT_SCHEMA = {
           description: "Optional signed PolicyPool quote. When present, it is authoritative and allows bodyless paid replay.",
         },
       },
-      required: ["targetAgent", "targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash", "jobDescription"],
+      required: REQUIRED_COVERAGE_EVIDENCE,
       additionalProperties: false,
     },
   },
@@ -291,6 +309,14 @@ function supportedTargets() {
     enrollmentWindowSeconds: policy.enrollmentWindowSeconds,
     exclusions: policy.exclusions || [],
   }));
+}
+
+function targetOptions() {
+  const targets = supportedTargets();
+  return {
+    supportedTargets: targets,
+    coverableTargets: targets.filter((target) => target.coverableNow),
+  };
 }
 
 export function evaluateGuard(input, policy) {
@@ -531,6 +557,14 @@ function rejectStaticGuard(res, guard) {
   if (guard.reason === "requested_coverage_below_minimum") {
     payload.minimumCoverageUSDT = formatUsdtAtomic(BigInt(COVERAGE.minAtomic), PAYMENT.decimals);
   }
+  if (MISSING_EVIDENCE_REASONS.has(guard.reason)) {
+    payload.requiredEvidence = REQUIRED_COVERAGE_EVIDENCE;
+    payload.freePreflight = {
+      endpoint: "https://policypool.vercel.app/api/coverage-preflight",
+      required: REQUIRED_PREFLIGHT_EVIDENCE,
+      charged: false,
+    };
+  }
   const status = guard.reason === "registered_policy_sla_invalid" ? 503 : 400;
   return sendJson(res, status, payload);
 }
@@ -698,7 +732,7 @@ export function createHandler(dependencies = {}) {
         ok: false,
         error: "target_policy_not_registered",
         charged: false,
-        supportedTargets: supportedTargets(),
+        ...targetOptions(),
       });
     }
 
@@ -726,7 +760,7 @@ export function createHandler(dependencies = {}) {
         ok: false,
         error: "target_agent_required",
         charged: false,
-        supportedTargets: supportedTargets(),
+        ...targetOptions(),
       });
     }
 

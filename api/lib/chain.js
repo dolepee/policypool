@@ -8,6 +8,9 @@ import {
   http,
   parseAbi,
   parseAbiItem,
+  TransactionNotFoundError,
+  TransactionReceiptNotFoundError,
+  WaitForTransactionReceiptTimeoutError,
   toHex,
 } from "viem";
 import { COVERAGE, OKX_TASK, PAYMENT, XLAYER } from "./config.js";
@@ -35,6 +38,10 @@ export class EvidenceError extends Error {
     this.name = "EvidenceError";
     this.code = code;
   }
+}
+
+function errorIs(error, ErrorType, name) {
+  return error instanceof ErrorType || error?.name === name;
 }
 
 function topicAddress(value) {
@@ -76,11 +83,59 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
   const publicClient = client || createPublicClient({ chain, transport: http(rpcUrl) });
 
   async function getReceipt(hash) {
+    // Test doubles created before receipt classification exposed only the
+    // waiter. Preserve that narrow injection contract while production clients
+    // use the explicit lookup path below.
+    if (
+      typeof publicClient.getTransactionReceipt !== "function"
+      || typeof publicClient.getTransaction !== "function"
+    ) {
+      try {
+        return await publicClient.waitForTransactionReceipt({ hash, confirmations: 1, timeout: 15_000 });
+      } catch (error) {
+        throw new EvidenceError("transaction_unconfirmed", error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    const receiptLookup = async () => {
+      try {
+        return (await publicClient.getTransactionReceipt({ hash })) || null;
+      } catch (error) {
+        if (errorIs(error, TransactionReceiptNotFoundError, "TransactionReceiptNotFoundError")) return null;
+        throw new EvidenceError("transaction_lookup_unavailable", error instanceof Error ? error.message : String(error));
+      }
+    };
+    const transactionLookup = async () => {
+      try {
+        return (await publicClient.getTransaction({ hash })) || null;
+      } catch (error) {
+        if (errorIs(error, TransactionNotFoundError, "TransactionNotFoundError")) return null;
+        throw new EvidenceError("transaction_lookup_unavailable", error instanceof Error ? error.message : String(error));
+      }
+    };
+
+    const initialReceipt = await receiptLookup();
+    if (initialReceipt) return initialReceipt;
+    const initiallyVisible = Boolean(await transactionLookup());
+
     try {
       return await publicClient.waitForTransactionReceipt({ hash, confirmations: 1, timeout: 15_000 });
     } catch (error) {
-      throw new EvidenceError("transaction_unconfirmed", error instanceof Error ? error.message : String(error));
+      if (!errorIs(error, WaitForTransactionReceiptTimeoutError, "WaitForTransactionReceiptTimeoutError")) {
+        throw new EvidenceError("transaction_lookup_unavailable", error instanceof Error ? error.message : String(error));
+      }
     }
+
+    // A valid transaction can be absent from one-shot reads while it propagates.
+    // Poll for the full grace period first, then re-read both objects before
+    // deciding whether the caller supplied a bad hash.
+    const finalReceipt = await receiptLookup();
+    if (finalReceipt) return finalReceipt;
+    const finallyVisible = Boolean(await transactionLookup());
+    if (initiallyVisible || finallyVisible) {
+      throw new EvidenceError("transaction_unconfirmed");
+    }
+    throw new EvidenceError("transaction_not_found");
   }
 
   async function getJobStatus(jobId) {
