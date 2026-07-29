@@ -834,24 +834,28 @@ function revealPreflightResult() {
   result.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
 }
 
-// Shows, names and requires exactly the selected mode's inputs, so validation
-// cannot block on a field the request will not carry and FormData carries
-// nothing from the other mode. Exported and pure over the form so the restoration
-// path can be verified without a browser: the public radio ships disabled today,
-// which means that branch is otherwise only reachable by hand.
-export function applyEvidenceMode(form, direct) {
-  for (const field of form.querySelectorAll(".direct-evidence-field")) {
-    field.hidden = !direct;
-    for (const control of field.querySelectorAll("input, textarea")) {
-      control.required = direct && control.dataset.optional !== "true";
-      control.disabled = !direct;
-    }
-  }
-  for (const field of form.querySelectorAll(".public-reference-field")) {
-    field.hidden = direct;
-    for (const control of field.querySelectorAll("input, textarea")) {
-      control.disabled = direct;
-      control.required = !direct;
+// Shows and submits only the selected evidence contract. Boolean arguments are
+// retained for the old two-mode test harness: true means exact transactions and
+// false means the dormant public-reference path.
+export function applyEvidenceMode(form, selectedMode) {
+  const mode = selectedMode === true
+    ? "verified_onchain_evidence"
+    : selectedMode === false
+      ? "public_task_reference"
+      : selectedMode;
+  const activeGroups = new Map([
+    [".onchain-evidence-field", mode !== "public_task_reference"],
+    [".direct-evidence-field", mode === "verified_onchain_evidence"],
+    [".event-hint-field", mode === "resolved_onchain_events"],
+    [".public-reference-field", mode === "public_task_reference"],
+  ]);
+  for (const [selector, active] of activeGroups) {
+    for (const field of form.querySelectorAll(selector)) {
+      field.hidden = !active;
+      for (const control of field.querySelectorAll("input, textarea")) {
+        control.required = active && control.dataset.optional !== "true";
+        control.disabled = !active;
+      }
     }
   }
   return form;
@@ -862,6 +866,8 @@ function bindCoveragePreflight() {
   if (!form) return;
   const submit = document.querySelector("#coverage-submit");
   const taskInput = document.querySelector("#coverage-task");
+  const createdAtInput = document.querySelector("#coverage-created-at");
+  const acceptedAtInput = document.querySelector("#coverage-accepted-at");
   const capInput = document.querySelector("#coverage-cap");
   const targetSelect = document.querySelector("#coverage-target");
   const targetService = document.querySelector("#coverage-target-service");
@@ -879,22 +885,20 @@ function bindCoveragePreflight() {
   customService.addEventListener("input", () => { targetService.value = customService.value.trim(); });
   setTargetMode();
 
-  // Only the chosen mode's fields are shown, named and required, so validation
-  // cannot block on an input the request will not carry and FormData carries
-  // exactly the chosen mode's inputs. The public-reference radio ships disabled
-  // because OKX withdrew the fields it depends on. Restoring that path means
-  // enabling the radio and updating the notice copy; the wiring below already
-  // handles the rest.
+  // Only the chosen mode's fields are shown and enabled, so FormData cannot mix
+  // a time-hint request with exact hashes or a public reference.
   const modeInputs = [...form.querySelectorAll('input[name="evidenceMode"]')];
   const setEvidenceMode = () => applyEvidenceMode(
     form,
-    form.querySelector('input[name="evidenceMode"]:checked')?.value !== "public_task_reference",
+    form.querySelector('input[name="evidenceMode"]:checked')?.value || "resolved_onchain_events",
   );
   for (const input of modeInputs) input.addEventListener("change", setEvidenceMode);
   setEvidenceMode();
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     taskInput.removeAttribute("aria-invalid");
+    createdAtInput.removeAttribute("aria-invalid");
+    acceptedAtInput.removeAttribute("aria-invalid");
     capInput.removeAttribute("aria-invalid");
     if (!form.checkValidity()) {
       form.querySelector(":invalid")?.setAttribute("aria-invalid", "true");
@@ -909,31 +913,48 @@ function bindCoveragePreflight() {
     // Only the fields the chosen mode actually uses are sent. Posting an empty
     // taskReference alongside on-chain evidence would read as a public lookup
     // that was attempted and returned nothing.
-    const mode = values.get("evidenceMode") === "public_task_reference"
-      ? "public_task_reference"
-      : "verified_onchain_evidence";
+    const mode = values.get("evidenceMode") || "resolved_onchain_events";
+    const asIsoTime = (value) => {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      const parsed = Date.parse(text);
+      return Number.isFinite(parsed) ? new Date(parsed).toISOString() : text;
+    };
+    const onchainBody = {
+      targetJobId: (values.get("targetJobId") || "").trim(),
+      jobDescription: (values.get("jobDescription") || "").trim(),
+    };
     const requestBody = {
       targetAgent: targetSelect.value === "custom" ? customAgent.value.trim() : values.get("targetAgent"),
       targetServiceId: targetSelect.value === "custom" ? customService.value.trim() : values.get("targetServiceId"),
       requestedCoverageUSDT: values.get("requestedCoverageUSDT"),
       ...(mode === "public_task_reference"
         ? { taskReference: values.get("taskReference") }
-        : {
-          targetJobId: (values.get("targetJobId") || "").trim(),
-          targetCreationTxHash: (values.get("targetCreationTxHash") || "").trim(),
-          targetAcceptanceTxHash: (values.get("targetAcceptanceTxHash") || "").trim(),
-          targetBuyer: (values.get("targetBuyer") || "").trim(),
-          jobDescription: (values.get("jobDescription") || "").trim(),
-          // Sent only when given. An empty string would read as a lookup that
-          // was attempted against the withdrawn page and returned nothing.
-          ...((values.get("taskReference") || "").trim()
-            ? { taskReference: values.get("taskReference").trim() }
-            : {}),
-        }),
+        : mode === "resolved_onchain_events"
+          ? {
+            ...onchainBody,
+            targetCreatedAt: asIsoTime(values.get("targetCreatedAt")),
+            ...(asIsoTime(values.get("targetAcceptedAt"))
+              ? { targetAcceptedAt: asIsoTime(values.get("targetAcceptedAt")) }
+              : {}),
+            ...((values.get("targetBuyer") || "").trim()
+              ? { targetBuyer: values.get("targetBuyer").trim() }
+              : {}),
+          }
+          : {
+            ...onchainBody,
+            targetCreationTxHash: (values.get("targetCreationTxHash") || "").trim(),
+            targetAcceptanceTxHash: (values.get("targetAcceptanceTxHash") || "").trim(),
+            targetBuyer: (values.get("targetBuyer") || "").trim(),
+          }),
     };
-    setPreflightStatus(mode === "public_task_reference"
-      ? "Reading the OKX task and verifying its X Layer events."
-      : "Verifying your transactions against the X Layer task escrow.");
+    setPreflightStatus(
+      mode === "public_task_reference"
+        ? "Reading the OKX task and verifying its X Layer events."
+        : mode === "resolved_onchain_events"
+          ? "Locating the indexed task events, then verifying both transactions."
+          : "Verifying your transactions against the X Layer task escrow.",
+    );
     try {
       const response = await fetch("/api/coverage-preflight", {
         method: "POST",
@@ -962,6 +983,12 @@ function bindCoveragePreflight() {
           }
         }
         if (String(data.error || "").startsWith("okx_task_")) taskInput.setAttribute("aria-invalid", "true");
+        if (String(data.error || "").includes("creation_time_hint")) {
+          createdAtInput.setAttribute("aria-invalid", "true");
+        }
+        if (String(data.error || "").includes("acceptance_time_hint")) {
+          acceptedAtInput.setAttribute("aria-invalid", "true");
+        }
         throw new Error(preflightMessage(data));
       }
       showPreflightResult(data);

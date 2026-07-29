@@ -48,6 +48,19 @@ export const OKX_TASK = {
   acceptedTopic: "0x49c131ab4997b3c3791e5e208b585c027c75b36373559faece1d17bb38a1cac7",
 };
 
+export const EVIDENCE_RESOLVER = {
+  creationHintRadiusBlocks: 120,
+  maxAutomaticAcceptanceScanBlocks: 1_800,
+};
+
+export const ONCHAIN_EVIDENCE_LIMITATIONS = Object.freeze([
+  Object.freeze({
+    whenPolicy: "serviceType is A2A and the policy is enrolled on the v0.4 stack",
+    reason: "direct_evidence_unavailable_for_universal_a2a",
+    note: "Reconciliation for these covenants reads the withdrawn public task page, so coverage bought this way could not release or pay out. It is refused rather than sold.",
+  }),
+]);
+
 export const OBJECTIVE_BREACH_RULES = [
   "accepted_job_still_undelivered_after_deadline",
 ];

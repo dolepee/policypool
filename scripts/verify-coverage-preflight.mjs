@@ -601,6 +601,9 @@ const universalDirectHandler = createCoveragePreflightHandler({
     async resolveTargetOrderEvidence() {
       throw new Error("the public task index must not be consulted");
     },
+    async resolveTargetOrderEvidenceFromHints() {
+      throw new Error("the event resolver must not run for an unsettleable covenant");
+    },
   },
   ledger,
   policyResolver: { async resolve() { return { policy: universalPolicy, source: "v0.4_provider_enrollment_registry" }; } },
@@ -617,6 +620,24 @@ assert.equal(universalDirect.json().eligible, false, "an unsettleable covenant m
 assert.equal(universalDirect.json().reason, "direct_evidence_unavailable_for_universal_a2a");
 assert.equal(universalDirect.json().charged, false);
 assert.equal(universalDirect.json().policy.coverableNow, false);
+
+const universalEventHint = await callHandler(universalDirectHandler, {
+  method: "POST",
+  body: {
+    targetAgent: "3465",
+    targetServiceId: "30019",
+    targetJobId: DIRECT_JOB_ID,
+    targetCreatedAt: "2026-07-11T10:00:00.000Z",
+    jobDescription: DIRECT_DESCRIPTION,
+    requestedCoverageUSDT: "0.5",
+  },
+});
+assert.equal(
+  universalEventHint.json().reason,
+  "direct_evidence_unavailable_for_universal_a2a",
+  "event resolution must refuse an A2A covenant before any chain lookup when reconciliation cannot settle it",
+);
+assert.equal(universalEventHint.json().charged, false);
 
 // Supplying a reference must not buy a way around it: storing that reference is
 // precisely what breaks reconciliation.
@@ -780,28 +801,191 @@ const directWithoutBuyer = await callHandler(directHandler, {
 assert.equal(directWithoutBuyer.json().error, "direct_evidence_incomplete");
 assert.deepEqual(directWithoutBuyer.json().missing, ["targetBuyer"]);
 
-// An on-chain identity field is what signals direct mode, and one alone is
-// enough to be held to the full requirement rather than silently half-handled.
+// A job id without transaction hashes selects the bounded event resolver. It is
+// still incomplete by itself, but the response asks only for the creation-time
+// hint and description instead of forcing the caller to discover both hashes.
 const onlyOneSignal = await callHandler(directHandler, {
   method: "POST",
   body: { targetAgent: "GlassDesk#3465", targetJobId: DIRECT_JOB_ID, requestedCoverageUSDT: "0.5" },
 });
-assert.equal(onlyOneSignal.json().error, "direct_evidence_incomplete");
+assert.equal(onlyOneSignal.json().error, "event_hint_evidence_incomplete");
 assert.deepEqual(
   onlyOneSignal.json().missing,
-  ["targetCreationTxHash", "targetAcceptanceTxHash", "targetBuyer", "jobDescription"],
+  ["targetCreatedAt", "jobDescription"],
 );
 
-// Discovery advertises both modes and is honest about which one works.
+const EVENT_JOB_ID = `0x${"c".repeat(64)}`;
+const EVENT_CREATION_TX = `0x${"d".repeat(64)}`;
+const EVENT_ACCEPTANCE_TX = `0x${"e".repeat(64)}`;
+const EVENT_BUYER = "0x3333333333333333333333333333333333333333";
+const EVENT_CREATED_AT = "2026-07-11T10:00:00.000Z";
+const EVENT_DESCRIPTION = "Verify a token market claim and return evidence with a source link.";
+let eventTaskFetches = 0;
+let resolverArgs = null;
+let eventVerifyArgs = null;
+const eventHandler = createCoveragePreflightHandler({
+  chain: {
+    ...directChain(),
+    async resolveTargetOrderEvidenceFromHints(args) {
+      resolverArgs = args;
+      return {
+        jobId: EVENT_JOB_ID,
+        buyer: EVENT_BUYER,
+        creationTxHash: EVENT_CREATION_TX,
+        acceptanceTxHash: EVENT_ACCEPTANCE_TX,
+        creationBlock: "200",
+        acceptanceBlock: "201",
+      };
+    },
+    async verifyTargetOrder(args) {
+      eventVerifyArgs = args;
+      if (args.buyer.toLowerCase() !== EVENT_BUYER.toLowerCase()) {
+        throw new EvidenceError("coverage_buyer_does_not_own_target_job");
+      }
+      return {
+        ...(await chain.verifyTargetOrder(args)),
+        jobId: args.jobId,
+        buyer: EVENT_BUYER,
+        creationTxHash: args.creationTxHash,
+        acceptanceTxHash: args.acceptanceTxHash,
+      };
+    },
+  },
+  ledger,
+  taskFetcher: async () => {
+    eventTaskFetches += 1;
+    return task;
+  },
+  now: () => Date.parse("2026-07-11T10:02:00.000Z"),
+  quoteSecret: QUOTE_SECRET,
+});
+const eventBody = {
+  targetAgent: "GlassDesk#3465",
+  targetJobId: EVENT_JOB_ID,
+  targetCreatedAt: EVENT_CREATED_AT,
+  jobDescription: EVENT_DESCRIPTION,
+  requestedCoverageUSDT: "0.5",
+};
+const eventResolved = await callHandler(eventHandler, {
+  method: "POST",
+  headers: { host: "policypool.test" },
+  body: eventBody,
+});
+assert.equal(eventResolved.statusCode, 200);
+assert.equal(eventResolved.json().eligible, true);
+assert.equal(eventResolved.json().charged, false);
+assert.equal(eventResolved.json().evidenceMode, "resolved_onchain_events");
+assert.equal(eventResolved.json().task, null);
+assert.equal(eventTaskFetches, 0, "event resolution must never fetch the withdrawn public page");
+assert.deepEqual(resolverArgs, {
+  jobId: EVENT_JOB_ID,
+  createdAt: EVENT_CREATED_AT,
+  acceptedAt: "",
+});
+assert.deepEqual(
+  {
+    jobId: eventVerifyArgs.jobId,
+    creationTxHash: eventVerifyArgs.creationTxHash,
+    acceptanceTxHash: eventVerifyArgs.acceptanceTxHash,
+    buyer: eventVerifyArgs.buyer,
+  },
+  {
+    jobId: EVENT_JOB_ID,
+    creationTxHash: EVENT_CREATION_TX,
+    acceptanceTxHash: EVENT_ACCEPTANCE_TX,
+    buyer: EVENT_BUYER,
+  },
+  "the event resolver must derive the transactions and buyer before the authoritative verifier runs",
+);
+assert.equal(
+  eventResolved.json().evidence.source,
+  "x_layer_task_escrow_events_resolved_from_untrusted_time_hints",
+);
+assert.equal(eventResolved.json().paidRequest.body.targetCreationTxHash, EVENT_CREATION_TX);
+assert.equal(eventResolved.json().paidRequest.body.targetAcceptanceTxHash, EVENT_ACCEPTANCE_TX);
+
+const wrongEventBuyer = await callHandler(eventHandler, {
+  method: "POST",
+  body: {
+    ...eventBody,
+    targetBuyer: "0x4444444444444444444444444444444444444444",
+  },
+});
+assert.equal(wrongEventBuyer.json().eligible, false);
+assert.equal(wrongEventBuyer.json().charged, false);
+assert.equal(wrongEventBuyer.json().reason, "coverage_buyer_does_not_own_target_job");
+assert.equal(wrongEventBuyer.json().quote, undefined);
+
+const eventWithAcceptanceHint = await callHandler(eventHandler, {
+  method: "POST",
+  headers: { host: "policypool.test" },
+  body: {
+    ...eventBody,
+    targetAcceptedAt: "2026-07-11T10:01:00.000Z",
+  },
+});
+assert.equal(eventWithAcceptanceHint.json().eligible, true);
+assert.deepEqual(resolverArgs, {
+  jobId: EVENT_JOB_ID,
+  createdAt: EVENT_CREATED_AT,
+  acceptedAt: "2026-07-11T10:01:00.000Z",
+});
+
+const eventFailureHandler = (code) => createCoveragePreflightHandler({
+  chain: {
+    ...directChain(),
+    async resolveTargetOrderEvidenceFromHints() {
+      throw new EvidenceError(code);
+    },
+    async verifyTargetOrder() {
+      throw new Error("verification must not run without resolved transactions");
+    },
+  },
+  ledger,
+  taskFetcher: async () => {
+    throw new Error("event failures must not fall back to the public page");
+  },
+  now: () => Date.parse("2026-07-11T10:02:00.000Z"),
+  quoteSecret: QUOTE_SECRET,
+});
+const missingEvent = await callHandler(eventFailureHandler("target_event_not_found"), {
+  method: "POST",
+  body: eventBody,
+});
+assert.equal(missingEvent.statusCode, 200);
+assert.equal(missingEvent.json().eligible, false);
+assert.equal(missingEvent.json().reason, "target_event_not_found");
+assert.equal(missingEvent.json().retryable, false);
+assert.equal(missingEvent.json().charged, false);
+
+const calibrationOutage = await callHandler(eventFailureHandler("target_block_calibration_failed"), {
+  method: "POST",
+  body: eventBody,
+});
+assert.equal(calibrationOutage.statusCode, 503);
+assert.equal(calibrationOutage.json().error, "target_block_calibration_failed");
+assert.equal(calibrationOutage.json().retryable, true);
+assert.equal(calibrationOutage.json().charged, false);
+
+// Discovery advertises all modes and is honest about which one works.
 const modes = (await callHandler(directHandler, { method: "GET" })).json().modes;
 const publicMode = modes.find((mode) => mode.mode === "public_task_reference");
 const onchainMode = modes.find((mode) => mode.mode === "verified_onchain_evidence");
+const eventMode = modes.find((mode) => mode.mode === "resolved_onchain_events");
 assert.equal(publicMode.available, false, "the withdrawn page path must not be advertised as usable");
 assert.equal(publicMode.unavailableReason, "okx_public_task_evidence_withdrawn");
 assert.equal(onchainMode.available, true);
 for (const field of ["targetJobId", "targetCreationTxHash", "targetAcceptanceTxHash", "targetBuyer", "jobDescription"]) {
   assert.ok(onchainMode.required.includes(field), `discovery must list ${field} as required`);
 }
+assert.equal(eventMode.available, true);
+assert.deepEqual(eventMode.required, [
+  "targetAgent",
+  "targetJobId",
+  "targetCreatedAt",
+  "jobDescription",
+]);
+assert.deepEqual(eventMode.optional, ["targetAcceptedAt", "targetBuyer"]);
 
 // Discovery states where the mode does not apply, rather than advertising it
 // unconditionally and refusing only on submission. An enrolled v0.4 A2A covenant
@@ -810,6 +994,14 @@ const notAvailable = (onchainMode.notAvailableFor || [])
   .find((entry) => entry.reason === "direct_evidence_unavailable_for_universal_a2a");
 assert.ok(notAvailable, "discovery must state where direct evidence is refused");
 assert.match(notAvailable.whenPolicy, /A2A/, "the exclusion must name when it applies");
+const eventNotAvailable = (eventMode.notAvailableFor || [])
+  .find((entry) => entry.reason === "direct_evidence_unavailable_for_universal_a2a");
+assert.ok(eventNotAvailable, "discovery must state where resolved event evidence is refused");
+assert.deepEqual(
+  eventMode.notAvailableFor,
+  onchainMode.notAvailableFor,
+  "both on-chain evidence modes must publish the same v0.4 A2A exclusion",
+);
 assert.ok(
   !(onchainMode.required || []).includes("taskReference"),
   "a direct covenant must never be asked for a reference it must not store",

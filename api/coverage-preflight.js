@@ -1,4 +1,10 @@
-import { COVERAGE, MARKETPLACE, PAYMENT, XLAYER } from "./lib/config.js";
+import {
+  COVERAGE,
+  MARKETPLACE,
+  ONCHAIN_EVIDENCE_LIMITATIONS,
+  PAYMENT,
+  XLAYER,
+} from "./lib/config.js";
 import { createChainService, EvidenceError } from "./lib/chain.js";
 import { createLedger } from "./lib/ledger.js";
 import { fetchOkxTaskPage, OkxTaskPageError } from "./lib/okx-task-page.js";
@@ -38,6 +44,8 @@ const INPUT_ALIASES = {
   targetCreationTxHash: ["targetCreationTxHash", "creationTxHash", "jobCreationTxHash"],
   targetAcceptanceTxHash: ["targetAcceptanceTxHash", "acceptanceTxHash", "jobAcceptanceTxHash"],
   targetBuyer: ["targetBuyer", "buyer", "buyerWallet", "coverageBuyer"],
+  targetCreatedAt: ["targetCreatedAt", "jobCreatedAt", "taskCreatedAt", "creationTimeHint"],
+  targetAcceptedAt: ["targetAcceptedAt", "jobAcceptedAt", "taskAcceptedAt", "acceptanceTimeHint"],
   jobDescription: ["jobDescription", "description", "jobSummary"],
 };
 const CONTAINER_KEYS = new Set(["input", "data", "payload", "request", "parameters", "arguments", "context", "body"]);
@@ -109,14 +117,15 @@ function readInput(req) {
     targetCreationTxHash: readAlias(INPUT_ALIASES.targetCreationTxHash, 80),
     targetAcceptanceTxHash: readAlias(INPUT_ALIASES.targetAcceptanceTxHash, 80),
     targetBuyer: readAlias(INPUT_ALIASES.targetBuyer, 80),
+    targetCreatedAt: readAlias(INPUT_ALIASES.targetCreatedAt, 80),
+    targetAcceptedAt: readAlias(INPUT_ALIASES.targetAcceptedAt, 80),
     jobDescription: readAlias(INPUT_ALIASES.jobDescription),
   };
 }
 
-// The two ways a caller can identify a target job. Public task references are
-// resolved through the marketplace page; direct evidence is supplied by the
-// buyer and verified against X Layer. Both end at the same
-// `chain.verifyTargetOrder`, which is what actually establishes eligibility.
+// Public references, exact transaction evidence, and bounded event-hint
+// resolution all end at the same `chain.verifyTargetOrder`, which is what
+// actually establishes eligibility.
 // What direct evidence requires.
 const DIRECT_EVIDENCE_FIELDS = Object.freeze([
   "targetJobId",
@@ -138,16 +147,31 @@ const DIRECT_EVIDENCE_FIELDS = Object.freeze([
 // taskReference sitting unread.
 //
 // Both stay required by DIRECT_EVIDENCE_FIELDS. Requiring a field and inferring
-// intent from it are different jobs, and only the three below name something
-// that exists on chain.
+// intent from it are different jobs. Transaction mode is selected only by an
+// actual transaction hash; a job id without hashes belongs to the event-hint
+// resolver below.
 const DIRECT_EVIDENCE_SIGNALS = Object.freeze([
-  "targetJobId",
   "targetCreationTxHash",
   "targetAcceptanceTxHash",
 ]);
 
 function directEvidenceIntent(input) {
   return DIRECT_EVIDENCE_SIGNALS.some((field) => Boolean(input[field]));
+}
+
+const EVENT_HINT_FIELDS = Object.freeze([
+  "targetJobId",
+  "targetCreatedAt",
+  "jobDescription",
+]);
+const EVENT_HINT_SIGNALS = Object.freeze([
+  "targetJobId",
+  "targetCreatedAt",
+  "targetAcceptedAt",
+]);
+
+function eventHintEvidenceIntent(input) {
+  return EVENT_HINT_SIGNALS.some((field) => Boolean(input[field]));
 }
 
 function paidEndpoint(req, quoteToken) {
@@ -165,8 +189,10 @@ function minBigInt(...values) {
 function evidenceUnavailable(error) {
   return [
     "target_chain_head_unavailable",
+    "target_block_calibration_failed",
     "target_block_lookup_failed",
     "target_event_lookup_failed",
+    "target_event_search_window_invalid",
     "transaction_unconfirmed",
     "transaction_lookup_unavailable",
     "target_job_status_unavailable",
@@ -227,11 +253,17 @@ export function createCoveragePreflightHandler(dependencies = {}) {
 
     const input = readInput(req);
     const directEvidence = directEvidenceIntent(input);
-    const evidenceMode = directEvidence ? "verified_onchain_evidence" : "public_task_reference";
+    const eventHintEvidence = !directEvidence && eventHintEvidenceIntent(input);
+    const onchainEvidence = directEvidence || eventHintEvidence;
+    const evidenceMode = directEvidence
+      ? "verified_onchain_evidence"
+      : eventHintEvidence
+        ? "resolved_onchain_events"
+        : "public_task_reference";
     // Declines carry the mode too. A caller debugging a refusal otherwise cannot
     // tell whether the evidence they supplied was the evidence that was used.
     const decline = (response, reason, extra = {}) => declineWith(response, reason, { evidenceMode, ...extra });
-    if (!input.targetAgent && !input.taskReference && !directEvidence) {
+    if (!input.targetAgent && !input.taskReference && !onchainEvidence) {
       return sendJson(res, 200, {
         ok: true,
         service: "PolicyPool Coverage Preflight",
@@ -253,15 +285,17 @@ export function createCoveragePreflightHandler(dependencies = {}) {
             // Reconciliation for an enrolled v0.4 A2A covenant reads the public
             // task page, which is withdrawn, so such a covenant could be sold and
             // then never settle. The mode is refused there rather than quoted.
-            notAvailableFor: [
-              {
-                whenPolicy: "serviceType is A2A and the policy is enrolled on the v0.4 stack",
-                reason: "direct_evidence_unavailable_for_universal_a2a",
-                note: "Reconciliation for these covenants reads the withdrawn public task page, so coverage bought this way could not release or pay out. It is refused rather than sold.",
-              },
-            ],
+            notAvailableFor: ONCHAIN_EVIDENCE_LIMITATIONS,
             available: true,
             note: "You supply the exact X Layer transactions; PolicyPool verifies them against the task escrow rather than trusting them. targetBuyer must be the wallet that created the target job, and must be the payer on the paid call. The job description is checked against the policy's published scope but is not proved on chain.",
+          },
+          {
+            mode: "resolved_onchain_events",
+            required: ["targetAgent", ...EVENT_HINT_FIELDS],
+            optional: ["targetAcceptedAt", "targetBuyer"],
+            notAvailableFor: ONCHAIN_EVIDENCE_LIMITATIONS,
+            available: true,
+            note: "You supply the job id and an approximate creation time. PolicyPool treats the time as an untrusted search hint, derives both transaction hashes and the buyer from indexed X Layer escrow events, and then runs the same verifier. Add targetAcceptedAt only when the provider accepted more than 30 minutes after creation.",
           },
         ],
         ...targetOptions(),
@@ -286,6 +320,19 @@ export function createCoveragePreflightHandler(dependencies = {}) {
           charged: false,
           missing,
           required: ["targetAgent", ...DIRECT_EVIDENCE_FIELDS],
+        });
+      }
+    }
+    if (eventHintEvidence) {
+      const missing = EVENT_HINT_FIELDS.filter((field) => !input[field]);
+      if (missing.length > 0) {
+        return sendJson(res, 400, {
+          ok: false,
+          error: "event_hint_evidence_incomplete",
+          charged: false,
+          missing,
+          required: ["targetAgent", ...EVENT_HINT_FIELDS],
+          optional: ["targetAcceptedAt", "targetBuyer"],
         });
       }
     }
@@ -329,17 +376,21 @@ export function createCoveragePreflightHandler(dependencies = {}) {
         },
       });
     }
-    if (!directEvidence && !publicTaskEvidenceAvailable) {
+    if (!onchainEvidence && !publicTaskEvidenceAvailable) {
       return sendJson(res, 422, {
         ok: false,
         error: "okx_task_timeline_unavailable",
         charged: false,
         evidenceMode,
         requiredDirectEvidence: ["targetAgent", ...DIRECT_EVIDENCE_FIELDS],
+        resolvedEventEvidence: {
+          required: ["targetAgent", ...EVENT_HINT_FIELDS],
+          optional: ["targetAcceptedAt", "targetBuyer"],
+        },
         ...targetOptions(),
       });
     }
-    if (!input.taskReference && !directEvidence) {
+    if (!input.taskReference && !onchainEvidence) {
       return sendJson(res, 400, { ok: false, error: "okx_task_reference_required", charged: false });
     }
 
@@ -351,7 +402,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
     // a page fetch which now always throws. The covenant would be paid for and
     // then never release or advance to payout. Refuse to sell what cannot be
     // settled, rather than quote it and discover this after the money moves.
-    if (directEvidence && policy.onchainPolicyId && policy.serviceType === "A2A") {
+    if (onchainEvidence && policy.onchainPolicyId && policy.serviceType === "A2A") {
       return decline(res, "direct_evidence_unavailable_for_universal_a2a", {
         policy: {
           agentId: policy.agentId,
@@ -363,7 +414,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
     }
 
     let task = null;
-    if (!directEvidence) {
+    if (!onchainEvidence) {
       try {
         task = await taskFetcher(input.taskReference);
       } catch (error) {
@@ -374,18 +425,18 @@ export function createCoveragePreflightHandler(dependencies = {}) {
       }
     }
 
-    // Direct evidence changes only where the transaction hashes come from, never
-    // what is done with them. Both modes end at the same verifyTargetOrder,
+    // On-chain evidence modes change only where the transaction hashes come
+    // from, never what is done with them. Every mode ends at the same verifier,
     // which reads the escrow logs and binds buyer, job, provider wallet, agent
     // id, asset, amount, service type and accepted-service hash. Nothing the
     // caller asserts is taken on trust: a wrong buyer wallet, a forged hash, a
     // reverted transaction, or a job that is not accepted all fail there.
-    // Never carried in direct mode. Storing a reference on the covenant is what
-    // makes a2aObservation fetch the withdrawn page instead of falling back to
-    // chain, so a direct covenant deliberately has none.
+    // Never carried in either on-chain mode. Storing a reference on the covenant
+    // is what makes a2aObservation fetch the withdrawn page instead of falling
+    // back to chain, so these covenants deliberately have none.
     const publicTaskReference = task?.publicTaskId || null;
-    const jobId = directEvidence ? input.targetJobId : task.jobId;
-    const jobDescription = directEvidence ? input.jobDescription : task.description;
+    const jobId = onchainEvidence ? input.targetJobId : task.jobId;
+    const jobDescription = onchainEvidence ? input.jobDescription : task.description;
     let evidence;
     let targetOrder;
     try {
@@ -396,10 +447,19 @@ export function createCoveragePreflightHandler(dependencies = {}) {
           acceptanceTxHash: input.targetAcceptanceTxHash,
           buyer: input.targetBuyer,
         }
+        : eventHintEvidence
+          ? {
+            source: "x_layer_task_escrow_events_resolved_from_untrusted_time_hints",
+            ...await getChain().resolveTargetOrderEvidenceFromHints({
+              jobId,
+              createdAt: input.targetCreatedAt,
+              acceptedAt: input.targetAcceptedAt,
+            }),
+          }
         // No `source` here on purpose. The response below already sets a
         // human-readable one before spreading this object, so adding a key would
         // overwrite an established field value rather than add to it. Only
-        // direct mode needs to say something different.
+        // on-chain modes need to say something different.
         : await getChain().resolveTargetOrderEvidence({
           jobId,
           createdAt: task.openedAt,
@@ -409,7 +469,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
         jobId,
         creationTxHash: evidence.creationTxHash,
         acceptanceTxHash: evidence.acceptanceTxHash,
-        buyer: evidence.buyer,
+        buyer: eventHintEvidence && input.targetBuyer ? input.targetBuyer : evidence.buyer,
         policy,
       });
     } catch (error) {
@@ -499,7 +559,7 @@ export function createCoveragePreflightHandler(dependencies = {}) {
       targetJobId: jobId,
       targetCreationTxHash: evidence.creationTxHash,
       targetAcceptanceTxHash: evidence.acceptanceTxHash,
-      // Omitted entirely in direct mode rather than sent empty: there is no
+      // Omitted entirely in on-chain modes rather than sent empty: there is no
       // public task reference to record, and a blank one would read as a lookup
       // that was attempted and returned nothing.
       ...(publicTaskReference ? { targetTaskReference: publicTaskReference } : {}),
@@ -534,23 +594,24 @@ export function createCoveragePreflightHandler(dependencies = {}) {
       eligible: true,
       charged: false,
       generatedAt: new Date(now()).toISOString(),
-      // Null in direct mode rather than a synthesised stand-in: there was no
-      // marketplace page in this flow, and inventing one would misrepresent
-      // where the evidence came from. `evidenceMode` says which path ran.
+      // Null in either on-chain mode rather than a synthesised stand-in: there
+      // was no marketplace page in these flows, and inventing one would
+      // misrepresent where the evidence came from. `evidenceMode` says which
+      // path ran.
       task,
       evidenceMode,
       // Where the description that satisfied the policy's scope keywords came
       // from. On the public path it is the marketplace page's own text. In
-      // direct mode the buyer writes it, and the marketplace publishes no
-      // authenticated mapping from an accepted order to a listed service id, so
-      // nothing here proves the covered work is the work the policy describes.
+      // either on-chain mode the buyer writes it, and the marketplace publishes
+      // no authenticated mapping from an accepted order to a listed service id,
+      // so nothing here proves the covered work is the work the policy describes.
       // The paid endpoint has always accepted a caller-written description on
       // this path; stating the difference is the honest response to that, and
       // claiming a service binding that does not exist would not be.
-      scopeEvidence: directEvidence
+      scopeEvidence: onchainEvidence
         ? "buyer_declared_description_matched_registered_policy"
         : "public_task_description_matched_registered_policy",
-      ...(directEvidence
+      ...(onchainEvidence
         ? {
           scopeLimitation: "The job description is supplied by you, not read from the marketplace. OKX publishes no authenticated mapping from an accepted order to a listed service id, so this quote binds the buyer, job, provider, agent, asset, amount and service type on chain, but takes the described work on trust.",
         }

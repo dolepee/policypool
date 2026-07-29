@@ -66,6 +66,38 @@ assert.deepEqual(manifest.preflightInput.modes.directEvidence.required, [
   "targetBuyer",
   "jobDescription",
 ]);
+assert.equal(manifest.preflightInput.modes.resolvedEventEvidence.available, true);
+assert.deepEqual(manifest.preflightInput.modes.resolvedEventEvidence.required, [
+  "targetAgent",
+  "targetJobId",
+  "targetCreatedAt",
+  "jobDescription",
+]);
+assert.deepEqual(
+  manifest.preflightInput.modes.directEvidence.notAvailableFor,
+  manifest.preflightInput.modes.resolvedEventEvidence.notAvailableFor,
+  "both manifest evidence modes must publish the same v0.4 A2A exclusion",
+);
+assert.equal(
+  manifest.preflightInput.modes.resolvedEventEvidence.notAvailableFor[0].reason,
+  "direct_evidence_unavailable_for_universal_a2a",
+);
+assert.deepEqual(
+  manifest.preflightInput.modes.resolvedEventEvidence.optional,
+  ["targetAcceptedAt", "targetBuyer"],
+);
+assert.equal(
+  manifest.preflightInput.modes.resolvedEventEvidence.maximumAutomaticAcceptanceScanBlocks,
+  1800,
+);
+assert.equal(
+  manifest.preflightInput.modes.resolvedEventEvidence.creationHintRadiusBlocks,
+  120,
+);
+assert.match(
+  manifest.preflightInput.modes.resolvedEventEvidence.trustModel,
+  /search_hints_only/,
+);
 assert.deepEqual(manifest.states.coverage, [
   "active",
   "declined",
