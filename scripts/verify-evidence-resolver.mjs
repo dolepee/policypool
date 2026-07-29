@@ -108,14 +108,14 @@ assert.equal(happy.creationTxHash, CREATION_TX);
 assert.equal(happy.acceptanceTxHash, ACCEPTANCE_TX);
 assert.equal(happy.creationBlock, CREATION_BLOCK.toString());
 assert.equal(happy.acceptanceBlock, ACCEPTANCE_BLOCK.toString());
-assert.equal(happyClient.statusReads, 0, "a found acceptance must not need a status fallback");
+assert.equal(happyClient.statusReads, 1, "the current job status must be checked before the historical scan");
 
 const automaticAcceptanceRequests = happyClient.requests.filter(
   (request) => request.topics[0] === OKX_TASK.acceptedTopic,
 );
 assert.equal(
   automaticAcceptanceRequests.length,
-  4,
+  1,
   "a typical acceptance in the first batch must not scan the remaining 30-minute window",
 );
 assert.equal(BigInt(automaticAcceptanceRequests[0].fromBlock), CREATION_BLOCK);
@@ -164,6 +164,11 @@ await assert.rejects(
   "a created but unaccepted job must remain retryable rather than ask for invented evidence",
 );
 assert.equal(unacceptedClient.statusReads, 1);
+assert.equal(
+  unacceptedClient.requests.filter((request) => request.topics[0] === OKX_TASK.acceptedTopic).length,
+  0,
+  "a job still in created state must not consume the 30-minute acceptance scan",
+);
 
 const lateAcceptanceClient = resolverClient({ status: 1, acceptanceLogs: [] });
 await assert.rejects(

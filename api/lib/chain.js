@@ -32,7 +32,10 @@ const MAX_PROVIDER_SETTLEMENT_SEARCH_SECONDS = 20 * 60;
 // Keep the scan portable across providers while preserving the exact bounded window.
 const MAX_LOG_SCAN_BLOCKS = 100n;
 const MAX_ACCEPTANCE_SCAN_BLOCKS = BigInt(EVIDENCE_RESOLVER.maxAutomaticAcceptanceScanBlocks);
-const LOG_SCAN_CONCURRENCY = 4;
+// The public X Layer RPC rate-limits small concurrent bursts, especially when
+// CI runs the push and pull-request workflows together. One request at a time
+// trades a little latency for deterministic availability.
+const LOG_SCAN_CONCURRENCY = 1;
 
 export class EvidenceError extends Error {
   constructor(code, message) {
@@ -403,6 +406,8 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
       radius: BigInt(EVIDENCE_RESOLVER.creationHintRadiusBlocks),
     });
     const creationBlock = BigInt(createdLog.blockNumber);
+    const currentStatus = await getJobStatus(jobId);
+    if (currentStatus === 0) throw new EvidenceError("target_job_not_accepted:0");
     const scanEnd = creationBlock + MAX_ACCEPTANCE_SCAN_BLOCKS - 1n < latestBlock.number
       ? creationBlock + MAX_ACCEPTANCE_SCAN_BLOCKS - 1n
       : latestBlock.number;
@@ -413,8 +418,6 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
       toBlock: scanEnd,
     });
     if (!acceptedLog) {
-      const status = await getJobStatus(jobId);
-      if (status === 0) throw new EvidenceError("target_job_not_accepted:0");
       throw new EvidenceError("target_acceptance_time_hint_required");
     }
     return evidenceFromTaskLogs(jobId, createdLog, acceptedLog);
