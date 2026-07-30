@@ -587,6 +587,19 @@ assert.deepEqual(
 assert.equal(direct.json().paidRequest.body.targetJobId, DIRECT_JOB_ID);
 assert.equal(direct.json().paidRequest.body.jobDescription, DIRECT_DESCRIPTION);
 
+const { targetBuyer: _explicitDirectBuyer, ...directWithoutExplicitBuyer } = directBody;
+const directBuyerAlias = await callHandler(directHandler, {
+  method: "POST",
+  headers: { host: "policypool.test" },
+  body: { ...directWithoutExplicitBuyer, buyerWallet: DIRECT_BUYER },
+});
+assert.equal(
+  directBuyerAlias.json().eligible,
+  true,
+  "exact-transaction mode must preserve its documented legacy buyer aliases",
+);
+assert.equal(verifyArgs.buyer, DIRECT_BUYER);
+
 // An enrolled v0.4 A2A covenant is reconciled through a2aObservation, which
 // reads the public task page whenever the covenant carries a reference. That
 // page is withdrawn, so such a covenant would be paid for and then never release
@@ -903,6 +916,28 @@ assert.equal(
 );
 assert.equal(eventResolved.json().paidRequest.body.targetCreationTxHash, EVENT_CREATION_TX);
 assert.equal(eventResolved.json().paidRequest.body.targetAcceptanceTxHash, EVENT_ACCEPTANCE_TX);
+
+for (const genericBuyerField of ["buyer", "buyerWallet"]) {
+  eventVerifyArgs = null;
+  const wrappedEventRequest = await callHandler(eventHandler, {
+    method: "POST",
+    headers: { host: "policypool.test" },
+    body: {
+      [genericBuyerField]: "0x4444444444444444444444444444444444444444",
+      input: eventBody,
+    },
+  });
+  assert.equal(
+    wrappedEventRequest.json().eligible,
+    true,
+    `${genericBuyerField} envelope metadata must not become an event-mode ownership assertion`,
+  );
+  assert.equal(
+    eventVerifyArgs.buyer,
+    EVENT_BUYER,
+    "event mode must keep the buyer derived from the indexed creation event",
+  );
+}
 
 const wrongEventBuyer = await callHandler(eventHandler, {
   method: "POST",

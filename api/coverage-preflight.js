@@ -117,6 +117,10 @@ function readInput(req) {
     targetCreationTxHash: readAlias(INPUT_ALIASES.targetCreationTxHash, 80),
     targetAcceptanceTxHash: readAlias(INPUT_ALIASES.targetAcceptanceTxHash, 80),
     targetBuyer: readAlias(INPUT_ALIASES.targetBuyer, 80),
+    // Event mode derives ownership from the creation event. Only an explicitly
+    // named targetBuyer field may opt into the additional assertion; generic
+    // buyer/buyerWallet envelope metadata must not override chain evidence.
+    targetBuyerAssertion: readAlias(["targetBuyer"], 80),
     targetCreatedAt: readAlias(INPUT_ALIASES.targetCreatedAt, 80),
     targetAcceptedAt: readAlias(INPUT_ALIASES.targetAcceptedAt, 80),
     jobDescription: readAlias(INPUT_ALIASES.jobDescription),
@@ -469,7 +473,9 @@ export function createCoveragePreflightHandler(dependencies = {}) {
         jobId,
         creationTxHash: evidence.creationTxHash,
         acceptanceTxHash: evidence.acceptanceTxHash,
-        buyer: eventHintEvidence && input.targetBuyer ? input.targetBuyer : evidence.buyer,
+        buyer: eventHintEvidence && input.targetBuyerAssertion
+          ? input.targetBuyerAssertion
+          : evidence.buyer,
         policy,
       });
     } catch (error) {
