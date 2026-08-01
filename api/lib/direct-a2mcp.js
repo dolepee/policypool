@@ -1,4 +1,4 @@
-import { decodePaymentSignatureHeader } from "@x402/core/http";
+import { decodePaymentSignatureHeader } from "@okxweb3/x402-core/http";
 import {
   encodeAbiParameters,
   getAddress,

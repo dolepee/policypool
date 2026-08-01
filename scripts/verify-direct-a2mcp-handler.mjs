@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { decodePaymentRequiredHeader } from "@x402/core/http";
+import { decodePaymentRequiredHeader } from "@okxweb3/x402-core/http";
 import { createDirectA2mcpHandler } from "../api/direct-a2mcp.js";
 import { PAYMENT, XLAYER } from "../api/lib/config.js";
 import { MemoryRateLimiter } from "../api/lib/rate-limit.js";

@@ -68,7 +68,7 @@ PolicyPool does not match by amount, agent name, or time alone. The caller must 
 1. The target agent must have a versioned policy snapshot in `api/lib/policy-registry.js`.
 2. The free preflight resolves indexed X Layer events from a job ID and creation-time hint, then returns a signed short-lived quote bound to the verified job and buyer. Exact transaction hashes remain an advanced fallback. **Since 2026-07-25 the entire public-task-reference path in this step is unavailable, for a bare task id exactly as for a URL**, since both normalise to the same withdrawn page.
 3. `api/lib/chain.js` derives or accepts both transaction hashes, then verifies them against the task escrow and binds buyer, job, provider wallet, agent ID, token, paid amount, service type, and the exact accepted-service hash. The coverage payer must own the target job.
-4. The paid endpoint recovers the canonical request from the quote URL, x402 requirements, request body, or exactly one open quote for the verified payer. Zero or multiple payer matches fail without settlement. Direct full-body requests reject a visibly non-accepted task before returning a payment challenge, and the full eligibility pass runs again before a valid signed service payment is settled.
+4. The paid endpoint uses the official OKX Payment SDK for challenge encoding, verification, and settlement. Every unpaid GET or POST receives the standard `402` contract before request validation. The compact payment header stays below a `2 KiB` parser budget; the complete request schema is in the JSON body. Invalid paid requests still fail before settlement, and callers that want a free eligibility decision use the preflight endpoint. The endpoint recovers the canonical request from the quote URL, x402 requirements, request body, or exactly one open quote for the verified payer; zero or multiple payer matches fail without settlement.
 5. The durable ledger atomically checks that active, pending, and payout-due liabilities plus the new cap do not exceed the live reserve.
 6. Each provider policy publishes an enrollment window. The deadline is derived from the verified acceptance block plus the registered target-policy SLA; callers cannot shorten or extend either clock.
 7. The scheduled reconciler reads `getJobStatus(bytes32)`. An accepted job still undelivered after that derived deadline becomes `payout_due`; a completed or refunded job releases capacity. State changes and failures alert the operator.
@@ -201,9 +201,9 @@ curl -sS https://policypool.vercel.app/api/coverage-preflight \
 npm run agent:verify-live
 ```
 
-The no-secret live verifier checks `HEAD 200`, unpaid `402`, the exact X Layer payment domain, rejection of generic or malformed payment headers, reserve solvency, and the controlled breach payout directly from its X Layer transaction receipt. It does not sign or spend a payment.
+The no-secret live verifier checks `HEAD 200`; empty, unknown-field, realistic-body, and GET unpaid `402` responses; a full response-header block below `2 KiB` through a strict Node client; the exact X Layer payment domain; rejection of generic or malformed payment headers; reserve solvency; and the controlled breach payout directly from its X Layer transaction receipt. It does not sign or spend a payment.
 
-Required production configuration is documented in `.env.example`. The paid route fails closed unless a durable Redis ledger, dedicated quote secret, and real settlement facilitator are configured. QStash is an optional primary reconciler; the repository's GitHub schedule remains the backup.
+Required production configuration is documented in `.env.example`. Production should configure `OKX_API_KEY`, `OKX_SECRET_KEY`, and `OKX_PASSPHRASE` for the official OKX facilitator; the dedicated local facilitator remains a controlled-development fallback. The paid route fails closed unless a durable Redis ledger, dedicated quote secret, and real settlement facilitator are configured. QStash is an optional primary reconciler; the repository's GitHub schedule remains the backup.
 
 ## Repository Map
 
@@ -215,7 +215,7 @@ api/coverage-status.js           # one receipt plus live target-job status
 api/reconcile-coverage.js        # authenticated objective-state reconciler
 api/manifest.js                  # versioned machine-readable integration contract
 api/record-payout.js             # authenticated payout transaction verifier
-api/lib/payment.js               # official x402 decode, verify, settle, transfer proof
+api/lib/payment.js               # official OKX SDK verify/settle + independent transfer proof
 api/lib/chain.js                 # OKX task and token evidence on X Layer
 api/lib/okx-task-page.js         # strict public OKX task-page parser
 api/lib/ledger.js                # atomic durable liability accounting

@@ -3,7 +3,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
-import { decodePaymentSignatureHeader } from "@x402/core/http";
+import { decodePaymentSignatureHeader } from "@okxweb3/x402-core/http";
 import { clean, header, sha256 } from "./utils.js";
 
 const TOKEN_PATTERN = /^ppq_([a-f0-9]{32})\.([a-f0-9]{64})$/;

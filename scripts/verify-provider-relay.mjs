@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { authorizationTypes } from "@x402/evm";
+import { authorizationTypes } from "@okxweb3/x402-evm";
 import {
   decodePaymentSignatureHeader,
   encodePaymentRequiredHeader,
   encodePaymentResponseHeader,
   encodePaymentSignatureHeader,
-} from "@x402/core/http";
+} from "@okxweb3/x402-core/http";
 import {
   encodeAbiParameters,
   encodeEventTopics,

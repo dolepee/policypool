@@ -1,8 +1,11 @@
-import { HTTPFacilitatorClient } from "@x402/core/server";
-import { decodePaymentSignatureHeader, encodePaymentResponseHeader } from "@x402/core/http";
-import { x402Facilitator } from "@x402/core/facilitator";
-import { registerExactEvmScheme } from "@x402/evm/exact/facilitator";
-import { toFacilitatorEvmSigner } from "@x402/evm";
+import { OKXFacilitatorClient } from "@okxweb3/x402-core";
+import { x402Facilitator } from "@okxweb3/x402-core/facilitator";
+import {
+  decodePaymentSignatureHeader,
+  encodePaymentResponseHeader,
+} from "@okxweb3/x402-core/http";
+import { toFacilitatorEvmSigner } from "@okxweb3/x402-evm";
+import { registerExactEvmScheme } from "@okxweb3/x402-evm/exact/facilitator";
 import {
   createPublicClient,
   createWalletClient,
@@ -46,25 +49,42 @@ function assertAccepted(accepted, requirements) {
   if (String(accepted.amount) !== String(requirements.amount)) throw new PaymentVerificationError("payment_amount_mismatch");
 }
 
-function createHttpFacilitator() {
-  const url = process.env.POLICYPOOL_FACILITATOR_URL;
-  if (!url) return null;
-  const token = process.env.POLICYPOOL_FACILITATOR_TOKEN;
-  const auth = token ? { Authorization: `Bearer ${token}` } : {};
-  return new HTTPFacilitatorClient({
-    url,
-    createAuthHeaders: async () => ({
-      verify: auth,
-      settle: auth,
-      supported: auth,
-      bazaar: auth,
-    }),
+function createOkxFacilitator(environment = process.env) {
+  const names = ["OKX_API_KEY", "OKX_SECRET_KEY", "OKX_PASSPHRASE"];
+  const values = names.map((name) => String(environment[name] || ""));
+  if (values.every((value) => !value)) return null;
+  const missing = names.filter((_, index) => !values[index].trim());
+  const padded = names.filter((_, index) => values[index] !== values[index].trim());
+  if (missing.length > 0 || padded.length > 0) {
+    throw new PaymentConfigurationError("OKX facilitator credentials are incomplete or padded");
+  }
+  return new OKXFacilitatorClient({
+    apiKey: values[0],
+    secretKey: values[1],
+    passphrase: values[2],
+    syncSettle: true,
   });
 }
 
-function createLocalFacilitator() {
-  const privateKey = process.env.POLICYPOOL_FACILITATOR_PRIVATE_KEY;
+function selfHostedFacilitatorEnabled(environment = process.env) {
+  const value = String(environment.POLICYPOOL_SELF_HOSTED_FACILITATOR_ENABLED || "")
+    .trim()
+    .toLowerCase();
+  if (!value || value === "false") return false;
+  if (value === "true") return true;
+  throw new PaymentConfigurationError(
+    "POLICYPOOL_SELF_HOSTED_FACILITATOR_ENABLED must be true or false",
+  );
+}
+
+function createLocalFacilitator(environment = process.env) {
+  const privateKey = environment.POLICYPOOL_FACILITATOR_PRIVATE_KEY;
   if (!privateKey) return null;
+  if (!selfHostedFacilitatorEnabled(environment)) {
+    throw new PaymentConfigurationError(
+      "Set POLICYPOOL_SELF_HOSTED_FACILITATOR_ENABLED=true to select the self-hosted facilitator",
+    );
+  }
   if (!/^0x[a-fA-F0-9]{64}$/.test(privateKey)) {
     throw new PaymentConfigurationError("POLICYPOOL_FACILITATOR_PRIVATE_KEY must be a 32-byte hex key");
   }
@@ -99,11 +119,11 @@ export function createPaymentService({ facilitator, chain } = {}) {
   let resolvedFacilitator = facilitator;
   function getFacilitator() {
     if (!resolvedFacilitator) {
-      resolvedFacilitator = createHttpFacilitator() || createLocalFacilitator();
+      resolvedFacilitator = createOkxFacilitator() || createLocalFacilitator();
     }
     if (!resolvedFacilitator) {
       throw new PaymentConfigurationError(
-        "Configure POLICYPOOL_FACILITATOR_URL or a dedicated POLICYPOOL_FACILITATOR_PRIVATE_KEY",
+        "Configure OKX facilitator credentials or a dedicated POLICYPOOL_FACILITATOR_PRIVATE_KEY",
       );
     }
     return resolvedFacilitator;
@@ -179,4 +199,9 @@ export function createPaymentService({ facilitator, chain } = {}) {
   return { fingerprint, settle, verify };
 }
 
-export const __test = { assertAccepted };
+export const __test = {
+  assertAccepted,
+  createLocalFacilitator,
+  createOkxFacilitator,
+  selfHostedFacilitatorEnabled,
+};

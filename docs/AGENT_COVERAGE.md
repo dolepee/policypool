@@ -54,7 +54,9 @@ and on-chain job ID.
 
 `quoteId` is optional for legacy full-body clients. The free preflight returns a signed, short-lived quote in the paid URL, x402 accepted requirements, and canonical body. If OKX drops the replay body, PolicyPool can recover only when the verified payer has exactly one canonical open quote; zero or multiple matches fail without settlement.
 
-For direct full-body clients, PolicyPool checks the on-chain target-job status before returning a payment challenge and declines tasks that are already submitted or terminal. This early check only removes an unnecessary signing round-trip; payer ownership and the complete target evidence are still reverified after authorization and before settlement.
+The paid endpoint always returns its x402 `402` challenge before validating an unpaid GET or POST body. The `PAYMENT-REQUIRED` header contains only the compact standard payment contract and is kept below a 2 KiB response-header budget; the full request schema is returned in the JSON body. Use the free preflight endpoint when input must be checked before authorizing payment. A signed but invalid paid request is rejected before settlement.
+
+The free preflight checks on-chain target-job status before returning a signed quote and declines tasks that are already submitted or terminal. The paid endpoint repeats payer ownership and complete target-evidence verification after authorization and before settlement.
 
 The target job must still be in accepted state. PolicyPool verifies the creation and acceptance transactions against the public OKX task escrow and binds the buyer wallet, job ID, provider wallet, target agent ID, payment token, target-job value, service type, exact accepted-service hash, and acceptance timestamp. The coverage payer must be the target-job buyer.
 

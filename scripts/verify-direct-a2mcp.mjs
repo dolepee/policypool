@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
-import { authorizationTypes } from "@x402/evm";
-import { decodePaymentSignatureHeader, encodePaymentSignatureHeader } from "@x402/core/http";
+import { authorizationTypes } from "@okxweb3/x402-evm";
+import {
+  decodePaymentSignatureHeader,
+  encodePaymentSignatureHeader,
+} from "@okxweb3/x402-core/http";
 import { getAddress, verifyTypedData } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import {

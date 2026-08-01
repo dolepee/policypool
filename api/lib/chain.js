@@ -1,4 +1,4 @@
-import { authorizationTypes } from "@x402/evm";
+import { authorizationTypes } from "@okxweb3/x402-evm";
 import {
   createPublicClient,
   decodeAbiParameters,

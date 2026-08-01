@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import {
   createPublicClient,
   decodeEventLog,
@@ -41,6 +43,44 @@ const sampleBody = {
   requestedCoverageUSDT: "1",
 };
 
+function strictHeaderProbe(url, body) {
+  const target = new URL(url);
+  const payload = JSON.stringify(body);
+  const requestImpl = target.protocol === "https:" ? httpsRequest : httpRequest;
+  return new Promise((resolve, reject) => {
+    const request = requestImpl(target, {
+      method: "POST",
+      maxHeaderSize: 2_048,
+      headers: {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(payload),
+      },
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => {
+        let headerBytes = Buffer.byteLength(
+          `HTTP/1.1 ${response.statusCode} ${response.statusMessage}\r\n\r\n`,
+        );
+        for (let index = 0; index < response.rawHeaders.length; index += 2) {
+          headerBytes += Buffer.byteLength(
+            `${response.rawHeaders[index]}: ${response.rawHeaders[index + 1]}\r\n`,
+          );
+        }
+        resolve({
+          statusCode: response.statusCode,
+          headers: response.headers,
+          headerBytes,
+          body: Buffer.concat(chunks).toString("utf8"),
+        });
+      });
+    });
+    request.setTimeout(30_000, () => request.destroy(new Error("strict_probe_timeout")));
+    request.once("error", reject);
+    request.end(payload);
+  });
+}
+
 const head = await fetch(endpoint, { method: "HEAD" });
 assert.equal(head.status, 200, `HEAD expected 200, got ${head.status}`);
 
@@ -49,6 +89,7 @@ assert.equal(unpaid.status, 402, `anonymous discovery expected 402, got ${unpaid
 const required = unpaid.headers.get("payment-required");
 assert.ok(required, "missing PAYMENT-REQUIRED header");
 const challenge = JSON.parse(Buffer.from(required, "base64").toString("utf8"));
+const unpaidBody = await unpaid.json();
 assert.equal(challenge.x402Version, 2);
 assert.equal(challenge.accepts[0].network, "eip155:196");
 assert.equal(challenge.accepts[0].amount, "100000");
@@ -72,23 +113,60 @@ assert.equal(
   true,
   `unexpected payment version ${challenge.accepts[0].extra.version}`,
 );
+assert.equal(challenge.resource.description, "PolicyPool Covered Job Receipt API");
+assert.equal(challenge.resource.mimeType, "application/json");
 assert.equal(
-  Array.isArray(challenge.outputSchema?.input?.body?.required),
-  true,
-  "missing challenge output schema body requirements",
+  challenge.outputSchema,
+  undefined,
+  "PAYMENT-REQUIRED must stay compact",
 );
-assert.equal(challenge.outputSchema.input.body.required.includes("targetAgent"), true);
+assert.equal(
+  Array.isArray(unpaidBody.outputSchema?.input?.body?.required),
+  true,
+  "402 body is missing request schema requirements",
+);
+assert.equal(unpaidBody.outputSchema.input.body.required.includes("targetAgent"), true);
+assert.deepEqual(unpaidBody.accepts, challenge.accepts);
 
-const stale = await fetch(endpoint, {
+const barePost = await fetch(endpoint, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: "{}",
+  cache: "no-store",
+});
+assert.equal(barePost.status, 402, `bare marketplace POST expected 402, got ${barePost.status}`);
+const barePostRequired = barePost.headers.get("payment-required");
+assert.ok(barePostRequired, "bare marketplace POST is missing PAYMENT-REQUIRED");
+const barePostChallenge = JSON.parse(Buffer.from(barePostRequired, "base64").toString("utf8"));
+assert.equal(barePostChallenge.x402Version, 2);
+assert.equal(barePostChallenge.accepts[0].network, "eip155:196");
+assert.equal(barePostChallenge.accepts[0].amount, "100000");
+
+const unknownProbe = await fetch(endpoint, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ zzz: 1 }),
+  cache: "no-store",
+});
+assert.equal(unknownProbe.status, 402, `unknown-field probe expected 402, got ${unknownProbe.status}`);
+assert.ok(unknownProbe.headers.get("payment-required"), "unknown-field probe is missing PAYMENT-REQUIRED");
+
+const realisticProbe = await fetch(endpoint, {
   method: "POST",
   headers: { "content-type": "application/json" },
   body: JSON.stringify(sampleBody),
+  cache: "no-store",
 });
-assert.equal(stale.status, 400, `non-accepted task expected 400, got ${stale.status}`);
-assert.equal(stale.headers.has("payment-required"), false, "a stale task must not receive a payment challenge");
-const staleBody = await stale.json();
-assert.match(staleBody.error, /^target_job_not_accepted:\d+$/);
-assert.equal(staleBody.charged, false);
+assert.equal(realisticProbe.status, 402, `realistic probe expected 402, got ${realisticProbe.status}`);
+assert.ok(realisticProbe.headers.get("payment-required"), "realistic probe is missing PAYMENT-REQUIRED");
+
+const strictProbe = await strictHeaderProbe(endpoint, { zzz: 1 });
+assert.equal(strictProbe.statusCode, 402, "2 KiB Node client did not receive 402");
+assert.ok(strictProbe.headerBytes < 2_048, `response headers are ${strictProbe.headerBytes} bytes`);
+assert.ok(strictProbe.headers["payment-required"], "strict probe is missing PAYMENT-REQUIRED");
+const strictBody = JSON.parse(strictProbe.body);
+assert.equal(strictBody.x402Version, 2);
+assert.ok(strictBody.outputSchema?.input?.body, "strict probe body is missing its request schema");
 
 const genericAuth = await fetch(endpoint, {
   headers: {
