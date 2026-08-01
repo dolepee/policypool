@@ -36,6 +36,14 @@ assert.equal(manifest.version, "0.3.0");
 assert.equal(manifest.agent.id, "4674");
 assert.equal(manifest.service.id, "33290");
 assert.equal(manifest.service.priceAtomic, "100000");
+assert.deepEqual(manifest.payment.discovery.unpaidMethods, ["GET", "POST"]);
+assert.equal(
+  manifest.payment.discovery.validationOrder,
+  "payment_challenge_before_paid_request_validation",
+);
+assert.equal(manifest.payment.discovery.maximumResponseHeaderBytes, 2048);
+assert.equal(manifest.payment.discovery.requestSchemaLocation, "json_response_body");
+assert.equal(manifest.payment.discovery.freeValidationEndpoint, manifest.service.preflight);
 assert.equal(manifest.quote.signed, true);
 assert.equal(manifest.quote.fullEligibilityRecheckedAtSettlement, true);
 assert.equal(manifest.quote.ambiguityBehavior, "fail_closed_without_settlement");

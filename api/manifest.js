@@ -137,6 +137,13 @@ export function createManifestHandler({
         protocol: "OKX Agent Payments Protocol",
         x402Version: 2,
         scheme: "exact",
+        discovery: {
+          unpaidMethods: ["GET", "POST"],
+          validationOrder: "payment_challenge_before_paid_request_validation",
+          maximumResponseHeaderBytes: 2048,
+          requestSchemaLocation: "json_response_body",
+          freeValidationEndpoint: "https://policypool.vercel.app/api/coverage-preflight",
+        },
         network: XLAYER.network,
         chainId: XLAYER.id,
         asset: PAYMENT.asset,

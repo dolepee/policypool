@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { encodePaymentSignatureHeader } from "@x402/core/http";
-import { authorizationTypes } from "@x402/evm";
+import { encodePaymentSignatureHeader } from "@okxweb3/x402-core/http";
+import { authorizationTypes } from "@okxweb3/x402-evm";
 import {
   getAddress,
   keccak256,

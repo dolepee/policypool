@@ -1,4 +1,4 @@
-import { encodePaymentRequiredHeader } from "@x402/core/http";
+import { encodePaymentRequiredHeader } from "@okxweb3/x402-core/http";
 import { createChainService } from "./lib/chain.js";
 import { createDirectA2mcpCoordinator, DirectA2mcpError } from "./lib/direct-a2mcp.js";
 import { createDirectA2mcpState, DirectA2mcpStateError } from "./lib/direct-a2mcp-store.js";

@@ -5,7 +5,7 @@ import {
   decodePaymentRequiredHeader,
   decodePaymentResponseHeader,
   decodePaymentSignatureHeader,
-} from "@x402/core/http";
+} from "@okxweb3/x402-core/http";
 import { privateKeyToAccount } from "viem/accounts";
 import { getAddress, isAddress, keccak256, stringToHex, verifyTypedData } from "viem";
 import { createChainService } from "./chain.js";

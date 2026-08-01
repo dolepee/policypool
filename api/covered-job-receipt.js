@@ -1,3 +1,4 @@
+import { encodePaymentRequiredHeader } from "@okxweb3/x402-core/http";
 import { COVERAGE, OBJECTIVE_BREACH_RULES, PAYMENT, XLAYER, paymentRequirements } from "./lib/config.js";
 import { createChainService, EvidenceError } from "./lib/chain.js";
 import { createLedger } from "./lib/ledger.js";
@@ -24,7 +25,6 @@ import {
 } from "./lib/quote.js";
 import {
   clean,
-  encodeBase64Json,
   formatUsdtAtomic,
   header,
   isBytes32,
@@ -191,30 +191,41 @@ function absoluteUrl(req, quoteToken = "") {
 
 function challengeFor(req, error = "Payment required", quoteToken = "") {
   const requirements = paymentRequirementsForQuote(paymentRequirements(), quoteToken);
-  return {
+  const paymentChallenge = {
     x402Version: 2,
-    error,
     resource: {
       url: absoluteUrl(req, quoteToken),
-      description: "PolicyPool Covered Job Receipt API",
-      mimeType: "application/json",
     },
-    outputSchema: OUTPUT_SCHEMA,
-    accepts: [{
-      ...requirements,
+    accepts: [requirements],
+  };
+  return {
+    paymentChallenge,
+    responseBody: {
+      ...paymentChallenge,
+      error,
+      resource: {
+        ...paymentChallenge.resource,
+        description: "PolicyPool Covered Job Receipt API",
+        mimeType: "application/json",
+      },
       outputSchema: OUTPUT_SCHEMA,
-    }],
+      freePreflight: {
+        endpoint: "https://policypool.vercel.app/api/coverage-preflight",
+        required: REQUIRED_PREFLIGHT_EVIDENCE,
+        charged: false,
+      },
+    },
   };
 }
 
 function paymentRequired(req, res, error = "Payment required", quoteToken = "") {
-  const challenge = challengeFor(req, error, quoteToken);
-  res.setHeader("PAYMENT-REQUIRED", encodeBase64Json(challenge));
+  const { paymentChallenge, responseBody } = challengeFor(req, error, quoteToken);
+  res.setHeader("PAYMENT-REQUIRED", encodePaymentRequiredHeader(paymentChallenge));
   return sendJson(res, 402, {
     ok: false,
     error,
     charged: false,
-    ...challenge,
+    ...responseBody,
   });
 }
 
@@ -279,19 +290,6 @@ function isBodylessRequest(req) {
     || typeof source !== "object"
     || Array.isArray(source)
     || Object.keys(source).length === 0;
-}
-
-function requestBodyFromInput(input) {
-  return {
-    targetAgent: input.targetAgent,
-    targetServiceId: input.targetServiceId,
-    targetJobId: input.targetJobId,
-    targetCreationTxHash: input.targetCreationTxHash,
-    targetAcceptanceTxHash: input.targetAcceptanceTxHash,
-    targetTaskReference: input.targetTaskReference,
-    jobDescription: input.jobDescription,
-    requestedCoverageUSDT: formatUsdtAtomic(input.requestedCoverageAtomic, PAYMENT.decimals),
-  };
 }
 
 function supportedTargets() {
@@ -623,6 +621,7 @@ export function createHandler(dependencies = {}) {
     }
 
     const paymentSignature = header(req, "payment-signature");
+    const quoteToken = extractQuoteToken(req);
     const limited = await enforceRateLimit(req, res, limiter, {
       scope: paymentSignature ? "coverage-paid" : "coverage-quote",
       subject: req.body?.targetAgent || req.query?.targetAgent || "",
@@ -630,6 +629,11 @@ export function createHandler(dependencies = {}) {
       windowSeconds: 60,
     });
     if (limited) return sendJson(res, 429, limited);
+    // x402 discovery precedes request validation. The separate free-preflight
+    // endpoint lets callers validate evidence without authorizing a payment;
+    // this paid endpoint validates only after a payment signature is present.
+    if (!paymentSignature) return paymentRequired(req, res, "Payment required", quoteToken);
+
     let ledger = null;
     let payment = null;
     let paymentId = "";
@@ -673,7 +677,6 @@ export function createHandler(dependencies = {}) {
       }
     }
 
-    const quoteToken = extractQuoteToken(req);
     let quote = null;
     if (quoteToken) {
       try {
@@ -752,9 +755,6 @@ export function createHandler(dependencies = {}) {
         });
       }
     }
-    if (!targetAgent && req.method === "GET" && !paymentSignature) {
-      return paymentRequired(req, res);
-    }
     if (!targetAgent) {
       return sendJson(res, 400, {
         ok: false,
@@ -765,46 +765,6 @@ export function createHandler(dependencies = {}) {
     }
 
     const staticGuard = evaluateGuard(input, policy);
-    if (!paymentSignature) {
-      if (req.method === "POST" && staticGuard.verdict === "BLOCK") {
-        return rejectStaticGuard(res, staticGuard);
-      }
-      if (req.method === "POST") {
-        try {
-          const targetStatus = await getChain().getJobStatus(input.targetJobId);
-          if (targetStatus !== 1) {
-            return sendJson(res, 400, {
-              ok: false,
-              error: `target_job_not_accepted:${targetStatus}`,
-              charged: false,
-              quoteId: quote?.id || null,
-            });
-          }
-        } catch (error) {
-          return sendJson(res, 503, {
-            ok: false,
-            error: error instanceof EvidenceError ? error.code : "target_job_status_unavailable",
-            charged: false,
-          });
-        }
-      }
-      if (!quote) {
-        try {
-          quote = await getQuoteService().issue({
-            requestBody: requestBodyFromInput(input),
-            policyHash: policy.policyHash,
-            source: "direct_request_transport",
-          });
-        } catch (error) {
-          const code = error instanceof QuoteConfigurationError
-            ? "coverage_quote_not_configured"
-            : "coverage_quote_unavailable";
-          return sendJson(res, 503, { ok: false, error: code, charged: false });
-        }
-      }
-      return paymentRequired(req, res, "Payment required", quote.token);
-    }
-
     if (staticGuard.verdict === "BLOCK") return rejectStaticGuard(res, staticGuard);
 
     requirements ||= paymentRequirementsForQuote(paymentRequirements(), quote?.token || "");

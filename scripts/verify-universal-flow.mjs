@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { encodePaymentSignatureHeader } from "@x402/core/http";
+import { encodePaymentSignatureHeader } from "@okxweb3/x402-core/http";
 import { createHandler } from "../api/covered-job-receipt.js";
 import { PAYMENT, paymentRequirements } from "../api/lib/config.js";
 import { MemoryLedger } from "../api/lib/ledger.js";

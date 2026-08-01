@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { encodePaymentSignatureHeader } from "@x402/core/http";
+import { readFileSync } from "node:fs";
+import { createServer, request as httpRequest } from "node:http";
+import { encodePaymentSignatureHeader } from "@okxweb3/x402-core/http";
 import { createHandler } from "../api/covered-job-receipt.js";
 import { createCoverageStatusHandler } from "../api/coverage-status.js";
 import { createReconcileHandler } from "../api/reconcile-coverage.js";
@@ -7,7 +9,7 @@ import { createRecordPayoutHandler } from "../api/record-payout.js";
 import { EvidenceError, validateServiceBinding } from "../api/lib/chain.js";
 import { PAYMENT, paymentRequirements } from "../api/lib/config.js";
 import { MemoryLedger } from "../api/lib/ledger.js";
-import { createPaymentService } from "../api/lib/payment.js";
+import { createPaymentService, __test as paymentTest } from "../api/lib/payment.js";
 import { findPublishedPolicy, policyCoverageCapAtomic } from "../api/lib/policy-registry.js";
 import { createQuoteService } from "../api/lib/quote.js";
 import { sha256 } from "../api/lib/utils.js";
@@ -28,6 +30,97 @@ const sampleBody = {
   deadline: "2026-07-17T00:00:00.000Z",
   requestedCoverageUSDT: "1",
 };
+
+async function verifyMarketplaceProbeContract(handler) {
+  const server = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const rawBody = Buffer.concat(chunks).toString("utf8");
+    req.body = rawBody ? JSON.parse(rawBody) : undefined;
+    const parsedUrl = new URL(req.url || "/", "http://127.0.0.1");
+    req.query = Object.fromEntries(parsedUrl.searchParams);
+    res.status = function status(code) {
+      this.statusCode = code;
+      return this;
+    };
+    res.send = function send(value) {
+      this.end(value);
+      return this;
+    };
+    await handler(req, res);
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  async function probe(method, body) {
+    const payload = typeof body === "undefined" ? "" : JSON.stringify(body);
+    return new Promise((resolve, reject) => {
+      const request = httpRequest({
+        host: "127.0.0.1",
+        port: address.port,
+        path: "/api/covered-job-receipt",
+        method,
+        maxHeaderSize: 2_048,
+        headers: payload ? {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(payload),
+        } : {},
+      }, (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("end", () => {
+          let headerBytes = Buffer.byteLength(
+            `HTTP/1.1 ${response.statusCode} ${response.statusMessage}\r\n\r\n`,
+          );
+          for (let index = 0; index < response.rawHeaders.length; index += 2) {
+            headerBytes += Buffer.byteLength(
+              `${response.rawHeaders[index]}: ${response.rawHeaders[index + 1]}\r\n`,
+            );
+          }
+          resolve({
+            statusCode: response.statusCode,
+            headers: response.headers,
+            headerBytes,
+            body: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      });
+      request.once("error", reject);
+      request.end(payload);
+    });
+  }
+
+  try {
+    for (const candidate of [
+      { method: "POST", body: {} },
+      { method: "POST", body: { zzz: 1 } },
+      { method: "POST", body: sampleBody },
+      { method: "GET", body: undefined },
+    ]) {
+      const response = await probe(candidate.method, candidate.body);
+      assert.equal(response.statusCode, 402, `${candidate.method} probe must return 402`);
+      assert.ok(response.headerBytes < 2_048, `header block is ${response.headerBytes} bytes`);
+      const encoded = response.headers["payment-required"];
+      assert.ok(encoded, "probe response is missing PAYMENT-REQUIRED");
+      const compact = decodePaymentRequired(encoded);
+      const body = JSON.parse(response.body);
+      assert.equal(compact.x402Version, 2);
+      assert.equal(compact.outputSchema, undefined, "schema must not inflate the payment header");
+      assert.equal(compact.accepts[0].outputSchema, undefined, "schema must not be duplicated in accepts");
+      assert.deepEqual(body.accepts, compact.accepts, "body and header payment requirements diverged");
+      assert.equal(body.x402Version, 2);
+      assert.equal(body.outputSchema.input.method, "POST");
+      assert.ok(body.outputSchema.input.body.required.includes("targetAgent"));
+      assert.equal(body.freePreflight.charged, false);
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
 
 function makePaymentHeader(tag, accepted = paymentRequirements()) {
   return encodePaymentSignatureHeader({
@@ -139,46 +232,105 @@ function makeRuntime({
 }
 
 const primary = makeRuntime();
+const packageJson = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+);
+assert.equal(packageJson.dependencies["@okxweb3/x402-core"], "0.1.0");
+assert.equal(packageJson.dependencies["@okxweb3/x402-evm"], "0.2.1");
+assert.equal(packageJson.dependencies["@x402/core"], undefined);
+assert.equal(packageJson.dependencies["@x402/evm"], undefined);
+assert.equal(paymentTest.createOkxFacilitator({}), null);
+assert.throws(
+  () => paymentTest.createOkxFacilitator({ OKX_API_KEY: "partial" }),
+  /credentials are incomplete or padded/,
+  "partial OKX facilitator credentials must fail closed",
+);
+assert.throws(
+  () => paymentTest.createOkxFacilitator({
+    OKX_API_KEY: " padded",
+    OKX_SECRET_KEY: "secret",
+    OKX_PASSPHRASE: "passphrase",
+  }),
+  /credentials are incomplete or padded/,
+  "padded OKX facilitator credentials must fail closed",
+);
+const officialFacilitator = paymentTest.createOkxFacilitator({
+  OKX_API_KEY: "test-api-key",
+  OKX_SECRET_KEY: "test-secret-key",
+  OKX_PASSPHRASE: "test-passphrase",
+});
+assert.equal(typeof officialFacilitator.verify, "function");
+assert.equal(typeof officialFacilitator.settle, "function");
 const head = await callHandler(primary.handler, { method: "HEAD" });
 assert.equal(head.statusCode, 200, "HEAD must return 200");
 
 const unpaid = await callHandler(primary.handler, { method: "POST", body: sampleBody });
 assert.equal(unpaid.statusCode, 402, "unpaid request must return 402");
 const challenge = decodePaymentRequired(unpaid.headers["payment-required"]);
+const challengeBody = unpaid.json();
 assert.equal(challenge.x402Version, 2);
 assert.equal(challenge.accepts[0].network, "eip155:196");
 assert.equal(challenge.accepts[0].amount, "100000");
 assert.equal(challenge.accepts[0].extra.name, "USD₮0");
 assert.equal(challenge.accepts[0].extra.version, "1");
-assert.ok(challenge.outputSchema.input.body.required.includes("targetAcceptanceTxHash"));
-assert.ok(challenge.outputSchema.input.body.required.includes("targetCreationTxHash"));
-assert.equal(challenge.outputSchema.input.body.required.includes("deadline"), false);
-assert.match(challenge.accepts[0].extra.policyPoolQuote, /^ppq_[a-f0-9]{32}\.[a-f0-9]{64}$/);
-assert.equal(new URL(challenge.resource.url).searchParams.get("quote"), challenge.accepts[0].extra.policyPoolQuote);
+assert.equal(challenge.outputSchema, undefined, "the compact header must omit the request schema");
+assert.equal(challenge.accepts[0].outputSchema, undefined, "accepts must not duplicate the request schema");
+assert.ok(challengeBody.outputSchema.input.body.required.includes("targetAcceptanceTxHash"));
+assert.ok(challengeBody.outputSchema.input.body.required.includes("targetCreationTxHash"));
+assert.equal(challengeBody.outputSchema.input.body.required.includes("deadline"), false);
+assert.deepEqual(challengeBody.accepts, challenge.accepts);
+assert.ok(
+  Buffer.byteLength(Object.entries(unpaid.headers).map(([name, value]) => `${name}: ${value}\r\n`).join("")) < 2_048,
+  "the complete 402 header block must stay below 2 KiB",
+);
 
-const staleBeforeQuote = makeRuntime({ jobStatus: 2 });
-const staleBeforeQuoteResponse = await callHandler(staleBeforeQuote.handler, {
+const staleBeforeQuote = makeRuntime({ targetError: "target_job_not_accepted:2" });
+const staleDiscovery = await callHandler(staleBeforeQuote.handler, {
   method: "POST",
   body: { ...sampleBody, targetJobId: `0x${"7".repeat(64)}` },
 });
-assert.equal(staleBeforeQuoteResponse.statusCode, 400, "a stale task must fail before a payment challenge");
-assert.equal(staleBeforeQuoteResponse.json().error, "target_job_not_accepted:2");
-assert.equal(staleBeforeQuoteResponse.json().charged, false);
-assert.equal(staleBeforeQuoteResponse.headers["payment-required"], undefined);
-assert.equal(staleBeforeQuote.calls.status, 1);
+assert.equal(staleDiscovery.statusCode, 402, "unpaid stale input must still receive payment discovery");
 assert.equal(staleBeforeQuote.calls.verify, 0);
 assert.equal(staleBeforeQuote.calls.settle, 0);
 assert.equal(staleBeforeQuote.calls.target, 0);
+const staleBeforeQuoteResponse = await callHandler(staleBeforeQuote.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("stale-target") },
+  body: { ...sampleBody, targetJobId: `0x${"7".repeat(64)}` },
+});
+assert.equal(staleBeforeQuoteResponse.statusCode, 400, "invalid target evidence must fail before settlement");
+assert.equal(staleBeforeQuoteResponse.json().error, "target_job_not_accepted:2");
+assert.equal(staleBeforeQuoteResponse.json().charged, false);
+assert.equal(staleBeforeQuoteResponse.headers["payment-required"], undefined);
+assert.equal(staleBeforeQuote.calls.verify, 1);
+assert.equal(staleBeforeQuote.calls.settle, 0);
+assert.equal(staleBeforeQuote.calls.target, 1);
 assert.equal((await staleBeforeQuote.ledger.stats()).recordCount, 0);
 
 const explicitBodyless = makeRuntime();
+const foremanPolicy = findPublishedPolicy("Foreman#4348");
+const explicitQuote = await explicitBodyless.quoteService.issue({
+  requestBody: { ...sampleBody, targetJobId: `0x${"1".repeat(64)}` },
+  buyer: null,
+  policyHash: foremanPolicy.policyHash,
+  source: "verified_preflight",
+});
 const explicitUnpaid = await callHandler(explicitBodyless.handler, {
   method: "POST",
-  body: { ...sampleBody, targetJobId: `0x${"1".repeat(64)}` },
+  query: { quote: explicitQuote.token },
+  body: {},
 });
 const explicitChallenge = decodePaymentRequired(explicitUnpaid.headers["payment-required"]);
+assert.equal(explicitChallenge.accepts[0].extra.policyPoolQuote, explicitQuote.token);
+assert.ok(
+  Buffer.byteLength(
+    Object.entries(explicitUnpaid.headers).map(([name, value]) => `${name}: ${value}\r\n`).join(""),
+  ) < 2_048,
+  "a quote-bound 402 header block must stay below 2 KiB",
+);
 const explicitBodylessResponse = await callHandler(explicitBodyless.handler, {
   method: "POST",
+  query: { quote: explicitQuote.token },
   headers: {
     "payment-signature": makePaymentHeader("explicit-bodyless", explicitChallenge.accepts[0]),
   },
@@ -189,7 +341,6 @@ assert.equal(explicitBodylessResponse.json().receipt.coverageQuote.canonicalRequ
 assert.equal(explicitBodyless.calls.settle, 1);
 
 const payerFallback = makeRuntime();
-const foremanPolicy = findPublishedPolicy("Foreman#4348");
 const fallbackQuote = await payerFallback.quoteService.issue({
   requestBody: { ...sampleBody, targetJobId: `0x${"2".repeat(64)}` },
   buyer: "0x1111111111111111111111111111111111111111",
@@ -313,10 +464,11 @@ assert.equal(expiredQuoteResponse.json().error, "coverage_quote_expired");
 assert.equal(expiredQuoteRuntime.calls.verify, 0);
 assert.equal(expiredQuoteRuntime.calls.settle, 0);
 
-const originalToken = challenge.accepts[0].extra.policyPoolQuote;
+const originalToken = explicitQuote.token;
 const tamperedToken = `${originalToken.slice(0, -1)}${originalToken.endsWith("0") ? "1" : "0"}`;
 const tamperedQuote = await callHandler(makeRuntime().handler, {
   method: "POST",
+  headers: { "payment-signature": makePaymentHeader("tampered-quote") },
   query: { quote: tamperedToken },
 });
 assert.equal(tamperedQuote.statusCode, 400);
@@ -326,22 +478,44 @@ assert.equal(tamperedQuote.json().charged, false);
 const discovery = await callHandler(primary.handler, { method: "GET" });
 assert.equal(discovery.statusCode, 402, "anonymous discovery must still return the payment challenge");
 
+const barePostDiscovery = await callHandler(primary.handler, { method: "POST", body: {} });
+assert.equal(
+  barePostDiscovery.statusCode,
+  402,
+  "a bare marketplace POST probe must receive the payment challenge",
+);
+assert.ok(
+  barePostDiscovery.headers["payment-required"],
+  "a bare marketplace POST probe must include PAYMENT-REQUIRED",
+);
+const barePostChallenge = decodePaymentRequired(barePostDiscovery.headers["payment-required"]);
+assert.equal(barePostChallenge.x402Version, 2);
+assert.equal(barePostChallenge.accepts[0].network, "eip155:196");
+assert.equal(barePostChallenge.accepts[0].amount, "100000");
+
 const listingPayloadRuntime = makeRuntime();
+const listingProbeBody = {
+  targetAgent: "GlassDesk#3465",
+  jobDescription: "Prepare an evidence pack for an accepted task.",
+  deadline: "2026-07-30T12:00:00.000Z",
+  paymentStatus: "accepted",
+  requestedCoverageUSDT: "0.5",
+};
 const listingPayload = await callHandler(listingPayloadRuntime.handler, {
   method: "POST",
-  body: {
-    targetAgent: "GlassDesk#3465",
-    jobDescription: "Prepare an evidence pack for an accepted task.",
-    deadline: "2026-07-30T12:00:00.000Z",
-    paymentStatus: "accepted",
-    requestedCoverageUSDT: "0.5",
-  },
+  body: listingProbeBody,
 });
-assert.equal(listingPayload.statusCode, 400);
-assert.equal(listingPayload.json().code, "TARGET_JOB_ID_REQUIRED");
-assert.equal(listingPayload.json().charged, false);
+assert.equal(listingPayload.statusCode, 402, "realistic marketplace probe input must receive discovery first");
+const paidListingPayload = await callHandler(listingPayloadRuntime.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("incomplete-listing-payload") },
+  body: listingProbeBody,
+});
+assert.equal(paidListingPayload.statusCode, 400);
+assert.equal(paidListingPayload.json().code, "TARGET_JOB_ID_REQUIRED");
+assert.equal(paidListingPayload.json().charged, false);
 assert.deepEqual(
-  listingPayload.json().requiredEvidence,
+  paidListingPayload.json().requiredEvidence,
   [
     "targetAgent",
     "targetJobId",
@@ -351,7 +525,7 @@ assert.deepEqual(
   ],
 );
 assert.deepEqual(
-  listingPayload.json().freePreflight.required,
+  paidListingPayload.json().freePreflight.required,
   [
     "targetAgent",
     "targetJobId",
@@ -361,9 +535,11 @@ assert.deepEqual(
     "jobDescription",
   ],
 );
-assert.equal(listingPayload.json().freePreflight.charged, false);
+assert.equal(paidListingPayload.json().freePreflight.charged, false);
 assert.equal(listingPayloadRuntime.calls.verify, 0, "incomplete listing-style input must fail before payment");
 assert.equal(listingPayloadRuntime.calls.settle, 0, "incomplete listing-style input must never settle");
+
+await verifyMarketplaceProbeContract(makeRuntime().handler);
 
 const missingTarget = await callHandler(primary.handler, {
   method: "POST",
