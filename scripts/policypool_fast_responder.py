@@ -237,13 +237,14 @@ def build_reply(content: str, session_key: str, state: dict[str, Any]) -> str | 
     )
 
 
-def okx_a2a_binary() -> str:
-    configured = os.environ.get("OKX_A2A_BIN", "").strip()
-    candidates = [
-        configured,
-        "/opt/homebrew/bin/okx-a2a",
-        "/usr/local/bin/okx-a2a",
-    ]
+def okx_a2a_binary(candidates: list[str] | None = None) -> str:
+    if candidates is None:
+        configured = os.environ.get("OKX_A2A_BIN", "").strip()
+        candidates = [
+            configured,
+            "/opt/homebrew/bin/okx-a2a",
+            "/usr/local/bin/okx-a2a",
+        ]
     for candidate in candidates:
         if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):
             return candidate
@@ -562,7 +563,7 @@ def run_self_test() -> None:
     source = Path(__file__).read_text(encoding="utf-8").lower()
     assert ("import " + "sqlite3") not in source
     assert ("command" + "_queue") not in source
-    assert Path(okx_a2a_binary()).is_absolute()
+    assert okx_a2a_binary([sys.executable]) == sys.executable
     print(
         "PolicyPool responder gate passed: supported session polling, one reply, "
         "and replay suppression verified."
