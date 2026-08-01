@@ -142,6 +142,7 @@ function makeRuntime({
   createdAt = "2026-07-10T09:57:00.000Z",
   acceptedAt = "2026-07-10T09:59:30.000Z",
   clock = () => FIXED_NOW,
+  limiter,
 } = {}) {
   const ledger = new MemoryLedger();
   const calls = { verify: 0, settle: 0, target: 0, status: 0, transfer: 0 };
@@ -227,6 +228,7 @@ function makeRuntime({
     payment,
     quoteService,
     now: clock,
+    limiter,
   });
   return { calls, handler, ledger, quoteService };
 }
@@ -253,6 +255,35 @@ assert.throws(
   }),
   /credentials are incomplete or padded/,
   "padded OKX facilitator credentials must fail closed",
+);
+assert.equal(paymentTest.selfHostedFacilitatorEnabled({}), false);
+assert.equal(
+  paymentTest.selfHostedFacilitatorEnabled({
+    POLICYPOOL_SELF_HOSTED_FACILITATOR_ENABLED: "true",
+  }),
+  true,
+);
+assert.throws(
+  () => paymentTest.selfHostedFacilitatorEnabled({
+    POLICYPOOL_SELF_HOSTED_FACILITATOR_ENABLED: "yes",
+  }),
+  /must be true or false/,
+  "ambiguous self-hosted facilitator opt-in must fail closed",
+);
+assert.throws(
+  () => paymentTest.createLocalFacilitator({
+    POLICYPOOL_FACILITATOR_PRIVATE_KEY: "not-a-key",
+  }),
+  /SELF_HOSTED_FACILITATOR_ENABLED=true/,
+  "a private key alone must not silently select the self-hosted facilitator",
+);
+assert.throws(
+  () => paymentTest.createLocalFacilitator({
+    POLICYPOOL_SELF_HOSTED_FACILITATOR_ENABLED: "true",
+    POLICYPOOL_FACILITATOR_PRIVATE_KEY: "not-a-key",
+  }),
+  /32-byte hex key/,
+  "the explicitly selected self-hosted facilitator must still validate its key",
 );
 const officialFacilitator = paymentTest.createOkxFacilitator({
   OKX_API_KEY: "test-api-key",
@@ -477,6 +508,22 @@ assert.equal(tamperedQuote.json().charged, false);
 
 const discovery = await callHandler(primary.handler, { method: "GET" });
 assert.equal(discovery.statusCode, 402, "anonymous discovery must still return the payment challenge");
+
+let unpaidLimiterCalls = 0;
+const sharedIpDiscovery = makeRuntime({
+  limiter: {
+    async check() {
+      unpaidLimiterCalls += 1;
+      throw new Error("unpaid discovery reached the mutation limiter");
+    },
+  },
+});
+const sharedIpResponse = await callHandler(sharedIpDiscovery.handler, {
+  method: "POST",
+  body: {},
+});
+assert.equal(sharedIpResponse.statusCode, 402, "shared-IP discovery must not degrade to 429");
+assert.equal(unpaidLimiterCalls, 0, "unpaid discovery must bypass the mutation limiter");
 
 const barePostDiscovery = await callHandler(primary.handler, { method: "POST", body: {} });
 assert.equal(

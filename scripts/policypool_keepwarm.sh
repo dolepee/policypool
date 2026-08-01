@@ -4,9 +4,25 @@ set -u
 
 ENDPOINT="${POLICYPOOL_AGENT_ENDPOINT:-https://policypool.vercel.app/api/covered-job-receipt}"
 LOG="${POLICYPOOL_KEEPWARM_LOG:-/Users/qdee/.okx-agent-task/logs/policypool-keepwarm.log}"
+NODE_BIN="${POLICYPOOL_NODE_BIN:-}"
 
 mkdir -p "$(dirname "$LOG")"
-result=$(node --input-type=module - "$ENDPOINT" <<'NODE' 2>&1
+
+if [ -z "$NODE_BIN" ]; then
+  for candidate in /opt/homebrew/bin/node /usr/local/bin/node "$(command -v node 2>/dev/null || true)"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      NODE_BIN="$candidate"
+      break
+    fi
+  done
+fi
+
+if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
+  printf '%s FAIL node_executable_not_found\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$LOG"
+  exit 1
+fi
+
+result=$("$NODE_BIN" --input-type=module - "$ENDPOINT" <<'NODE' 2>&1
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 

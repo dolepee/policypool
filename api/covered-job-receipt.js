@@ -622,17 +622,17 @@ export function createHandler(dependencies = {}) {
 
     const paymentSignature = header(req, "payment-signature");
     const quoteToken = extractQuoteToken(req);
+    // Discovery must remain available to marketplace probes sharing an IP.
+    // Paid requests retain the mutation-path rate limit below.
+    if (!paymentSignature) return paymentRequired(req, res, "Payment required", quoteToken);
+
     const limited = await enforceRateLimit(req, res, limiter, {
-      scope: paymentSignature ? "coverage-paid" : "coverage-quote",
+      scope: "coverage-paid",
       subject: req.body?.targetAgent || req.query?.targetAgent || "",
-      limit: paymentSignature ? 120 : 30,
+      limit: 120,
       windowSeconds: 60,
     });
     if (limited) return sendJson(res, 429, limited);
-    // x402 discovery precedes request validation. The separate free-preflight
-    // endpoint lets callers validate evidence without authorizing a payment;
-    // this paid endpoint validates only after a payment signature is present.
-    if (!paymentSignature) return paymentRequired(req, res, "Payment required", quoteToken);
 
     let ledger = null;
     let payment = null;

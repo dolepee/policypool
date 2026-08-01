@@ -66,9 +66,25 @@ function createOkxFacilitator(environment = process.env) {
   });
 }
 
-function createLocalFacilitator() {
-  const privateKey = process.env.POLICYPOOL_FACILITATOR_PRIVATE_KEY;
+function selfHostedFacilitatorEnabled(environment = process.env) {
+  const value = String(environment.POLICYPOOL_SELF_HOSTED_FACILITATOR_ENABLED || "")
+    .trim()
+    .toLowerCase();
+  if (!value || value === "false") return false;
+  if (value === "true") return true;
+  throw new PaymentConfigurationError(
+    "POLICYPOOL_SELF_HOSTED_FACILITATOR_ENABLED must be true or false",
+  );
+}
+
+function createLocalFacilitator(environment = process.env) {
+  const privateKey = environment.POLICYPOOL_FACILITATOR_PRIVATE_KEY;
   if (!privateKey) return null;
+  if (!selfHostedFacilitatorEnabled(environment)) {
+    throw new PaymentConfigurationError(
+      "Set POLICYPOOL_SELF_HOSTED_FACILITATOR_ENABLED=true to select the self-hosted facilitator",
+    );
+  }
   if (!/^0x[a-fA-F0-9]{64}$/.test(privateKey)) {
     throw new PaymentConfigurationError("POLICYPOOL_FACILITATOR_PRIVATE_KEY must be a 32-byte hex key");
   }
@@ -183,4 +199,9 @@ export function createPaymentService({ facilitator, chain } = {}) {
   return { fingerprint, settle, verify };
 }
 
-export const __test = { assertAccepted, createOkxFacilitator };
+export const __test = {
+  assertAccepted,
+  createLocalFacilitator,
+  createOkxFacilitator,
+  selfHostedFacilitatorEnabled,
+};
