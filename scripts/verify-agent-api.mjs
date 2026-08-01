@@ -109,6 +109,8 @@ async function verifyMarketplaceProbeContract(handler) {
       const compact = decodePaymentRequired(encoded);
       const body = JSON.parse(response.body);
       assert.equal(compact.x402Version, 2);
+      assert.equal(compact.resource.description, "PolicyPool Covered Job Receipt API");
+      assert.equal(compact.resource.mimeType, "application/json");
       assert.equal(compact.outputSchema, undefined, "schema must not inflate the payment header");
       assert.equal(compact.accepts[0].outputSchema, undefined, "schema must not be duplicated in accepts");
       assert.deepEqual(body.accepts, compact.accepts, "body and header payment requirements diverged");
@@ -304,6 +306,8 @@ assert.equal(challenge.accepts[0].network, "eip155:196");
 assert.equal(challenge.accepts[0].amount, "100000");
 assert.equal(challenge.accepts[0].extra.name, "USD₮0");
 assert.equal(challenge.accepts[0].extra.version, "1");
+assert.equal(challenge.resource.description, "PolicyPool Covered Job Receipt API");
+assert.equal(challenge.resource.mimeType, "application/json");
 assert.equal(challenge.outputSchema, undefined, "the compact header must omit the request schema");
 assert.equal(challenge.accepts[0].outputSchema, undefined, "accepts must not duplicate the request schema");
 assert.ok(challengeBody.outputSchema.input.body.required.includes("targetAcceptanceTxHash"));

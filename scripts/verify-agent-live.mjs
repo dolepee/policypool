@@ -113,6 +113,8 @@ assert.equal(
   true,
   `unexpected payment version ${challenge.accepts[0].extra.version}`,
 );
+assert.equal(challenge.resource.description, "PolicyPool Covered Job Receipt API");
+assert.equal(challenge.resource.mimeType, "application/json");
 assert.equal(
   challenge.outputSchema,
   undefined,

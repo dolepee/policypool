@@ -195,6 +195,8 @@ function challengeFor(req, error = "Payment required", quoteToken = "") {
     x402Version: 2,
     resource: {
       url: absoluteUrl(req, quoteToken),
+      description: "PolicyPool Covered Job Receipt API",
+      mimeType: "application/json",
     },
     accepts: [requirements],
   };
@@ -203,11 +205,6 @@ function challengeFor(req, error = "Payment required", quoteToken = "") {
     responseBody: {
       ...paymentChallenge,
       error,
-      resource: {
-        ...paymentChallenge.resource,
-        description: "PolicyPool Covered Job Receipt API",
-        mimeType: "application/json",
-      },
       outputSchema: OUTPUT_SCHEMA,
       freePreflight: {
         endpoint: "https://policypool.vercel.app/api/coverage-preflight",
