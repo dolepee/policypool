@@ -653,6 +653,7 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
     authorizationNonce,
     notBeforeTimestamp,
     notAfterTimestamp,
+    requireCompleteWindow = false,
   }) {
     let expectedPayer;
     let expectedPayTo;
@@ -683,7 +684,13 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
     } catch (error) {
       throw new EvidenceError("provider_settlement_search_head_unavailable", error instanceof Error ? error.message : String(error));
     }
-    if (latest.number === null || Number(latest.timestamp) < fromTimestamp) return null;
+    if (latest.number === null) {
+      throw new EvidenceError("provider_settlement_search_head_unavailable");
+    }
+    if (requireCompleteWindow && Number(latest.timestamp) < throughTimestamp) {
+      throw new EvidenceError("provider_settlement_search_window_incomplete");
+    }
+    if (Number(latest.timestamp) < fromTimestamp) return null;
     const boundedThrough = Math.min(throughTimestamp, Number(latest.timestamp));
     const firstEligibleBlock = await firstBlockAtOrAfter(fromTimestamp);
     // Include the boundary block in case wall-clock issuance is just ahead of its block timestamp.

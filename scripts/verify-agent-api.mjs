@@ -139,7 +139,11 @@ function makeRuntime({
   reserveAtomic = 5_000_000n,
   targetError,
   settlementFails = false,
+  settlementFailsWithTransaction = false,
   settlementThrows = false,
+  settlementVerificationThrows = false,
+  recoveredSettlementStatus = "pending",
+  markSettlementUnknownFails = false,
   jobStatus = 1,
   targetAmountAtomic = "5000000",
   createdAt = "2026-07-10T09:57:00.000Z",
@@ -148,7 +152,7 @@ function makeRuntime({
   limiter,
 } = {}) {
   const ledger = new MemoryLedger();
-  const calls = { verify: 0, settle: 0, target: 0, status: 0, transfer: 0 };
+  const calls = { verify: 0, settle: 0, reconcile: 0, target: 0, status: 0, transfer: 0 };
   const chain = {
     async getReserveBalance() {
       return reserveAtomic;
@@ -183,6 +187,9 @@ function makeRuntime({
     },
     async verifySettlement({ txHash, payer, amountAtomic }) {
       calls.transfer += 1;
+      if (settlementVerificationThrows && calls.transfer === 1) {
+        throw new Error("simulated_settlement_rpc_failure");
+      }
       return {
         txHash,
         blockNumber: "101",
@@ -190,6 +197,23 @@ function makeRuntime({
         from: payer,
         to: PAYMENT.payTo,
         amountAtomic,
+      };
+    },
+    async findProviderSettlement({ payer, payTo, asset, amountAtomic, authorizationNonce }) {
+      calls.reconcile += 1;
+      if (recoveredSettlementStatus === "pending") {
+        throw new EvidenceError("provider_settlement_search_window_incomplete");
+      }
+      if (recoveredSettlementStatus === "not_found") return null;
+      return {
+        txHash: `0x${"e".repeat(64)}`,
+        blockNumber: "103",
+        asset,
+        from: payer,
+        to: payTo,
+        amountAtomic,
+        authorizationNonce,
+        settledAt: "2026-07-10T10:00:01.000Z",
       };
     },
     async verifyPayout({ txHash, buyer, amountAtomic }) {
@@ -215,6 +239,14 @@ function makeRuntime({
     async settle(payload) {
       calls.settle += 1;
       if (settlementThrows) throw new Error("simulated_settlement_transport_failure");
+      if (settlementFailsWithTransaction) {
+        return {
+          success: false,
+          errorReason: "simulated_settlement_timeout",
+          network: "eip155:196",
+          transaction: `0x${"7".repeat(64)}`,
+        };
+      }
       if (settlementFails) return { success: false, errorReason: "simulated_settlement_failure" };
       return {
         success: true,
@@ -226,6 +258,11 @@ function makeRuntime({
   };
   const payment = createPaymentService({ facilitator, chain });
   const quoteService = createQuoteService({ ledger, secret: QUOTE_SECRET, now: clock });
+  if (markSettlementUnknownFails) {
+    ledger.markSettlementUnknown = async () => {
+      throw new Error("simulated_ledger_write_failure");
+    };
+  }
   const handler = createHandler({
     ledger,
     chain,
@@ -1065,6 +1102,134 @@ assert.equal(
 );
 assert.equal((await ambiguousSettlement.ledger.stats()).pendingAtomic, "1000000");
 assert.equal((await ambiguousSettlement.ledger.stats()).recordCount, 1);
+
+const recoveredAmbiguousSettlement = makeRuntime({
+  settlementThrows: true,
+  recoveredSettlementStatus: "settled",
+});
+const recoveredAmbiguousHeader = makePaymentHeader("settlement-recovered");
+const recoveredAmbiguousRequest = {
+  method: "POST",
+  headers: { "payment-signature": recoveredAmbiguousHeader },
+  body: { ...sampleBody, targetJobId: `0x${"8".repeat(64)}` },
+};
+assert.equal(
+  (await callHandler(recoveredAmbiguousSettlement.handler, recoveredAmbiguousRequest)).statusCode,
+  503,
+);
+const recoveredAmbiguousResponse = await callHandler(
+  recoveredAmbiguousSettlement.handler,
+  recoveredAmbiguousRequest,
+);
+assert.equal(recoveredAmbiguousResponse.statusCode, 200);
+assert.equal(recoveredAmbiguousResponse.json().receipt.servicePayment.settled, true);
+assert.equal(
+  recoveredAmbiguousResponse.json().receipt.servicePayment.transaction,
+  `0x${"e".repeat(64)}`,
+);
+assert.equal(recoveredAmbiguousSettlement.calls.settle, 1);
+assert.equal(recoveredAmbiguousSettlement.calls.reconcile, 1);
+assert.equal((await recoveredAmbiguousSettlement.ledger.stats()).pendingAtomic, "0");
+assert.equal((await recoveredAmbiguousSettlement.ledger.stats()).activeAtomic, "1000000");
+
+const postSubmissionVerification = makeRuntime({
+  settlementVerificationThrows: true,
+  recoveredSettlementStatus: "settled",
+});
+const postSubmissionHeader = makePaymentHeader("post-submission-verification");
+const postSubmissionRequest = {
+  method: "POST",
+  headers: { "payment-signature": postSubmissionHeader },
+  body: { ...sampleBody, targetJobId: `0x${"4".repeat(64)}` },
+};
+const postSubmissionUnknown = await callHandler(
+  postSubmissionVerification.handler,
+  postSubmissionRequest,
+);
+assert.equal(postSubmissionUnknown.statusCode, 503);
+assert.equal(postSubmissionUnknown.headers["payment-required"], undefined);
+assert.equal(postSubmissionUnknown.json().settlement, "unknown");
+assert.equal(postSubmissionUnknown.json().charged, null);
+assert.equal((await postSubmissionVerification.ledger.stats()).pendingAtomic, "1000000");
+const postSubmissionRecovered = await callHandler(
+  postSubmissionVerification.handler,
+  postSubmissionRequest,
+);
+assert.equal(postSubmissionRecovered.statusCode, 200);
+assert.equal(postSubmissionVerification.calls.settle, 1);
+assert.equal(postSubmissionVerification.calls.transfer, 2);
+assert.equal((await postSubmissionVerification.ledger.stats()).activeAtomic, "1000000");
+
+const timeoutWithTransaction = makeRuntime({ settlementFailsWithTransaction: true });
+const timeoutWithTransactionHeader = makePaymentHeader("timeout-with-transaction");
+const timeoutWithTransactionRequest = {
+  method: "POST",
+  headers: { "payment-signature": timeoutWithTransactionHeader },
+  body: { ...sampleBody, targetJobId: `0x${"a".repeat(64)}` },
+};
+const timeoutWithTransactionUnknown = await callHandler(
+  timeoutWithTransaction.handler,
+  timeoutWithTransactionRequest,
+);
+assert.equal(timeoutWithTransactionUnknown.statusCode, 503);
+assert.equal(timeoutWithTransactionUnknown.headers["payment-required"], undefined);
+assert.equal(timeoutWithTransactionUnknown.json().settlement, "unknown");
+assert.equal((await timeoutWithTransaction.ledger.stats()).pendingAtomic, "1000000");
+const timeoutWithTransactionRecovered = await callHandler(
+  timeoutWithTransaction.handler,
+  timeoutWithTransactionRequest,
+);
+assert.equal(timeoutWithTransactionRecovered.statusCode, 200);
+assert.equal(
+  timeoutWithTransactionRecovered.json().receipt.servicePayment.transaction,
+  `0x${"7".repeat(64)}`,
+);
+assert.equal(timeoutWithTransaction.calls.settle, 1);
+assert.equal((await timeoutWithTransaction.ledger.stats()).activeAtomic, "1000000");
+
+const definitelyNotSettled = makeRuntime({
+  settlementThrows: true,
+  recoveredSettlementStatus: "not_found",
+});
+const definitelyNotSettledHeader = makePaymentHeader("settlement-not-found");
+const definitelyNotSettledRequest = {
+  method: "POST",
+  headers: { "payment-signature": definitelyNotSettledHeader },
+  body: { ...sampleBody, targetJobId: `0x${"5".repeat(64)}` },
+};
+assert.equal(
+  (await callHandler(definitelyNotSettled.handler, definitelyNotSettledRequest)).statusCode,
+  503,
+);
+const definitelyNotSettledRecovery = await callHandler(
+  definitelyNotSettled.handler,
+  definitelyNotSettledRequest,
+);
+assert.equal(definitelyNotSettledRecovery.statusCode, 402);
+assert.ok(definitelyNotSettledRecovery.headers["payment-required"]);
+assert.equal(definitelyNotSettled.calls.settle, 1);
+assert.equal(definitelyNotSettled.calls.reconcile, 1);
+assert.equal((await definitelyNotSettled.ledger.stats()).pendingAtomic, "0");
+assert.equal((await definitelyNotSettled.ledger.stats()).recordCount, 0);
+
+const markerWriteFailure = makeRuntime({
+  settlementThrows: true,
+  markSettlementUnknownFails: true,
+});
+const markerWriteFailureResponse = await callHandler(markerWriteFailure.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("marker-write-failure") },
+  body: { ...sampleBody, targetJobId: `0x${"6".repeat(64)}` },
+});
+assert.equal(markerWriteFailureResponse.statusCode, 503);
+assert.equal(markerWriteFailureResponse.headers["payment-required"], undefined);
+assert.equal(markerWriteFailureResponse.json().error, "durable_settlement_reconciliation_unavailable");
+assert.equal(markerWriteFailureResponse.json().charged, null);
+assert.equal(markerWriteFailureResponse.json().settlement, "unknown");
+assert.equal(markerWriteFailureResponse.json().retryable, false);
+assert.equal(markerWriteFailureResponse.json().nextAction, "MANUAL_PAYMENT_RECONCILIATION_REQUIRED");
+assert.equal((await markerWriteFailure.ledger.stats()).pendingAtomic, "1000000");
+assert.equal((await markerWriteFailure.ledger.stats()).recordCount, 1);
 
 const adminStopped = makeRuntime();
 const adminStoppedIssued = await callHandler(adminStopped.handler, {

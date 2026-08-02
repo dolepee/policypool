@@ -5,6 +5,7 @@ import { createLedger } from "./lib/ledger.js";
 import {
   createPaymentService,
   PaymentConfigurationError,
+  PaymentSettlementUnknownError,
   PaymentVerificationError,
 } from "./lib/payment.js";
 import {
@@ -580,8 +581,73 @@ function settlementOutcomeUnknown(res, record) {
     settlement: "unknown",
     retryable: false,
     nextAction: "RECONCILE_PAYMENT_BEFORE_RETRY",
+    reconciliation: {
+      method: "REPLAY_EXACT_PAID_REQUEST",
+      submitsPayment: false,
+      submitsSettlement: false,
+    },
     receiptId: record.receiptId,
   });
+}
+
+function durableSettlementMarkerUnavailable(res, record) {
+  return sendJson(res, 503, {
+    ok: false,
+    error: "durable_settlement_reconciliation_unavailable",
+    code: "DURABLE_SETTLEMENT_RECONCILIATION_UNAVAILABLE",
+    message: "The payment outcome is unknown and its reconciliation marker could not be confirmed. Do not pay or submit again.",
+    charged: null,
+    settlement: "unknown",
+    retryable: false,
+    nextAction: "MANUAL_PAYMENT_RECONCILIATION_REQUIRED",
+    receiptId: record.receiptId,
+  });
+}
+
+function finalRecordForSettlement(pending, settlement, generatedAt, overrides = {}) {
+  const context = pending.receiptContext;
+  if (!context?.policy) throw new Error("receipt_recovery_context_missing");
+  const universalCovenant = overrides.universalCovenant || null;
+  const relayGrantPayload = overrides.relayGrantPayload || null;
+  const coverageCapAtomic = BigInt(context.coverageCapAtomic);
+  const reserveBalanceAtomic = BigInt(context.reserveBalanceAtomic);
+  const receipt = buildReceipt({
+    receiptId: pending.receiptId,
+    input: pending.input,
+    policy: context.policy,
+    guard: pending.guard,
+    targetOrder: pending.targetOrder,
+    payer: pending.payer,
+    coverageCapAtomic,
+    reserveBalanceAtomic,
+    settlement,
+    generatedAt,
+    coverageDeadline: context.coverageDeadline,
+    coverageEnrollmentClosesAt: context.coverageEnrollmentClosesAt,
+    quote: context.quote,
+    universalCovenant,
+    relayGrantPayload,
+  });
+  return {
+    ...pending,
+    state: pending.guard.verdict === "ALLOW"
+      ? context.policy.clockMode === "policypool_relay" ? "pending_start" : "active"
+      : "declined",
+    finalizedAt: generatedAt,
+    liabilityAtomic: context.policy.onchainPolicyId ? "0" : coverageCapAtomic.toString(),
+    providerBondLiabilityAtomic: context.policy.onchainPolicyId ? coverageCapAtomic.toString() : "0",
+    universalCovenant,
+    relayGrantPayload,
+    settlement: {
+      network: settlement.network,
+      transaction: settlement.transaction,
+      payer: settlement.payer,
+      amountAtomic: settlement.amount,
+      transfer: settlement.transfer,
+    },
+    paymentResponseHeader: settlement.responseHeader,
+    receipt,
+  };
 }
 
 export function createHandler(dependencies = {}) {
@@ -667,7 +733,50 @@ export function createHandler(dependencies = {}) {
           return respond(res, { ...existingPayment, replayed: true });
         }
         if (existingPayment?.settlement?.status === "unknown") {
-          return settlementOutcomeUnknown(res, existingPayment);
+          let reconciliation;
+          try {
+            reconciliation = await payment.reconcileSettlement(
+              existingPayment,
+              existingPayment.paymentRequirements,
+            );
+          } catch {
+            return settlementOutcomeUnknown(res, existingPayment);
+          }
+          if (reconciliation.status === "pending") {
+            return settlementOutcomeUnknown(res, existingPayment);
+          }
+          if (reconciliation.status === "not_found") {
+            try {
+              await ledger.release(existingPayment);
+            } catch {
+              return durableSettlementMarkerUnavailable(res, existingPayment);
+            }
+            return paymentRequired(
+              req,
+              res,
+              "payment_not_settled_after_reconciliation",
+              "",
+            );
+          }
+          let finalRecord;
+          try {
+            finalRecord = finalRecordForSettlement(
+              existingPayment,
+              reconciliation.settlement,
+              new Date(now()).toISOString(),
+            );
+            finalRecord = await ledger.finalize(finalRecord);
+          } catch (error) {
+            return sendJson(res, 503, {
+              ok: false,
+              error: "payment_settled_receipt_pending_reconciliation",
+              charged: true,
+              paymentTransaction: reconciliation.settlement.transaction,
+              receiptId: existingPayment.receiptId,
+              detail: error instanceof Error ? error.message : String(error),
+            });
+          }
+          return respond(res, finalRecord);
         }
         if (existingPayment?.state === "compensation_required") {
           return sendJson(res, 503, {
@@ -924,6 +1033,20 @@ export function createHandler(dependencies = {}) {
       quoteId: quote?.id || null,
       feeAuthorization,
       universalCovenant: plannedUniversalCovenant,
+      paymentRequirements: requirements,
+      receiptContext: {
+        policy,
+        coverageCapAtomic: coverageCapAtomic.toString(),
+        reserveBalanceAtomic: reserveBalanceAtomic.toString(),
+        coverageDeadline,
+        coverageEnrollmentClosesAt,
+        quote: quote ? {
+          id: quote.id,
+          source: quote.source,
+          issuedAt: quote.issuedAt,
+          expiresAt: quote.expiresAt,
+        } : null,
+      },
     };
 
     let reservation;
@@ -1045,18 +1168,32 @@ export function createHandler(dependencies = {}) {
         });
       } else {
         if (
-          error instanceof PaymentVerificationError
-          && error.code === "payment_settlement_unavailable"
+          error instanceof PaymentSettlementUnknownError
         ) {
+          const attemptedAt = now();
+          let recovery;
+          try {
+            recovery = payment.settlementRecovery(verified, requirements, error, attemptedAt);
+          } catch {
+            return durableSettlementMarkerUnavailable(res, pending);
+          }
           const settlementPending = {
             ...pending,
             settlement: {
               status: "unknown",
-              attemptedAt: new Date(now()).toISOString(),
+              attemptedAt: new Date(attemptedAt).toISOString(),
               error: error.code,
+              recovery,
             },
           };
-          await ledger.markSettlementUnknown(settlementPending).catch(() => undefined);
+          try {
+            const stored = await ledger.markSettlementUnknown(settlementPending);
+            if (stored?.settlement?.status !== "unknown") {
+              return durableSettlementMarkerUnavailable(res, settlementPending);
+            }
+          } catch {
+            return durableSettlementMarkerUnavailable(res, settlementPending);
+          }
           return settlementOutcomeUnknown(res, settlementPending);
         }
         await ledger.release(pending).catch(() => undefined);
@@ -1065,44 +1202,12 @@ export function createHandler(dependencies = {}) {
       return paymentRequired(req, res, "payment_settlement_failed");
     }
 
-    const receipt = buildReceipt({
-      receiptId,
-      input,
-      policy,
-      guard,
-      targetOrder,
-      payer: verified.payer,
-      coverageCapAtomic,
-      reserveBalanceAtomic,
+    const finalRecord = finalRecordForSettlement(
+      pending,
       settlement,
-      generatedAt: new Date(now()).toISOString(),
-      coverageDeadline,
-      coverageEnrollmentClosesAt,
-      quote,
-      universalCovenant,
-      relayGrantPayload,
-    });
-    const finalRecord = {
-      ...pending,
-      state: guard.verdict === "ALLOW"
-        ? policy.clockMode === "policypool_relay" ? "pending_start" : "active"
-        : "declined",
-      finalizedAt: new Date(now()).toISOString(),
-      liabilityAtomic: policy.onchainPolicyId ? "0" : coverageCapAtomic.toString(),
-      providerBondLiabilityAtomic: policy.onchainPolicyId ? coverageCapAtomic.toString() : "0",
-      universalCovenant,
-      relayGrantPayload,
-      guard,
-      settlement: {
-        network: settlement.network,
-        transaction: settlement.transaction,
-        payer: settlement.payer,
-        amountAtomic: settlement.amount,
-        transfer: settlement.transfer,
-      },
-      paymentResponseHeader: settlement.responseHeader,
-      receipt,
-    };
+      new Date(now()).toISOString(),
+      { universalCovenant, relayGrantPayload },
+    );
 
     try {
       await ledger.finalize(finalRecord);

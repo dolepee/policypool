@@ -149,6 +149,21 @@ await assert.rejects(
     amountAtomic: "500000",
     authorizationNonce: nonce,
     notBeforeTimestamp: 1_000,
+    notAfterTimestamp: 2_100,
+    requireCompleteWindow: true,
+  }),
+  (error) => error instanceof EvidenceError
+    && error.code === "provider_settlement_search_window_incomplete",
+  "a no-match scan must not release a payment before the complete recovery window is on chain",
+);
+await assert.rejects(
+  () => chain.findProviderSettlement({
+    payer,
+    payTo: provider,
+    asset: PAYMENT.asset,
+    amountAtomic: "500000",
+    authorizationNonce: nonce,
+    notBeforeTimestamp: 1_000,
     notAfterTimestamp: 3_000,
   }),
   (error) => error instanceof EvidenceError && error.code === "provider_settlement_search_window_invalid",

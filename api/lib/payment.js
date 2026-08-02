@@ -32,6 +32,14 @@ export class PaymentVerificationError extends Error {
   }
 }
 
+export class PaymentSettlementUnknownError extends PaymentVerificationError {
+  constructor(code, message, transaction = null) {
+    super(code, message);
+    this.name = "PaymentSettlementUnknownError";
+    this.transaction = isBytes32(transaction) ? transaction : null;
+  }
+}
+
 function sameAddress(left, right) {
   try {
     return getAddress(left) === getAddress(right);
@@ -191,22 +199,63 @@ export function createPaymentService({ facilitator, chain, environment = process
     try {
       result = await getFacilitator().settle(verified.payload, requirements);
     } catch (error) {
-      throw new PaymentVerificationError("payment_settlement_unavailable", error instanceof Error ? error.message : String(error));
+      throw new PaymentSettlementUnknownError(
+        "payment_settlement_unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
     }
-    if (!result?.success || !isBytes32(result.transaction)) {
+    if (!result?.success && isBytes32(result?.transaction)) {
+      throw new PaymentSettlementUnknownError(
+        result?.errorReason || "payment_settlement_outcome_unknown",
+        result?.errorMessage,
+        result.transaction,
+      );
+    }
+    if (!result?.success) {
       throw new PaymentVerificationError(result?.errorReason || "payment_settlement_failed", result?.errorMessage);
     }
-    if (result.network !== requirements.network) throw new PaymentVerificationError("settlement_network_mismatch");
+    if (!isBytes32(result.transaction)) {
+      throw new PaymentSettlementUnknownError(
+        "payment_settlement_transaction_unavailable",
+        "The facilitator reported success without a transaction hash",
+      );
+    }
+    if (result.network !== requirements.network) {
+      throw new PaymentSettlementUnknownError(
+        "settlement_network_mismatch",
+        "The facilitator settlement network did not match the signed requirement",
+        result.transaction,
+      );
+    }
     const settledAmount = result.amount || requirements.amount;
     if (String(settledAmount) !== String(requirements.amount)) {
-      throw new PaymentVerificationError("settlement_amount_mismatch");
+      throw new PaymentSettlementUnknownError(
+        "settlement_amount_mismatch",
+        "The facilitator settlement amount did not match the signed requirement",
+        result.transaction,
+      );
     }
-    if (!chain?.verifySettlement) throw new PaymentConfigurationError("chain settlement verifier is unavailable");
-    const transfer = await chain.verifySettlement({
-      txHash: result.transaction,
-      payer: verified.payer,
-      amountAtomic: requirements.amount,
-    });
+    if (!chain?.verifySettlement) {
+      throw new PaymentSettlementUnknownError(
+        "payment_settlement_verifier_unavailable",
+        "Chain settlement verifier is unavailable",
+        result.transaction,
+      );
+    }
+    let transfer;
+    try {
+      transfer = await chain.verifySettlement({
+        txHash: result.transaction,
+        payer: verified.payer,
+        amountAtomic: requirements.amount,
+      });
+    } catch (error) {
+      throw new PaymentSettlementUnknownError(
+        "payment_settlement_verification_unavailable",
+        error instanceof Error ? error.message : String(error),
+        result.transaction,
+      );
+    }
     return {
       ...result,
       payer: verified.payer,
@@ -216,7 +265,85 @@ export function createPaymentService({ facilitator, chain, environment = process
     };
   }
 
-  return { fingerprint, settle, verify };
+  function settlementRecovery(verified, requirements, error, attemptedAtMs) {
+    const nonce = verified?.payload?.payload?.authorization?.nonce;
+    const attemptedAtSeconds = Math.floor(Number(attemptedAtMs) / 1_000);
+    const timeoutSeconds = Number(requirements?.maxTimeoutSeconds);
+    if (!isBytes32(nonce)) {
+      throw new PaymentVerificationError("payment_settlement_recovery_nonce_missing");
+    }
+    if (!Number.isSafeInteger(attemptedAtSeconds) || attemptedAtSeconds <= 0) {
+      throw new PaymentVerificationError("payment_settlement_recovery_time_invalid");
+    }
+    if (!Number.isSafeInteger(timeoutSeconds) || timeoutSeconds <= 0 || timeoutSeconds > 15 * 60) {
+      throw new PaymentVerificationError("payment_settlement_recovery_window_invalid");
+    }
+    return {
+      authorizationNonce: nonce,
+      transaction: error instanceof PaymentSettlementUnknownError ? error.transaction : null,
+      notBeforeTimestamp: attemptedAtSeconds - 30,
+      notAfterTimestamp: attemptedAtSeconds + timeoutSeconds + 60,
+    };
+  }
+
+  function recoveredSettlement(record, requirements, transfer) {
+    const response = {
+      success: true,
+      network: requirements.network,
+      transaction: transfer.txHash,
+      payer: record.payer,
+    };
+    return {
+      ...response,
+      amount: requirements.amount,
+      transfer,
+      responseHeader: encodePaymentResponseHeader(response),
+    };
+  }
+
+  async function reconcileSettlement(record, requirements) {
+    const recovery = record?.settlement?.recovery;
+    if (!recovery || !chain?.findProviderSettlement) {
+      throw new PaymentVerificationError("payment_settlement_reconciliation_unavailable");
+    }
+    if (isBytes32(recovery.transaction)) {
+      try {
+        const transfer = await chain.verifySettlement({
+          txHash: recovery.transaction,
+          payer: record.payer,
+          amountAtomic: requirements.amount,
+        });
+        return { status: "settled", settlement: recoveredSettlement(record, requirements, transfer) };
+      } catch {
+        // The known transaction may still be propagating. The nonce-indexed scan
+        // below is the authoritative bounded recovery path.
+      }
+    }
+    try {
+      const transfer = await chain.findProviderSettlement({
+        payer: record.payer,
+        payTo: requirements.payTo,
+        asset: requirements.asset,
+        amountAtomic: requirements.amount,
+        authorizationNonce: recovery.authorizationNonce,
+        notBeforeTimestamp: recovery.notBeforeTimestamp,
+        notAfterTimestamp: recovery.notAfterTimestamp,
+        requireCompleteWindow: true,
+      });
+      if (!transfer) return { status: "not_found" };
+      return { status: "settled", settlement: recoveredSettlement(record, requirements, transfer) };
+    } catch (error) {
+      if (error?.code === "provider_settlement_search_window_incomplete") {
+        return { status: "pending" };
+      }
+      throw new PaymentVerificationError(
+        "payment_settlement_reconciliation_unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  return { fingerprint, reconcileSettlement, settle, settlementRecovery, verify };
 }
 
 export const __test = {
