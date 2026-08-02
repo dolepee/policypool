@@ -368,6 +368,24 @@ try {
     "https://okx-agent-review-relay.onrender.com/policypool/api/coverage-preflight",
   );
   assert.doesNotMatch(JSON.stringify(relayedBody), /vercel\.app/i);
+
+  const relayedRuntime = makeRuntime();
+  const relayedPaid = await callHandler(relayedRuntime.handler, {
+    method: "POST",
+    url: "/api/covered-job-receipt",
+    headers: { "payment-signature": makePaymentHeader("relayed-paid-response") },
+    body: sampleBody,
+  });
+  assert.equal(relayedPaid.statusCode, 200);
+  assert.equal(
+    relayedPaid.json().receipt.reserve.publicUrl,
+    "https://okx-agent-review-relay.onrender.com/policypool/api/coverage-ledger#reserve",
+  );
+  assert.doesNotMatch(
+    JSON.stringify(relayedPaid.json()),
+    /vercel\.app/i,
+    "a successful paid response must remain consumable by the reviewer guardrail",
+  );
 } finally {
   if (typeof previousPublicOrigin === "undefined") delete process.env.POLICYPOOL_PUBLIC_ORIGIN;
   else process.env.POLICYPOOL_PUBLIC_ORIGIN = previousPublicOrigin;
