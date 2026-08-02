@@ -1063,15 +1063,45 @@ assert.equal(noReserveResponse.json().charged, false);
 assert.equal(noReserve.calls.settle, 0);
 assert.equal((await noReserve.ledger.stats()).recordCount, 0);
 
-const failedSettlement = makeRuntime({ settlementFails: true });
-const failedSettlementResponse = await callHandler(failedSettlement.handler, {
+const failedSettlement = makeRuntime({
+  settlementFails: true,
+  recoveredSettlementStatus: "settled",
+});
+const failedSettlementRequest = {
   method: "POST",
   headers: { "payment-signature": makePaymentHeader("settlement-fails") },
   body: { ...sampleBody, targetJobId: `0x${"3".repeat(64)}` },
-});
-assert.equal(failedSettlementResponse.statusCode, 402);
-assert.equal((await failedSettlement.ledger.stats()).pendingAtomic, "0", "failed settlement must release pending liability");
-assert.equal((await failedSettlement.ledger.stats()).recordCount, 0);
+};
+const failedSettlementResponse = await callHandler(
+  failedSettlement.handler,
+  failedSettlementRequest,
+);
+assert.equal(failedSettlementResponse.statusCode, 503);
+assert.equal(failedSettlementResponse.headers["payment-required"], undefined);
+assert.equal(failedSettlementResponse.headers["payment-response"], undefined);
+assert.equal(failedSettlementResponse.headers["x-payment-response"], undefined);
+assert.equal(failedSettlementResponse.json().error, "payment_settlement_outcome_unknown");
+assert.equal(failedSettlementResponse.json().charged, null);
+assert.equal(failedSettlementResponse.json().settlement, "unknown");
+assert.equal((await failedSettlement.ledger.stats()).pendingAtomic, "1000000");
+assert.equal((await failedSettlement.ledger.stats()).recordCount, 1);
+assert.equal(
+  (await failedSettlement.ledger.get(failedSettlementResponse.json().receiptId)).settlement.status,
+  "unknown",
+);
+const failedSettlementRecovered = await callHandler(
+  failedSettlement.handler,
+  failedSettlementRequest,
+);
+assert.equal(failedSettlementRecovered.statusCode, 200);
+assert.ok(failedSettlementRecovered.json().receipt);
+assert.equal(failedSettlement.calls.settle, 1, "a late-mined rejection must never settle twice");
+assert.equal(failedSettlement.calls.reconcile, 1);
+assert.deepEqual(failedSettlement.calls.recoveryNonces, [
+  `0x${sha256("nonce:settlement-fails")}`,
+]);
+assert.equal((await failedSettlement.ledger.stats()).pendingAtomic, "0");
+assert.equal((await failedSettlement.ledger.stats()).activeAtomic, "1000000");
 
 const preSettlementJournalFailure = makeRuntime({ markSettlementStateFailsOnCall: 1 });
 const preSettlementJournalFailureResponse = await callHandler(preSettlementJournalFailure.handler, {
@@ -1355,7 +1385,7 @@ assert.deepEqual(timeoutWithTransaction.calls.settlementNonces, [
 assert.equal((await timeoutWithTransaction.ledger.stats()).activeAtomic, "1000000");
 
 const definitelyNotSettled = makeRuntime({
-  settlementThrows: true,
+  settlementFails: true,
   recoveredSettlementStatus: "not_found",
 });
 const definitelyNotSettledHeader = makePaymentHeader("settlement-not-found");
@@ -1364,10 +1394,16 @@ const definitelyNotSettledRequest = {
   headers: { "payment-signature": definitelyNotSettledHeader },
   body: { ...sampleBody, targetJobId: `0x${"5".repeat(64)}` },
 };
-assert.equal(
-  (await callHandler(definitelyNotSettled.handler, definitelyNotSettledRequest)).statusCode,
-  503,
+const definitelyNotSettledUnknown = await callHandler(
+  definitelyNotSettled.handler,
+  definitelyNotSettledRequest,
 );
+assert.equal(definitelyNotSettledUnknown.statusCode, 503);
+assert.equal(definitelyNotSettledUnknown.headers["payment-required"], undefined);
+assert.equal(definitelyNotSettledUnknown.headers["payment-response"], undefined);
+assert.equal(definitelyNotSettledUnknown.headers["x-payment-response"], undefined);
+assert.equal(definitelyNotSettledUnknown.json().charged, null);
+assert.equal(definitelyNotSettledUnknown.json().settlement, "unknown");
 const definitelyNotSettledRecovery = await callHandler(
   definitelyNotSettled.handler,
   definitelyNotSettledRequest,
