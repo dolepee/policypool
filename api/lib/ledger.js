@@ -92,7 +92,7 @@ redis.call('SET', KEYS[1], ARGV[1])
 return {'updated', ARGV[1]}
 `;
 
-const MARK_SETTLEMENT_UNKNOWN_SCRIPT = `
+const MARK_SETTLEMENT_STATE_SCRIPT = `
 local current = redis.call('GET', KEYS[1])
 if not current then return {'missing'} end
 local decoded = cjson.decode(current)
@@ -180,19 +180,23 @@ export class MemoryLedger {
 
   async release(record) {
     const current = this.records.get(record.receiptId);
-    if (!current || !["pending", "compensation_required"].includes(current.state)) return;
+    if (!current) return { status: "missing" };
+    if (!["pending", "compensation_required"].includes(current.state)) {
+      return { status: "not_pending" };
+    }
     this.pendingAtomic -= BigInt(current.liabilityAtomic);
     this.records.delete(record.receiptId);
     this.requests.delete(record.requestId);
     this.payments.delete(record.paymentId);
+    return { status: "released" };
   }
 
-  async markSettlementUnknown(record) {
+  async markSettlementState(record) {
     const current = this.records.get(record.receiptId);
     if (!current) throw new Error("ledger_record_missing");
     if (current.state !== "pending") return current;
-    if (record.settlement?.status !== "unknown") {
-      throw new Error("settlement_unknown_state_required");
+    if (!["submitting", "unknown"].includes(record.settlement?.status)) {
+      throw new Error("settlement_recovery_state_required");
     }
     this.records.set(record.receiptId, structuredClone(record));
     return record;
@@ -334,19 +338,20 @@ export class RedisLedger {
   }
 
   async release(record) {
-    await this.redis.eval(RELEASE_SCRIPT, [
+    const result = await this.redis.eval(RELEASE_SCRIPT, [
       this.key("request", record.requestId),
       this.key("payment", record.paymentId),
       this.key("receipt", record.receiptId),
       this.key("liability", "pending"),
     ], [record.liabilityAtomic]);
+    return { status: String(result[0]) };
   }
 
-  async markSettlementUnknown(record) {
-    if (record.settlement?.status !== "unknown") {
-      throw new Error("settlement_unknown_state_required");
+  async markSettlementState(record) {
+    if (!["submitting", "unknown"].includes(record.settlement?.status)) {
+      throw new Error("settlement_recovery_state_required");
     }
-    const result = await this.redis.eval(MARK_SETTLEMENT_UNKNOWN_SCRIPT, [
+    const result = await this.redis.eval(MARK_SETTLEMENT_STATE_SCRIPT, [
       this.key("receipt", record.receiptId),
     ], [JSON.stringify(record)]);
     if (String(result[0]) === "missing") throw new Error("ledger_record_missing");

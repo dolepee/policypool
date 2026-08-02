@@ -143,7 +143,8 @@ function makeRuntime({
   settlementThrows = false,
   settlementVerificationThrows = false,
   recoveredSettlementStatus = "pending",
-  markSettlementUnknownFails = false,
+  markSettlementStateFailsOnCall = 0,
+  releaseReturnsNotPending = false,
   onSettle,
   jobStatus = 1,
   targetAmountAtomic = "5000000",
@@ -153,7 +154,16 @@ function makeRuntime({
   limiter,
 } = {}) {
   const ledger = new MemoryLedger();
-  const calls = { verify: 0, settle: 0, reconcile: 0, target: 0, status: 0, transfer: 0 };
+  const calls = {
+    verify: 0,
+    settle: 0,
+    reconcile: 0,
+    target: 0,
+    status: 0,
+    transfer: 0,
+    settlementNonces: [],
+    recoveryNonces: [],
+  };
   const chain = {
     async getReserveBalance() {
       return reserveAtomic;
@@ -186,8 +196,9 @@ function makeRuntime({
         statusLabel: "accepted",
       };
     },
-    async verifySettlement({ txHash, payer, amountAtomic }) {
+    async verifySettlement({ txHash, payer, amountAtomic, authorizationNonce }) {
       calls.transfer += 1;
+      calls.settlementNonces.push(authorizationNonce || null);
       if (settlementVerificationThrows && calls.transfer === 1) {
         throw new Error("simulated_settlement_rpc_failure");
       }
@@ -202,6 +213,7 @@ function makeRuntime({
     },
     async findProviderSettlement({ payer, payTo, asset, amountAtomic, authorizationNonce }) {
       calls.reconcile += 1;
+      calls.recoveryNonces.push(authorizationNonce || null);
       if (recoveredSettlementStatus === "pending") {
         throw new EvidenceError("provider_settlement_search_window_incomplete");
       }
@@ -239,7 +251,7 @@ function makeRuntime({
     },
     async settle(payload) {
       calls.settle += 1;
-      onSettle?.();
+      await onSettle?.({ ledger, payload });
       if (settlementThrows) throw new Error("simulated_settlement_transport_failure");
       if (settlementFailsWithTransaction) {
         return {
@@ -260,10 +272,19 @@ function makeRuntime({
   };
   const payment = createPaymentService({ facilitator, chain });
   const quoteService = createQuoteService({ ledger, secret: QUOTE_SECRET, now: clock });
-  if (markSettlementUnknownFails) {
-    ledger.markSettlementUnknown = async () => {
-      throw new Error("simulated_ledger_write_failure");
+  if (markSettlementStateFailsOnCall > 0) {
+    const markSettlementState = ledger.markSettlementState.bind(ledger);
+    let settlementStateWrites = 0;
+    ledger.markSettlementState = async (record) => {
+      settlementStateWrites += 1;
+      if (settlementStateWrites === markSettlementStateFailsOnCall) {
+        throw new Error("simulated_ledger_write_failure");
+      }
+      return markSettlementState(record);
     };
+  }
+  if (releaseReturnsNotPending) {
+    ledger.release = async () => ({ status: "not_pending" });
   }
   const handler = createHandler({
     ledger,
@@ -1045,6 +1066,82 @@ assert.equal(failedSettlementResponse.statusCode, 402);
 assert.equal((await failedSettlement.ledger.stats()).pendingAtomic, "0", "failed settlement must release pending liability");
 assert.equal((await failedSettlement.ledger.stats()).recordCount, 0);
 
+const preSettlementJournalFailure = makeRuntime({ markSettlementStateFailsOnCall: 1 });
+const preSettlementJournalFailureResponse = await callHandler(preSettlementJournalFailure.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("pre-settlement-journal-failure") },
+  body: { ...sampleBody, targetJobId: `0x${"f".repeat(64)}` },
+});
+assert.equal(preSettlementJournalFailureResponse.statusCode, 503);
+assert.equal(preSettlementJournalFailureResponse.headers["payment-required"], undefined);
+assert.equal(
+  preSettlementJournalFailureResponse.json().error,
+  "payment_settlement_journal_unavailable",
+);
+assert.equal(preSettlementJournalFailureResponse.json().charged, false);
+assert.equal(preSettlementJournalFailureResponse.json().settlement, "not_submitted");
+assert.equal(preSettlementJournalFailureResponse.json().retryable, true);
+assert.equal(preSettlementJournalFailure.calls.settle, 0);
+assert.equal((await preSettlementJournalFailure.ledger.stats()).pendingAtomic, "0");
+assert.equal((await preSettlementJournalFailure.ledger.stats()).recordCount, 0);
+
+const unconfirmedJournalRelease = makeRuntime({
+  markSettlementStateFailsOnCall: 1,
+  releaseReturnsNotPending: true,
+});
+const unconfirmedJournalReleaseResponse = await callHandler(unconfirmedJournalRelease.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("journal-release-unconfirmed") },
+  body: { ...sampleBody, targetJobId: `0x${"1".repeat(64)}` },
+});
+assert.equal(unconfirmedJournalReleaseResponse.statusCode, 503);
+assert.equal(unconfirmedJournalReleaseResponse.json().error, "durable_ledger_unavailable");
+assert.equal(unconfirmedJournalReleaseResponse.json().charged, false);
+assert.equal(unconfirmedJournalReleaseResponse.json().retryable, false);
+assert.equal(unconfirmedJournalReleaseResponse.json().nextAction, "CONTACT_PROVIDER");
+assert.equal(unconfirmedJournalRelease.calls.settle, 0);
+
+let submittingSnapshot = null;
+const journaledBeforeSettlement = makeRuntime({
+  settlementThrows: true,
+  onSettle: async ({ ledger }) => {
+    [submittingSnapshot] = await ledger.list(1);
+  },
+});
+const journaledPaymentHeader = makePaymentHeader("journaled-before-settlement");
+const journaledRequest = {
+  method: "POST",
+  headers: { "payment-signature": journaledPaymentHeader },
+  body: { ...sampleBody, targetJobId: `0x${"0".repeat(64)}` },
+};
+assert.equal((await callHandler(journaledBeforeSettlement.handler, journaledRequest)).statusCode, 503);
+assert.equal(submittingSnapshot?.state, "pending");
+assert.equal(submittingSnapshot?.settlement?.status, "submitting");
+assert.equal(
+  submittingSnapshot?.settlement?.recovery?.authorizationNonce,
+  `0x${sha256("nonce:journaled-before-settlement")}`,
+);
+assert.ok(submittingSnapshot?.paymentRequirements);
+assert.ok(submittingSnapshot?.receiptContext?.policy);
+
+// Simulate a serverless process dying after the durable journal write but before
+// the handler could persist an outcome. A fresh process receives only that
+// journal snapshot and must recover by nonce without settling a second time.
+const restartedAfterSubmission = makeRuntime({ recoveredSettlementStatus: "settled" });
+assert.equal(
+  (await restartedAfterSubmission.ledger.reserve(submittingSnapshot, 5_000_000n)).status,
+  "reserved",
+);
+const restartedResponse = await callHandler(restartedAfterSubmission.handler, journaledRequest);
+assert.equal(restartedResponse.statusCode, 200);
+assert.equal(restartedAfterSubmission.calls.settle, 0);
+assert.equal(restartedAfterSubmission.calls.reconcile, 1);
+assert.deepEqual(restartedAfterSubmission.calls.recoveryNonces, [
+  `0x${sha256("nonce:journaled-before-settlement")}`,
+]);
+assert.equal((await restartedAfterSubmission.ledger.stats()).pendingAtomic, "0");
+assert.equal((await restartedAfterSubmission.ledger.stats()).activeAtomic, "1000000");
+
 const ambiguousSettlement = makeRuntime({ settlementThrows: true });
 const ambiguousPaymentHeader = makePaymentHeader("settlement-unknown");
 const ambiguousSettlementRequest = {
@@ -1187,6 +1284,10 @@ const postSubmissionRecovered = await callHandler(
 assert.equal(postSubmissionRecovered.statusCode, 200);
 assert.equal(postSubmissionVerification.calls.settle, 1);
 assert.equal(postSubmissionVerification.calls.transfer, 2);
+assert.deepEqual(postSubmissionVerification.calls.settlementNonces, [
+  `0x${sha256("nonce:post-submission-verification")}`,
+  `0x${sha256("nonce:post-submission-verification")}`,
+]);
 assert.equal((await postSubmissionVerification.ledger.stats()).activeAtomic, "1000000");
 
 const timeoutWithTransaction = makeRuntime({ settlementFailsWithTransaction: true });
@@ -1214,6 +1315,9 @@ assert.equal(
   `0x${"7".repeat(64)}`,
 );
 assert.equal(timeoutWithTransaction.calls.settle, 1);
+assert.deepEqual(timeoutWithTransaction.calls.settlementNonces, [
+  `0x${sha256("nonce:timeout-with-transaction")}`,
+]);
 assert.equal((await timeoutWithTransaction.ledger.stats()).activeAtomic, "1000000");
 
 const definitelyNotSettled = makeRuntime({
@@ -1243,7 +1347,8 @@ assert.equal((await definitelyNotSettled.ledger.stats()).recordCount, 0);
 
 const markerWriteFailure = makeRuntime({
   settlementThrows: true,
-  markSettlementUnknownFails: true,
+  recoveredSettlementStatus: "settled",
+  markSettlementStateFailsOnCall: 2,
 });
 const markerWriteFailureResponse = await callHandler(markerWriteFailure.handler, {
   method: "POST",
@@ -1252,13 +1357,27 @@ const markerWriteFailureResponse = await callHandler(markerWriteFailure.handler,
 });
 assert.equal(markerWriteFailureResponse.statusCode, 503);
 assert.equal(markerWriteFailureResponse.headers["payment-required"], undefined);
-assert.equal(markerWriteFailureResponse.json().error, "durable_settlement_reconciliation_unavailable");
+assert.equal(markerWriteFailureResponse.json().error, "payment_settlement_outcome_unknown");
 assert.equal(markerWriteFailureResponse.json().charged, null);
 assert.equal(markerWriteFailureResponse.json().settlement, "unknown");
 assert.equal(markerWriteFailureResponse.json().retryable, false);
-assert.equal(markerWriteFailureResponse.json().nextAction, "MANUAL_PAYMENT_RECONCILIATION_REQUIRED");
+assert.equal(markerWriteFailureResponse.json().nextAction, "RECONCILE_PAYMENT_BEFORE_RETRY");
 assert.equal((await markerWriteFailure.ledger.stats()).pendingAtomic, "1000000");
 assert.equal((await markerWriteFailure.ledger.stats()).recordCount, 1);
+const markerFallbackRecord = await markerWriteFailure.ledger.get(
+  markerWriteFailureResponse.json().receiptId,
+);
+assert.equal(markerFallbackRecord.settlement.status, "submitting");
+const markerWriteFailureRecovered = await callHandler(markerWriteFailure.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("marker-write-failure") },
+  body: { ...sampleBody, targetJobId: `0x${"6".repeat(64)}` },
+});
+assert.equal(markerWriteFailureRecovered.statusCode, 200);
+assert.equal(markerWriteFailure.calls.settle, 1);
+assert.equal(markerWriteFailure.calls.reconcile, 1);
+assert.equal((await markerWriteFailure.ledger.stats()).pendingAtomic, "0");
+assert.equal((await markerWriteFailure.ledger.stats()).activeAtomic, "1000000");
 
 const adminStopped = makeRuntime();
 const adminStoppedIssued = await callHandler(adminStopped.handler, {

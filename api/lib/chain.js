@@ -746,11 +746,12 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
     resolveTargetOrderEvidence,
     resolveTargetOrderEvidenceFromHints,
     verifyProviderPaymentAuthorization,
-    verifySettlement: ({ txHash, payer, amountAtomic }) => verifyTransfer({
+    verifySettlement: ({ txHash, payer, amountAtomic, authorizationNonce }) => verifyTransfer({
       txHash,
       from: payer,
       to: PAYMENT.payTo,
       amountAtomic,
+      authorizationNonce,
     }),
     verifyProviderSettlement: ({ txHash, payer, payTo, asset, amountAtomic, authorizationNonce }) => verifyTransfer({
       txHash,

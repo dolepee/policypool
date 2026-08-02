@@ -604,6 +604,26 @@ function durableSettlementMarkerUnavailable(res, record) {
   });
 }
 
+function settlementJournalUnavailable(res, record, releaseConfirmed) {
+  return sendJson(res, 503, {
+    ok: false,
+    error: releaseConfirmed
+      ? "payment_settlement_journal_unavailable"
+      : "durable_ledger_unavailable",
+    code: releaseConfirmed
+      ? "PAYMENT_SETTLEMENT_JOURNAL_UNAVAILABLE"
+      : "DURABLE_LEDGER_UNAVAILABLE",
+    message: releaseConfirmed
+      ? "Settlement was not submitted because the recovery journal could not be persisted. The reservation was released safely."
+      : "Settlement was not submitted, but the pending reservation could not be released. Contact the provider before retrying.",
+    charged: false,
+    settlement: "not_submitted",
+    retryable: releaseConfirmed,
+    nextAction: releaseConfirmed ? "RETRY_SAME_REQUEST" : "CONTACT_PROVIDER",
+    receiptId: record.receiptId,
+  });
+}
+
 function finalRecordForSettlement(pending, settlement, generatedAt, overrides = {}) {
   const context = pending.receiptContext;
   if (!context?.policy) throw new Error("receipt_recovery_context_missing");
@@ -732,7 +752,7 @@ export function createHandler(dependencies = {}) {
         if (existingPayment?.receipt) {
           return respond(res, { ...existingPayment, replayed: true });
         }
-        if (existingPayment?.settlement?.status === "unknown") {
+        if (["submitting", "unknown"].includes(existingPayment?.settlement?.status)) {
           let reconciliation;
           try {
             reconciliation = await payment.reconcileSettlement(
@@ -1145,6 +1165,40 @@ export function createHandler(dependencies = {}) {
 
     let settlement;
     const settlementAttemptedAt = now();
+    let settlementRecovery = null;
+    if (!universalCovenant?.covenantId) {
+      try {
+        settlementRecovery = payment.settlementRecovery(
+          verified,
+          requirements,
+          null,
+          settlementAttemptedAt,
+        );
+        const settlementSubmitting = {
+          ...pending,
+          settlement: {
+            status: "submitting",
+            attemptedAt: new Date(settlementAttemptedAt).toISOString(),
+            recovery: settlementRecovery,
+          },
+        };
+        const stored = await ledger.markSettlementState(settlementSubmitting);
+        if (stored?.settlement?.status !== "submitting") {
+          throw new Error("settlement_submission_journal_not_persisted");
+        }
+        pending = stored;
+      } catch {
+        let releaseConfirmed = false;
+        try {
+          const released = await ledger.release(pending);
+          releaseConfirmed = released?.status === "released";
+        } catch {
+          // No settlement was attempted. Preserve the explicit ledger failure so
+          // an operator can clear the untouched reservation before any retry.
+        }
+        return settlementJournalUnavailable(res, pending, releaseConfirmed);
+      }
+    }
     try {
       settlement = await payment.settle(verified, requirements);
     } catch (error) {
@@ -1171,35 +1225,31 @@ export function createHandler(dependencies = {}) {
         if (
           error instanceof PaymentSettlementUnknownError
         ) {
-          let recovery;
-          try {
-            recovery = payment.settlementRecovery(
-              verified,
-              requirements,
-              error,
-              settlementAttemptedAt,
-            );
-          } catch {
-            return durableSettlementMarkerUnavailable(res, pending);
-          }
           const settlementPending = {
             ...pending,
             settlement: {
               status: "unknown",
               attemptedAt: new Date(settlementAttemptedAt).toISOString(),
               error: error.code,
-              recovery,
+              recovery: {
+                ...settlementRecovery,
+                transaction: error.transaction || settlementRecovery?.transaction || null,
+              },
             },
           };
           try {
-            const stored = await ledger.markSettlementUnknown(settlementPending);
+            const stored = await ledger.markSettlementState(settlementPending);
             if (stored?.settlement?.status !== "unknown") {
-              return durableSettlementMarkerUnavailable(res, settlementPending);
+              return settlementOutcomeUnknown(res, pending);
             }
+            pending = stored;
           } catch {
-            return durableSettlementMarkerUnavailable(res, settlementPending);
+            // The pre-submission marker is already durable and contains the
+            // authorization nonce and bounded scan window. A replay can still
+            // reconcile safely even if enriching it with the error/tx failed.
+            return settlementOutcomeUnknown(res, pending);
           }
-          return settlementOutcomeUnknown(res, settlementPending);
+          return settlementOutcomeUnknown(res, pending);
         }
         await ledger.release(pending).catch(() => undefined);
       }

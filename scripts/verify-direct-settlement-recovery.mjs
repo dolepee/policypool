@@ -19,6 +19,7 @@ const authorizationUsedEvent = parseAbiItem(
 );
 let returnSettlement = true;
 let receiptMode = "valid";
+let receiptRecipient = provider;
 let observedRange;
 let observedRanges = [];
 let settlementBlockNumber = 105n;
@@ -62,12 +63,48 @@ const client = {
       status: "success",
       blockNumber: settlementBlockNumber,
       logs: receiptMode === "substitution"
-        ? [authorizationUsedLog, transferLog(unrelatedRecipient), transferLog(provider)]
-        : [authorizationUsedLog, transferLog(provider)],
+        ? [authorizationUsedLog, transferLog(unrelatedRecipient), transferLog(receiptRecipient)]
+        : [authorizationUsedLog, transferLog(receiptRecipient)],
     };
   },
 };
 const chain = createChainService({ client });
+receiptRecipient = PAYMENT.payTo;
+const directSettlement = await chain.verifySettlement({
+  txHash: transactionHash,
+  payer,
+  amountAtomic: "500000",
+  authorizationNonce: nonce,
+});
+assert.equal(directSettlement.authorizationNonce, nonce);
+
+await assert.rejects(
+  () => chain.verifySettlement({
+    txHash: transactionHash,
+    payer,
+    amountAtomic: "500000",
+    authorizationNonce: `0x${"33".repeat(32)}`,
+  }),
+  (error) => error instanceof EvidenceError
+    && error.code === "provider_payment_authorization_event_missing",
+  "a known transaction from another authorization must not satisfy this payment",
+);
+
+receiptMode = "substitution";
+await assert.rejects(
+  () => chain.verifySettlement({
+    txHash: transactionHash,
+    payer,
+    amountAtomic: "500000",
+    authorizationNonce: nonce,
+  }),
+  (error) => error instanceof EvidenceError
+    && error.code === "provider_payment_authorization_transfer_mismatch",
+  "a known settlement hash must remain bound to the current authorization nonce",
+);
+receiptMode = "valid";
+receiptRecipient = provider;
+
 const found = await chain.findProviderSettlement({
   payer,
   payTo: provider,

@@ -195,6 +195,10 @@ export function createPaymentService({ facilitator, chain, environment = process
   }
 
   async function settle(verified, requirements) {
+    const authorizationNonce = verified?.payload?.payload?.authorization?.nonce;
+    if (!isBytes32(authorizationNonce)) {
+      throw new PaymentVerificationError("payment_settlement_authorization_nonce_missing");
+    }
     let result;
     try {
       result = await getFacilitator().settle(verified.payload, requirements);
@@ -248,6 +252,7 @@ export function createPaymentService({ facilitator, chain, environment = process
         txHash: result.transaction,
         payer: verified.payer,
         amountAtomic: requirements.amount,
+        authorizationNonce,
       });
     } catch (error) {
       throw new PaymentSettlementUnknownError(
@@ -312,6 +317,7 @@ export function createPaymentService({ facilitator, chain, environment = process
           txHash: recovery.transaction,
           payer: record.payer,
           amountAtomic: requirements.amount,
+          authorizationNonce: recovery.authorizationNonce,
         });
         return { status: "settled", settlement: recoveredSettlement(record, requirements, transfer) };
       } catch {
