@@ -19,6 +19,7 @@ const authorizationUsedEvent = parseAbiItem(
 );
 let returnSettlement = true;
 let receiptMode = "valid";
+let receiptRecipient = provider;
 let observedRange;
 let observedRanges = [];
 let settlementBlockNumber = 105n;
@@ -62,12 +63,48 @@ const client = {
       status: "success",
       blockNumber: settlementBlockNumber,
       logs: receiptMode === "substitution"
-        ? [authorizationUsedLog, transferLog(unrelatedRecipient), transferLog(provider)]
-        : [authorizationUsedLog, transferLog(provider)],
+        ? [authorizationUsedLog, transferLog(unrelatedRecipient), transferLog(receiptRecipient)]
+        : [authorizationUsedLog, transferLog(receiptRecipient)],
     };
   },
 };
 const chain = createChainService({ client });
+receiptRecipient = PAYMENT.payTo;
+const directSettlement = await chain.verifySettlement({
+  txHash: transactionHash,
+  payer,
+  amountAtomic: "500000",
+  authorizationNonce: nonce,
+});
+assert.equal(directSettlement.authorizationNonce, nonce);
+
+await assert.rejects(
+  () => chain.verifySettlement({
+    txHash: transactionHash,
+    payer,
+    amountAtomic: "500000",
+    authorizationNonce: `0x${"33".repeat(32)}`,
+  }),
+  (error) => error instanceof EvidenceError
+    && error.code === "provider_payment_authorization_event_missing",
+  "a known transaction from another authorization must not satisfy this payment",
+);
+
+receiptMode = "substitution";
+await assert.rejects(
+  () => chain.verifySettlement({
+    txHash: transactionHash,
+    payer,
+    amountAtomic: "500000",
+    authorizationNonce: nonce,
+  }),
+  (error) => error instanceof EvidenceError
+    && error.code === "provider_payment_authorization_transfer_mismatch",
+  "a known settlement hash must remain bound to the current authorization nonce",
+);
+receiptMode = "valid";
+receiptRecipient = provider;
+
 const found = await chain.findProviderSettlement({
   payer,
   payTo: provider,
@@ -114,6 +151,24 @@ assert.deepEqual(observedRange, { fromBlock: 99n, toBlock: 110n });
 assert.equal(boundarySettlement.blockNumber, "99");
 assert.equal(boundarySettlement.settledAt, "1970-01-01T00:16:39.000Z");
 
+settlementBlockNumber = 105n;
+observedRanges = [];
+const recoveredBeforeWindowClose = await chain.findProviderSettlement({
+  payer,
+  payTo: provider,
+  asset: PAYMENT.asset,
+  amountAtomic: "500000",
+  authorizationNonce: nonce,
+  notBeforeTimestamp: 1_000,
+  notAfterTimestamp: 2_100,
+  requireCompleteWindow: true,
+});
+assert.equal(recoveredBeforeWindowClose.txHash, transactionHash);
+assert.deepEqual(observedRanges, [
+  { fromBlock: 99n, toBlock: 198n },
+  { fromBlock: 199n, toBlock: 200n },
+]);
+
 returnSettlement = false;
 observedRanges = [];
 assert.equal(await chain.findProviderSettlement({
@@ -141,6 +196,21 @@ assert.deepEqual(observedRanges, [
   { fromBlock: 99n, toBlock: 198n },
   { fromBlock: 199n, toBlock: 200n },
 ]);
+await assert.rejects(
+  () => chain.findProviderSettlement({
+    payer,
+    payTo: provider,
+    asset: PAYMENT.asset,
+    amountAtomic: "500000",
+    authorizationNonce: nonce,
+    notBeforeTimestamp: 1_000,
+    notAfterTimestamp: 2_100,
+    requireCompleteWindow: true,
+  }),
+  (error) => error instanceof EvidenceError
+    && error.code === "provider_settlement_search_window_incomplete",
+  "a no-match scan must not release a payment before the complete recovery window is on chain",
+);
 await assert.rejects(
   () => chain.findProviderSettlement({
     payer,

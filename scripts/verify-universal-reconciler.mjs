@@ -165,6 +165,10 @@ const compensated = await seed({
 await ledger.transitionUniversal({
   ...(await ledger.get(compensated.receiptId)),
   state: "compensation_required",
+  settlement: {
+    status: "unknown",
+    recovery: { authorizationNonce: `0x${"55".repeat(32)}` },
+  },
   feeAuthorization: {
     hash: covenantStates.get(compensated.covenantId).feeAuthorizationHash,
     nonce: `0x${"55".repeat(32)}`,
@@ -352,6 +356,31 @@ covenantStates.set(interruptedCovenantId, {
   feeAuthorizationHash: interruptedFeeAuthorization.hash,
 });
 
+const ambiguousPaymentCovenantId = `0x${"fa".repeat(32)}`;
+const ambiguousPaymentPending = {
+  receiptId: "ppc-ambiguous-payment-pending",
+  requestId: "request-ambiguous-payment-pending",
+  paymentId: "payment-ambiguous-payment-pending",
+  state: "pending",
+  liabilityAtomic: "0",
+  providerBondLiabilityAtomic: "500000",
+  feeAuthorization: {
+    hash: `0x${"ab".repeat(32)}`,
+    nonce: `0x${"ac".repeat(32)}`,
+    validBefore: String(Math.floor(Date.parse("2026-07-16T13:05:00.000Z") / 1_000)),
+  },
+  universalCovenant: { covenantId: ambiguousPaymentCovenantId, state: "pending_start" },
+  settlement: {
+    status: "unknown",
+    recovery: { authorizationNonce: `0x${"ac".repeat(32)}` },
+  },
+};
+await ledger.reserve(ambiguousPaymentPending, 0n);
+covenantStates.set(ambiguousPaymentCovenantId, {
+  state: 1,
+  feeAuthorizationHash: ambiguousPaymentPending.feeAuthorization.hash,
+});
+
 const issuer = {
   async getCovenant(covenantId) {
     const value = covenantStates.get(covenantId);
@@ -438,7 +467,7 @@ await assert.rejects(
 
 const result = await reconciler.reconcile();
 assert.equal(result.ok, true);
-assert.equal(result.checked, 14);
+assert.equal(result.checked, 15);
 assert.deepEqual(
   writes.map((write) => write.action).sort(),
   ["cancel", "cancel", "expire", "payout_due", "release", "release", "release", "settle", "settle", "start"],
@@ -459,6 +488,7 @@ assert.equal((await ledger.get(lateA2aNetLoss.receiptId)).state, "payout_due");
 assert.equal((await ledger.get(issuancePending.receiptId)).state, "compensation_required");
 assert.equal(await ledger.get(issuanceAbsent.receiptId), null);
 assert.equal(await ledger.get(interruptedPending.receiptId), null);
+assert.equal((await ledger.get(ambiguousPaymentPending.receiptId)).settlement.status, "unknown");
 assert.ok(result.holds.some((hold) => (
   hold.receiptId === challengeActive.receiptId && hold.reason === "payout_due_challenge_period_active"
 )));
@@ -470,6 +500,10 @@ assert.ok(result.holds.some((hold) => (
 )));
 assert.ok(result.holds.some((hold) => (
   hold.receiptId === issuancePending.receiptId && hold.reason === "coverage_issuance_outcome_pending"
+)));
+assert.ok(result.holds.some((hold) => (
+  hold.receiptId === ambiguousPaymentPending.receiptId
+    && hold.reason === "payment_settlement_reconciliation_pending"
 )));
 
 const before = writes.length;

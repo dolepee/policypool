@@ -5,6 +5,7 @@ import { createLedger } from "./lib/ledger.js";
 import {
   createPaymentService,
   PaymentConfigurationError,
+  PaymentSettlementUnknownError,
   PaymentVerificationError,
 } from "./lib/payment.js";
 import {
@@ -374,6 +375,7 @@ function buildReceipt({
   coverageDeadline,
   coverageEnrollmentClosesAt,
   quote,
+  paymentReceiptTerms,
   universalCovenant = null,
   relayGrantPayload = null,
 }) {
@@ -490,12 +492,16 @@ function buildReceipt({
     servicePayment: {
       verified: true,
       settled: true,
-      network: settlement.network,
+      network: paymentReceiptTerms.network,
       transaction: settlement.transaction,
       payer: settlement.payer,
-      recipient: PAYMENT.payTo,
-      amountAtomic: PAYMENT.amountAtomic,
-      amountUSDT: formatUsdtAtomic(PAYMENT.amountAtomic, PAYMENT.decimals),
+      recipient: paymentReceiptTerms.payTo,
+      asset: paymentReceiptTerms.asset,
+      amountAtomic: paymentReceiptTerms.amountAtomic,
+      amountUSDT: formatUsdtAtomic(
+        BigInt(paymentReceiptTerms.amountAtomic),
+        paymentReceiptTerms.decimals,
+      ),
       transferBlock: settlement.transfer.blockNumber,
     },
     limitations: [
@@ -568,6 +574,138 @@ function rejectPaymentVerification(req, res, error) {
     return paymentRequired(req, res, error.code);
   }
   return paymentRequired(req, res, "payment_verification_failed");
+}
+
+function settlementOutcomeUnknown(res, record) {
+  return sendJson(res, 503, {
+    ok: false,
+    error: "payment_settlement_outcome_unknown",
+    code: "PAYMENT_SETTLEMENT_OUTCOME_UNKNOWN",
+    message: "The payment submission outcome could not be confirmed. The original reservation remains locked while settlement is reconciled.",
+    charged: null,
+    settlement: "unknown",
+    retryable: false,
+    nextAction: "RECONCILE_PAYMENT_BEFORE_RETRY",
+    reconciliation: {
+      method: "REPLAY_EXACT_PAID_REQUEST",
+      submitsPayment: false,
+      submitsSettlement: false,
+    },
+    receiptId: record.receiptId,
+  });
+}
+
+function durableSettlementMarkerUnavailable(res, record) {
+  return sendJson(res, 503, {
+    ok: false,
+    error: "durable_settlement_reconciliation_unavailable",
+    code: "DURABLE_SETTLEMENT_RECONCILIATION_UNAVAILABLE",
+    message: "The payment outcome is unknown and its reconciliation marker could not be confirmed. Do not pay or submit again.",
+    charged: null,
+    settlement: "unknown",
+    retryable: false,
+    nextAction: "MANUAL_PAYMENT_RECONCILIATION_REQUIRED",
+    receiptId: record.receiptId,
+  });
+}
+
+function settlementJournalUnavailable(res, record, releaseConfirmed) {
+  return sendJson(res, 503, {
+    ok: false,
+    error: releaseConfirmed
+      ? "payment_settlement_journal_unavailable"
+      : "durable_ledger_unavailable",
+    code: releaseConfirmed
+      ? "PAYMENT_SETTLEMENT_JOURNAL_UNAVAILABLE"
+      : "DURABLE_LEDGER_UNAVAILABLE",
+    message: releaseConfirmed
+      ? "Settlement was not submitted because the recovery journal could not be persisted. The reservation was released safely."
+      : "Settlement was not submitted, but the pending reservation could not be released. Contact the provider before retrying.",
+    charged: false,
+    settlement: "not_submitted",
+    retryable: releaseConfirmed,
+    nextAction: releaseConfirmed ? "RETRY_SAME_REQUEST" : "CONTACT_PROVIDER",
+    receiptId: record.receiptId,
+  });
+}
+
+function universalCompensationStateUnavailable(res, record) {
+  return sendJson(res, 503, {
+    ok: false,
+    error: "durable_universal_compensation_state_unavailable",
+    code: "DURABLE_UNIVERSAL_COMPENSATION_STATE_UNAVAILABLE",
+    message: "The payment was not settled, but the provider-bond compensation state could not be confirmed. Do not retry payment until the durable record is reconciled.",
+    charged: false,
+    settlement: "not_settled",
+    retryable: false,
+    nextAction: "MANUAL_PROVIDER_BOND_RECONCILIATION_REQUIRED",
+    receiptId: record.receiptId,
+  });
+}
+
+function finalRecordForSettlement(pending, settlement, generatedAt, overrides = {}) {
+  const context = pending.receiptContext;
+  if (!context?.policy) throw new Error("receipt_recovery_context_missing");
+  const universalCovenant = overrides.universalCovenant || null;
+  const relayGrantPayload = overrides.relayGrantPayload || null;
+  const coverageCapAtomic = BigInt(context.coverageCapAtomic);
+  const reserveBalanceAtomic = BigInt(context.reserveBalanceAtomic);
+  const storedRequirements = pending.paymentRequirements || {};
+  const paymentReceiptTerms = pending.paymentReceiptTerms || {
+    network: storedRequirements.network || settlement.network,
+    asset: storedRequirements.asset || settlement.transfer?.asset || PAYMENT.asset,
+    payTo: storedRequirements.payTo || settlement.transfer?.to || PAYMENT.payTo,
+    amountAtomic: String(storedRequirements.amount || settlement.amount),
+    decimals: PAYMENT.decimals,
+  };
+  const receipt = buildReceipt({
+    receiptId: pending.receiptId,
+    input: pending.input,
+    policy: context.policy,
+    guard: pending.guard,
+    targetOrder: pending.targetOrder,
+    payer: pending.payer,
+    coverageCapAtomic,
+    reserveBalanceAtomic,
+    settlement,
+    generatedAt,
+    coverageDeadline: context.coverageDeadline,
+    coverageEnrollmentClosesAt: context.coverageEnrollmentClosesAt,
+    quote: context.quote,
+    paymentReceiptTerms,
+    universalCovenant,
+    relayGrantPayload,
+  });
+  return {
+    ...pending,
+    state: pending.guard.verdict === "ALLOW"
+      ? context.policy.clockMode === "policypool_relay" ? "pending_start" : "active"
+      : "declined",
+    finalizedAt: generatedAt,
+    liabilityAtomic: context.policy.onchainPolicyId ? "0" : coverageCapAtomic.toString(),
+    providerBondLiabilityAtomic: context.policy.onchainPolicyId ? coverageCapAtomic.toString() : "0",
+    universalCovenant,
+    relayGrantPayload,
+    settlement: {
+      network: settlement.network,
+      transaction: settlement.transaction,
+      payer: settlement.payer,
+      amountAtomic: settlement.amount,
+      transfer: settlement.transfer,
+    },
+    paymentResponseHeader: settlement.responseHeader,
+    receipt,
+  };
+}
+
+function confirmedFinalizedSettlement(record, expected) {
+  return Boolean(
+    record?.receipt
+      && record.receiptId === expected.receiptId
+      && record.paymentId === expected.paymentId
+      && String(record.settlement?.transaction || "").toLowerCase()
+        === String(expected.settlement?.transaction || "").toLowerCase(),
+  );
 }
 
 export function createHandler(dependencies = {}) {
@@ -651,6 +789,91 @@ export function createHandler(dependencies = {}) {
         const existingPayment = await ledger.findByPaymentId(paymentId);
         if (existingPayment?.receipt) {
           return respond(res, { ...existingPayment, replayed: true });
+        }
+        if (["submitting", "unknown"].includes(existingPayment?.settlement?.status)) {
+          let reconciliation;
+          try {
+            reconciliation = await payment.reconcileSettlement(
+              existingPayment,
+              existingPayment.paymentRequirements,
+            );
+          } catch {
+            return settlementOutcomeUnknown(res, existingPayment);
+          }
+          if (reconciliation.status === "pending") {
+            return settlementOutcomeUnknown(res, existingPayment);
+          }
+          if (reconciliation.status === "not_found") {
+            if (existingPayment.universalCovenant?.covenantId) {
+              const compensationPending = {
+                ...existingPayment,
+                state: "compensation_required",
+                compensation: {
+                  reason: "coverage_fee_not_settled",
+                  createdAt: new Date(now()).toISOString(),
+                  feeAuthorization: existingPayment.feeAuthorization,
+                },
+              };
+              try {
+                const stored = await ledger.transitionUniversal(compensationPending, ["pending"]);
+                if (stored?.state !== "compensation_required") {
+                  return durableSettlementMarkerUnavailable(res, existingPayment);
+                }
+              } catch {
+                return durableSettlementMarkerUnavailable(res, existingPayment);
+              }
+              return sendJson(res, 503, {
+                ok: false,
+                error: "provider_bond_cancellation_pending_authorization_expiry",
+                charged: false,
+                receiptId: existingPayment.receiptId,
+                retryAfter: new Date(
+                  Number(existingPayment.feeAuthorization.validBefore) * 1_000,
+                ).toISOString(),
+              });
+            }
+            try {
+              const released = await ledger.release(existingPayment);
+              if (released?.status !== "released") {
+                return durableSettlementMarkerUnavailable(res, existingPayment);
+              }
+            } catch {
+              return durableSettlementMarkerUnavailable(res, existingPayment);
+            }
+            return paymentRequired(
+              req,
+              res,
+              "payment_not_settled_after_reconciliation",
+              "",
+            );
+          }
+          let finalRecord;
+          try {
+            finalRecord = finalRecordForSettlement(
+              existingPayment,
+              reconciliation.settlement,
+              new Date(now()).toISOString(),
+              {
+                universalCovenant: existingPayment.universalCovenant,
+                relayGrantPayload: existingPayment.relayGrantPayload,
+              },
+            );
+            const finalized = await ledger.finalize(finalRecord);
+            if (!confirmedFinalizedSettlement(finalized, finalRecord)) {
+              throw new Error("payment_settlement_finalization_not_confirmed");
+            }
+            finalRecord = finalized;
+          } catch (error) {
+            return sendJson(res, 503, {
+              ok: false,
+              error: "payment_settled_receipt_pending_reconciliation",
+              charged: true,
+              paymentTransaction: reconciliation.settlement.transaction,
+              receiptId: existingPayment.receiptId,
+              detail: error instanceof Error ? error.message : String(error),
+            });
+          }
+          return respond(res, finalRecord);
         }
         if (existingPayment?.state === "compensation_required") {
           return sendJson(res, 503, {
@@ -907,6 +1130,27 @@ export function createHandler(dependencies = {}) {
       quoteId: quote?.id || null,
       feeAuthorization,
       universalCovenant: plannedUniversalCovenant,
+      paymentRequirements: requirements,
+      paymentReceiptTerms: {
+        network: requirements.network,
+        asset: requirements.asset,
+        payTo: requirements.payTo,
+        amountAtomic: String(requirements.amount),
+        decimals: PAYMENT.decimals,
+      },
+      receiptContext: {
+        policy,
+        coverageCapAtomic: coverageCapAtomic.toString(),
+        reserveBalanceAtomic: reserveBalanceAtomic.toString(),
+        coverageDeadline,
+        coverageEnrollmentClosesAt,
+        quote: quote ? {
+          id: quote.id,
+          source: quote.source,
+          issuedAt: quote.issuedAt,
+          expiresAt: quote.expiresAt,
+        } : null,
+      },
     };
 
     let reservation;
@@ -964,7 +1208,7 @@ export function createHandler(dependencies = {}) {
             expiresAt: coverageEnrollmentClosesAt,
           }));
         }
-        pending = { ...pending, universalCovenant };
+        pending = { ...pending, universalCovenant, relayGrantPayload };
         const attached = await ledger.transitionUniversal(pending, ["pending"]);
         if (attached?.universalCovenant?.transactionHash !== universalCovenant.transactionHash) {
           throw new UniversalIssuerError("coverage_manager_outbox_update_failed");
@@ -1004,10 +1248,96 @@ export function createHandler(dependencies = {}) {
     }
 
     let settlement;
+    const settlementAttemptedAt = now();
+    let settlementRecovery = null;
+    try {
+      settlementRecovery = payment.settlementRecovery(
+        verified,
+        requirements,
+        null,
+        settlementAttemptedAt,
+      );
+      const settlementSubmitting = {
+        ...pending,
+        settlement: {
+          status: "submitting",
+          attemptedAt: new Date(settlementAttemptedAt).toISOString(),
+          recovery: settlementRecovery,
+        },
+      };
+      const stored = await ledger.markSettlementState(settlementSubmitting);
+      if (stored?.settlement?.status !== "submitting") {
+        throw new Error("settlement_submission_journal_not_persisted");
+      }
+      pending = stored;
+    } catch {
+      if (universalCovenant?.covenantId) {
+        const compensationPending = {
+          ...pending,
+          state: "compensation_required",
+          compensation: {
+            reason: "coverage_fee_not_submitted",
+            createdAt: new Date(now()).toISOString(),
+            feeAuthorization,
+          },
+        };
+        try {
+          const stored = await ledger.transitionUniversal(compensationPending, ["pending"]);
+          if (stored?.state !== "compensation_required") {
+            return universalCompensationStateUnavailable(res, pending);
+          }
+        } catch {
+          return universalCompensationStateUnavailable(res, pending);
+        }
+        return sendJson(res, 503, {
+          ok: false,
+          error: "provider_bond_cancellation_pending_authorization_expiry",
+          charged: false,
+          receiptId,
+          retryAfter: new Date(Number(feeAuthorization.validBefore) * 1_000).toISOString(),
+        });
+      }
+      let releaseConfirmed = false;
+      try {
+        const released = await ledger.release(pending);
+        releaseConfirmed = released?.status === "released";
+      } catch {
+        // No settlement was attempted. Preserve the explicit ledger failure so
+        // an operator can clear the untouched reservation before any retry.
+      }
+      return settlementJournalUnavailable(res, pending, releaseConfirmed);
+    }
     try {
       settlement = await payment.settle(verified, requirements);
     } catch (error) {
       let compensationPending = pending;
+      if (error instanceof PaymentSettlementUnknownError) {
+        const settlementPending = {
+          ...pending,
+          settlement: {
+            status: "unknown",
+            attemptedAt: new Date(settlementAttemptedAt).toISOString(),
+            error: error.code,
+            recovery: {
+              ...settlementRecovery,
+              transaction: error.transaction || settlementRecovery?.transaction || null,
+            },
+          },
+        };
+        try {
+          const stored = await ledger.markSettlementState(settlementPending);
+          if (stored?.settlement?.status !== "unknown") {
+            return settlementOutcomeUnknown(res, pending);
+          }
+          pending = stored;
+        } catch {
+          // The pre-submission marker is already durable and contains the
+          // authorization nonce and bounded scan window. A replay can still
+          // reconcile safely even if enriching it with the error/tx failed.
+          return settlementOutcomeUnknown(res, pending);
+        }
+        return settlementOutcomeUnknown(res, pending);
+      }
       if (universalCovenant?.covenantId) {
         compensationPending = {
           ...pending,
@@ -1018,7 +1348,14 @@ export function createHandler(dependencies = {}) {
             feeAuthorization,
           },
         };
-        await ledger.transitionUniversal(compensationPending, ["pending"]).catch(() => undefined);
+        try {
+          const stored = await ledger.transitionUniversal(compensationPending, ["pending"]);
+          if (stored?.state !== "compensation_required") {
+            return universalCompensationStateUnavailable(res, pending);
+          }
+        } catch {
+          return universalCompensationStateUnavailable(res, pending);
+        }
         return sendJson(res, 503, {
           ok: false,
           error: "provider_bond_cancellation_pending_authorization_expiry",
@@ -1033,47 +1370,19 @@ export function createHandler(dependencies = {}) {
       return paymentRequired(req, res, "payment_settlement_failed");
     }
 
-    const receipt = buildReceipt({
-      receiptId,
-      input,
-      policy,
-      guard,
-      targetOrder,
-      payer: verified.payer,
-      coverageCapAtomic,
-      reserveBalanceAtomic,
+    let finalRecord = finalRecordForSettlement(
+      pending,
       settlement,
-      generatedAt: new Date(now()).toISOString(),
-      coverageDeadline,
-      coverageEnrollmentClosesAt,
-      quote,
-      universalCovenant,
-      relayGrantPayload,
-    });
-    const finalRecord = {
-      ...pending,
-      state: guard.verdict === "ALLOW"
-        ? policy.clockMode === "policypool_relay" ? "pending_start" : "active"
-        : "declined",
-      finalizedAt: new Date(now()).toISOString(),
-      liabilityAtomic: policy.onchainPolicyId ? "0" : coverageCapAtomic.toString(),
-      providerBondLiabilityAtomic: policy.onchainPolicyId ? coverageCapAtomic.toString() : "0",
-      universalCovenant,
-      relayGrantPayload,
-      guard,
-      settlement: {
-        network: settlement.network,
-        transaction: settlement.transaction,
-        payer: settlement.payer,
-        amountAtomic: settlement.amount,
-        transfer: settlement.transfer,
-      },
-      paymentResponseHeader: settlement.responseHeader,
-      receipt,
-    };
+      new Date(now()).toISOString(),
+      { universalCovenant, relayGrantPayload },
+    );
 
     try {
-      await ledger.finalize(finalRecord);
+      const finalized = await ledger.finalize(finalRecord);
+      if (!confirmedFinalizedSettlement(finalized, finalRecord)) {
+        throw new Error("payment_settlement_finalization_not_confirmed");
+      }
+      finalRecord = finalized;
     } catch (error) {
       return sendJson(res, 503, {
         ok: false,

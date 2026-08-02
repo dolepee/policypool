@@ -25,7 +25,9 @@ const FINALIZE_SCRIPT = `
 local current = redis.call('GET', KEYS[1])
 if not current then return {'missing'} end
 local decoded = cjson.decode(current)
-if decoded.state ~= 'pending' then return {'existing', current} end
+if decoded.state ~= 'pending' and decoded.state ~= 'compensation_required' then
+  return {'existing', current}
+end
 local cap = tonumber(ARGV[2])
 redis.call('INCRBY', KEYS[2], -cap)
 if ARGV[3] == 'active' then redis.call('INCRBY', KEYS[3], cap) end
@@ -88,6 +90,15 @@ for index = 2, #ARGV do
   if decoded.state == ARGV[index] then allowed = true break end
 end
 if not allowed then return {'state_mismatch', current} end
+redis.call('SET', KEYS[1], ARGV[1])
+return {'updated', ARGV[1]}
+`;
+
+const MARK_SETTLEMENT_STATE_SCRIPT = `
+local current = redis.call('GET', KEYS[1])
+if not current then return {'missing'} end
+local decoded = cjson.decode(current)
+if decoded.state ~= 'pending' then return {'state_mismatch', current} end
 redis.call('SET', KEYS[1], ARGV[1])
 return {'updated', ARGV[1]}
 `;
@@ -161,7 +172,7 @@ export class MemoryLedger {
   async finalize(record) {
     const current = this.records.get(record.receiptId);
     if (!current) throw new Error("ledger_record_missing");
-    if (current.state !== "pending") return current;
+    if (!["pending", "compensation_required"].includes(current.state)) return current;
     const cap = BigInt(current.liabilityAtomic);
     this.pendingAtomic -= cap;
     if (record.state === "active") this.activeAtomic += cap;
@@ -171,11 +182,26 @@ export class MemoryLedger {
 
   async release(record) {
     const current = this.records.get(record.receiptId);
-    if (!current || !["pending", "compensation_required"].includes(current.state)) return;
+    if (!current) return { status: "missing" };
+    if (!["pending", "compensation_required"].includes(current.state)) {
+      return { status: "not_pending" };
+    }
     this.pendingAtomic -= BigInt(current.liabilityAtomic);
     this.records.delete(record.receiptId);
     this.requests.delete(record.requestId);
     this.payments.delete(record.paymentId);
+    return { status: "released" };
+  }
+
+  async markSettlementState(record) {
+    const current = this.records.get(record.receiptId);
+    if (!current) throw new Error("ledger_record_missing");
+    if (current.state !== "pending") return current;
+    if (!["submitting", "unknown"].includes(record.settlement?.status)) {
+      throw new Error("settlement_recovery_state_required");
+    }
+    this.records.set(record.receiptId, structuredClone(record));
+    return record;
   }
 
   async markPayoutDue(record) {
@@ -314,12 +340,24 @@ export class RedisLedger {
   }
 
   async release(record) {
-    await this.redis.eval(RELEASE_SCRIPT, [
+    const result = await this.redis.eval(RELEASE_SCRIPT, [
       this.key("request", record.requestId),
       this.key("payment", record.paymentId),
       this.key("receipt", record.receiptId),
       this.key("liability", "pending"),
     ], [record.liabilityAtomic]);
+    return { status: String(result[0]) };
+  }
+
+  async markSettlementState(record) {
+    if (!["submitting", "unknown"].includes(record.settlement?.status)) {
+      throw new Error("settlement_recovery_state_required");
+    }
+    const result = await this.redis.eval(MARK_SETTLEMENT_STATE_SCRIPT, [
+      this.key("receipt", record.receiptId),
+    ], [JSON.stringify(record)]);
+    if (String(result[0]) === "missing") throw new Error("ledger_record_missing");
+    return parseRecord(result[1]);
   }
 
   async markPayoutDue(record) {
