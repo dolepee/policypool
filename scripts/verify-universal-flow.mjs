@@ -75,7 +75,7 @@ function runtime({
   transitionUniversalFailsOnCall = 0,
 } = {}) {
   const ledger = new MemoryLedger();
-  const calls = { issue: 0, cancel: 0, settle: 0, reconcile: 0 };
+  const calls = { issue: 0, cancel: 0, settle: 0, reconcile: 0, recoveryNonces: [] };
   const chain = {
     async getReserveBalance() { return 9_000_000n; },
     async getJobStatus() { return 1; },
@@ -110,6 +110,7 @@ function runtime({
     },
     async findProviderSettlement({ payer, payTo, asset, amountAtomic, authorizationNonce }) {
       calls.reconcile += 1;
+      calls.recoveryNonces.push(authorizationNonce || null);
       if (recoveredSettlementStatus === "pending") {
         const error = new Error("provider_settlement_search_window_incomplete");
         error.code = "provider_settlement_search_window_incomplete";
@@ -242,14 +243,19 @@ const failedPaid = await callHandler(failed.handler, {
 });
 assert.equal(failed.calls.issue, 1);
 assert.equal(failedPaid.statusCode, 503);
-assert.equal(failedPaid.json().error, "provider_bond_cancellation_pending_authorization_expiry");
-assert.equal(failedPaid.json().charged, false);
+assert.equal(failedPaid.headers["payment-required"], undefined);
+assert.equal(failedPaid.headers["payment-response"], undefined);
+assert.equal(failedPaid.headers["x-payment-response"], undefined);
+assert.equal(failedPaid.json().error, "payment_settlement_outcome_unknown");
+assert.equal(failedPaid.json().charged, null);
+assert.equal(failedPaid.json().settlement, "unknown");
 assert.equal(failed.calls.cancel, 0);
-const [compensationRecord] = await failed.ledger.list();
-assert.equal(compensationRecord.state, "compensation_required");
-assert.equal(compensationRecord.compensation.reason, "coverage_fee_not_settled");
-assert.match(compensationRecord.compensation.feeAuthorization.hash, /^0x[a-f0-9]{64}$/);
-assert.equal(compensationRecord.universalCovenant.covenantId, `0x${"34".repeat(32)}`);
+const [failedPending] = await failed.ledger.list();
+assert.equal(failedPending.state, "pending");
+assert.equal(failedPending.settlement.status, "unknown");
+assert.equal(failedPending.compensation, undefined);
+assert.equal(failedPending.universalCovenant.covenantId, `0x${"34".repeat(32)}`);
+assert.equal(failedPending.providerBondLiabilityAtomic, "500000");
 
 const lateMined = runtime({ settlementFails: true, recoveredSettlementStatus: "settled" });
 const lateMinedChallengeResponse = await callHandler(lateMined.handler, { method: "POST", body });
@@ -263,9 +269,13 @@ const lateMinedRequest = {
 };
 const lateMinedFirst = await callHandler(lateMined.handler, lateMinedRequest);
 assert.equal(lateMinedFirst.statusCode, 503);
-assert.equal(lateMinedFirst.json().charged, false);
-assert.equal((await lateMined.ledger.list())[0].state, "compensation_required");
-assert.equal((await lateMined.ledger.list())[0].settlement.status, "submitting");
+assert.equal(lateMinedFirst.headers["payment-required"], undefined);
+assert.equal(lateMinedFirst.headers["payment-response"], undefined);
+assert.equal(lateMinedFirst.headers["x-payment-response"], undefined);
+assert.equal(lateMinedFirst.json().error, "payment_settlement_outcome_unknown");
+assert.equal(lateMinedFirst.json().charged, null);
+assert.equal((await lateMined.ledger.list())[0].state, "pending");
+assert.equal((await lateMined.ledger.list())[0].settlement.status, "unknown");
 const lateMinedRecovered = await callHandler(lateMined.handler, lateMinedRequest);
 assert.equal(lateMinedRecovered.statusCode, 200);
 assert.equal(lateMinedRecovered.json().receipt.version, "0.4.0");
@@ -274,12 +284,17 @@ assert.equal((await lateMined.ledger.list())[0].state, "pending_start");
 assert.ok((await lateMined.ledger.list())[0].receipt);
 assert.equal(lateMined.calls.settle, 1, "a recovered late-mined fee must never settle twice");
 assert.equal(lateMined.calls.reconcile, 1);
+assert.deepEqual(lateMined.calls.recoveryNonces, [
+  `0x${sha256("nonce:universal-late-mined")}`,
+]);
 
-let redisStored = JSON.stringify({
-  ...compensationRecord,
+const compensationRecord = {
   receiptId: "redis-compensation",
+  state: "compensation_required",
+  liabilityAtomic: "0",
   settlement: { status: "submitting" },
-});
+};
+let redisStored = JSON.stringify(compensationRecord);
 const redis = {
   async eval(script, keys, argv) {
     assert.match(
@@ -308,7 +323,8 @@ assert.equal(redisFinal.state, "pending_start");
 assert.equal(redisFinal.receipt.receiptId, "redis-compensation");
 
 const failedCompensationWrite = runtime({
-  settlementFails: true,
+  settlementThrows: true,
+  recoveredSettlementStatus: "not_found",
   transitionUniversalFailsOnCall: 2,
 });
 const failedCompensationChallengeResponse = await callHandler(
@@ -330,21 +346,39 @@ const failedCompensationResponse = await callHandler(failedCompensationWrite.han
 });
 assert.equal(failedCompensationResponse.statusCode, 503);
 assert.equal(failedCompensationResponse.headers["payment-required"], undefined);
-assert.equal(
-  failedCompensationResponse.json().error,
-  "durable_universal_compensation_state_unavailable",
+assert.equal(failedCompensationResponse.json().error, "payment_settlement_outcome_unknown");
+assert.equal(failedCompensationResponse.json().charged, null);
+const failedCompensationRecovery = await callHandler(
+  failedCompensationWrite.handler,
+  {
+    method: "POST",
+    body,
+    headers: {
+      "payment-signature": paymentHeader(
+        "universal-compensation-write-failure",
+        failedCompensationChallenge.accepts[0],
+      ),
+    },
+  },
 );
-assert.equal(failedCompensationResponse.json().charged, false);
-assert.equal(failedCompensationResponse.json().settlement, "not_settled");
-assert.equal(failedCompensationResponse.json().retryable, false);
+assert.equal(failedCompensationRecovery.statusCode, 503);
+assert.equal(failedCompensationRecovery.headers["payment-required"], undefined);
 assert.equal(
-  failedCompensationResponse.json().nextAction,
-  "MANUAL_PROVIDER_BOND_RECONCILIATION_REQUIRED",
+  failedCompensationRecovery.json().error,
+  "durable_settlement_reconciliation_unavailable",
+);
+assert.equal(failedCompensationRecovery.json().charged, null);
+assert.equal(failedCompensationRecovery.json().settlement, "unknown");
+assert.equal(failedCompensationRecovery.json().retryable, false);
+assert.equal(
+  failedCompensationRecovery.json().nextAction,
+  "MANUAL_PAYMENT_RECONCILIATION_REQUIRED",
 );
 const [failedCompensationRecord] = await failedCompensationWrite.ledger.list();
 assert.equal(failedCompensationRecord.state, "pending");
-assert.equal(failedCompensationRecord.settlement.status, "submitting");
+assert.equal(failedCompensationRecord.settlement.status, "unknown");
 assert.equal(failedCompensationWrite.calls.settle, 1);
+assert.equal(failedCompensationWrite.calls.reconcile, 1);
 
 const ambiguous = runtime({ settlementThrows: true, recoveredSettlementStatus: "settled" });
 const ambiguousChallengeResponse = await callHandler(ambiguous.handler, { method: "POST", body });
@@ -375,7 +409,7 @@ assert.equal(ambiguous.calls.settle, 1, "universal recovery must never settle tw
 assert.equal(ambiguous.calls.reconcile, 1);
 assert.equal((await ambiguous.ledger.list())[0].state, "pending_start");
 
-const universalNoMatch = runtime({ settlementThrows: true, recoveredSettlementStatus: "not_found" });
+const universalNoMatch = runtime({ settlementFails: true, recoveredSettlementStatus: "not_found" });
 const universalNoMatchChallengeResponse = await callHandler(
   universalNoMatch.handler,
   { method: "POST", body },
@@ -390,7 +424,19 @@ const universalNoMatchRequest = {
     "payment-signature": paymentHeader("universal-no-match", universalNoMatchChallenge.accepts[0]),
   },
 };
-assert.equal((await callHandler(universalNoMatch.handler, universalNoMatchRequest)).statusCode, 503);
+const universalNoMatchUnknown = await callHandler(
+  universalNoMatch.handler,
+  universalNoMatchRequest,
+);
+assert.equal(universalNoMatchUnknown.statusCode, 503);
+assert.equal(universalNoMatchUnknown.headers["payment-required"], undefined);
+assert.equal(universalNoMatchUnknown.headers["payment-response"], undefined);
+assert.equal(universalNoMatchUnknown.headers["x-payment-response"], undefined);
+assert.equal(universalNoMatchUnknown.json().charged, null);
+assert.equal(universalNoMatchUnknown.json().settlement, "unknown");
+assert.equal((await universalNoMatch.ledger.list())[0].state, "pending");
+assert.equal((await universalNoMatch.ledger.list())[0].settlement.status, "unknown");
+assert.equal((await universalNoMatch.ledger.list())[0].compensation, undefined);
 const universalNoMatchRecovered = await callHandler(
   universalNoMatch.handler,
   universalNoMatchRequest,
@@ -422,4 +468,4 @@ assert.equal(uncertainRecord.compensation.reason, "coverage_issuance_outcome_unc
 assert.equal(uncertainRecord.universalCovenant.covenantId, `0x${"34".repeat(32)}`);
 
 assert.equal(paymentRequirements().amount, "100000");
-console.log("PolicyPool universal flow passed: provider bond locks before charge, ambiguous fees recover without resubmission, and definite failures remain authorization-bound compensation.");
+console.log("PolicyPool universal flow passed: provider bond locks before charge, every post-submit uncertainty remains nonce-recoverable, and only a complete no-match enters compensation.");

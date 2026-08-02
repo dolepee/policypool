@@ -208,15 +208,15 @@ export function createPaymentService({ facilitator, chain, environment = process
         error instanceof Error ? error.message : String(error),
       );
     }
-    if (!result?.success && isBytes32(result?.transaction)) {
+    if (!result?.success) {
+      // settle() is the submission boundary. A facilitator rejection received
+      // after that call is not proof that the authorization was never mined;
+      // only the nonce-bound chain scan can establish that safely.
       throw new PaymentSettlementUnknownError(
         result?.errorReason || "payment_settlement_outcome_unknown",
         result?.errorMessage,
-        result.transaction,
+        result?.transaction,
       );
-    }
-    if (!result?.success) {
-      throw new PaymentVerificationError(result?.errorReason || "payment_settlement_failed", result?.errorMessage);
     }
     if (!isBytes32(result.transaction)) {
       throw new PaymentSettlementUnknownError(
