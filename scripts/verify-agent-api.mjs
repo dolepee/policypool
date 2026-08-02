@@ -369,6 +369,21 @@ try {
   );
   assert.doesNotMatch(JSON.stringify(relayedBody), /vercel\.app/i);
 
+  const prefixPreservingUnpaid = await callHandler(primary.handler, {
+    method: "POST",
+    url: "/policypool/api/covered-job-receipt",
+    headers: { "x-forwarded-host": "attacker.invalid" },
+    body: sampleBody,
+  });
+  const prefixPreservingChallenge = decodePaymentRequired(
+    prefixPreservingUnpaid.headers["payment-required"],
+  );
+  assert.equal(
+    prefixPreservingChallenge.resource.url,
+    "https://okx-agent-review-relay.onrender.com/policypool/api/covered-job-receipt",
+  );
+  assert.doesNotMatch(prefixPreservingChallenge.resource.url, /policypool\/policypool/);
+
   const relayedRuntime = makeRuntime();
   const relayedPaid = await callHandler(relayedRuntime.handler, {
     method: "POST",

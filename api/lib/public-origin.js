@@ -89,7 +89,13 @@ export function requestPublicPathUrl(req, pathname, environment = process.env) {
   const origin = requestPublicOrigin(req, environment);
   const requested = new URL(pathname, `${DEFAULT_PUBLIC_ORIGIN}/`);
   const prefix = publicPathPrefix(environment);
-  return new URL(`${prefix}${requested.pathname}${requested.search}`, `${origin}/`);
+  const publicPath = prefix && (
+    requested.pathname === prefix
+    || requested.pathname.startsWith(`${prefix}/`)
+  )
+    ? requested.pathname
+    : `${prefix}${requested.pathname}`;
+  return new URL(`${publicPath}${requested.search}`, `${origin}/`);
 }
 
 export function requestPublicUrl(req, fallbackPath, environment = process.env) {

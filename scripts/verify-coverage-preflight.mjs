@@ -207,6 +207,25 @@ try {
     "https://okx-agent-review-relay.onrender.com/policypool/api/covered-job-receipt",
   );
   assert.doesNotMatch(JSON.stringify(relayedEligible.json()), /vercel\.app/i);
+  assert.doesNotMatch(relayedEligible.json().paidRequest.endpoint, /policypool\/policypool/);
+
+  const rewrittenEligible = await callHandler(handler, {
+    method: "POST",
+    url: "/api/coverage-preflight",
+    headers: { host: "attacker.invalid" },
+    body: {
+      targetAgent: "GlassDesk#3465",
+      taskReference: task.publicUrl,
+      requestedCoverageUSDT: "0.5",
+    },
+  });
+  assert.equal(rewrittenEligible.statusCode, 200);
+  const rewrittenEndpoint = new URL(rewrittenEligible.json().paidRequest.endpoint);
+  assert.equal(
+    `${rewrittenEndpoint.origin}${rewrittenEndpoint.pathname}`,
+    "https://okx-agent-review-relay.onrender.com/policypool/api/covered-job-receipt",
+  );
+  assert.doesNotMatch(rewrittenEligible.json().paidRequest.endpoint, /policypool\/policypool/);
 } finally {
   if (typeof previousPublicOrigin === "undefined") delete process.env.POLICYPOOL_PUBLIC_ORIGIN;
   else process.env.POLICYPOOL_PUBLIC_ORIGIN = previousPublicOrigin;

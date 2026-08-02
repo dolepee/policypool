@@ -25,6 +25,15 @@ assert.equal(
   "https://okx-agent-review-relay.onrender.com/policypool/api/covered-job-receipt?quote=bound",
 );
 assert.equal(
+  requestPublicUrl(
+    { url: "/policypool/api/covered-job-receipt?quote=bound", headers: {} },
+    "/api/covered-job-receipt",
+    relayed,
+  ).toString(),
+  "https://okx-agent-review-relay.onrender.com/policypool/api/covered-job-receipt?quote=bound",
+  "a prefix-preserving proxy path must not duplicate the configured prefix",
+);
+assert.equal(
   requestPublicPathUrl(
     { url: "/api/coverage-preflight?attacker=1", headers: {} },
     "/api/covered-job-receipt",
