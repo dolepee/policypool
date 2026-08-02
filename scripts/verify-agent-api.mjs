@@ -124,13 +124,20 @@ async function verifyMarketplaceProbeContract(handler) {
   }
 }
 
-function makePaymentHeader(tag, accepted = paymentRequirements()) {
+function makePaymentHeader(
+  tag,
+  accepted = paymentRequirements(),
+  validBefore = Math.floor(FIXED_NOW / 1_000) + Number(accepted.maxTimeoutSeconds || 600),
+) {
   return encodePaymentSignatureHeader({
     x402Version: 2,
     accepted,
     payload: {
       signature: `0x${sha256(tag).padEnd(130, "0").slice(0, 130)}`,
-      authorization: { nonce: `0x${sha256(`nonce:${tag}`)}` },
+      authorization: {
+        nonce: `0x${sha256(`nonce:${tag}`)}`,
+        validBefore: String(validBefore),
+      },
     },
   });
 }
@@ -1160,7 +1167,12 @@ assert.equal((await restartedAfterSubmission.ledger.stats()).pendingAtomic, "0")
 assert.equal((await restartedAfterSubmission.ledger.stats()).activeAtomic, "1000000");
 
 const ambiguousSettlement = makeRuntime({ settlementThrows: true });
-const ambiguousPaymentHeader = makePaymentHeader("settlement-unknown");
+const longLivedAuthorizationExpiry = Math.floor(FIXED_NOW / 1_000) + 15 * 60;
+const ambiguousPaymentHeader = makePaymentHeader(
+  "settlement-unknown",
+  paymentRequirements(),
+  longLivedAuthorizationExpiry,
+);
 const ambiguousSettlementRequest = {
   method: "POST",
   headers: { "payment-signature": ambiguousPaymentHeader },
@@ -1192,6 +1204,11 @@ assert.deepEqual(
 );
 const ambiguousReceiptId = ambiguousSettlementResponse.json().receiptId;
 assert.ok(ambiguousReceiptId);
+assert.equal(
+  (await ambiguousSettlement.ledger.get(ambiguousReceiptId)).settlement.recovery.notAfterTimestamp,
+  longLivedAuthorizationExpiry + 60,
+  "recovery must remain open through the signed authorization expiry plus finality margin",
+);
 assert.equal((await ambiguousSettlement.ledger.stats()).pendingAtomic, "1000000");
 assert.equal((await ambiguousSettlement.ledger.stats()).recordCount, 1);
 

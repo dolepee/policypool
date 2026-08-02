@@ -271,9 +271,18 @@ export function createPaymentService({ facilitator, chain, environment = process
   }
 
   function settlementRecovery(verified, requirements, error, attemptedAtMs) {
-    const nonce = verified?.payload?.payload?.authorization?.nonce;
+    const authorization = verified?.payload?.payload?.authorization;
+    const nonce = authorization?.nonce;
     const attemptedAtSeconds = Math.floor(Number(attemptedAtMs) / 1_000);
     const timeoutSeconds = Number(requirements?.maxTimeoutSeconds);
+    let validBeforeSeconds;
+    try {
+      const validBefore = BigInt(authorization?.validBefore);
+      if (validBefore > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("out_of_range");
+      validBeforeSeconds = Number(validBefore);
+    } catch {
+      throw new PaymentVerificationError("payment_settlement_recovery_expiry_invalid");
+    }
     if (!isBytes32(nonce)) {
       throw new PaymentVerificationError("payment_settlement_recovery_nonce_missing");
     }
@@ -283,11 +292,21 @@ export function createPaymentService({ facilitator, chain, environment = process
     if (!Number.isSafeInteger(timeoutSeconds) || timeoutSeconds <= 0 || timeoutSeconds > 15 * 60) {
       throw new PaymentVerificationError("payment_settlement_recovery_window_invalid");
     }
+    if (
+      !Number.isSafeInteger(validBeforeSeconds)
+      || validBeforeSeconds <= attemptedAtSeconds
+      || validBeforeSeconds > attemptedAtSeconds + 15 * 60
+    ) {
+      throw new PaymentVerificationError("payment_settlement_recovery_expiry_invalid");
+    }
     return {
       authorizationNonce: nonce,
       transaction: error instanceof PaymentSettlementUnknownError ? error.transaction : null,
       notBeforeTimestamp: attemptedAtSeconds - 30,
-      notAfterTimestamp: attemptedAtSeconds + timeoutSeconds + 60,
+      // A facilitator can submit at any point while the signed authorization is
+      // valid. Do not conclude "not found" until that spend window plus the
+      // bounded chain-observation margin is complete.
+      notAfterTimestamp: validBeforeSeconds + 60,
     };
   }
 
