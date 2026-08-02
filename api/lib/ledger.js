@@ -25,7 +25,9 @@ const FINALIZE_SCRIPT = `
 local current = redis.call('GET', KEYS[1])
 if not current then return {'missing'} end
 local decoded = cjson.decode(current)
-if decoded.state ~= 'pending' then return {'existing', current} end
+if decoded.state ~= 'pending' and decoded.state ~= 'compensation_required' then
+  return {'existing', current}
+end
 local cap = tonumber(ARGV[2])
 redis.call('INCRBY', KEYS[2], -cap)
 if ARGV[3] == 'active' then redis.call('INCRBY', KEYS[3], cap) end
@@ -170,7 +172,7 @@ export class MemoryLedger {
   async finalize(record) {
     const current = this.records.get(record.receiptId);
     if (!current) throw new Error("ledger_record_missing");
-    if (current.state !== "pending") return current;
+    if (!["pending", "compensation_required"].includes(current.state)) return current;
     const cap = BigInt(current.liabilityAtomic);
     this.pendingAtomic -= cap;
     if (record.state === "active") this.activeAtomic += cap;

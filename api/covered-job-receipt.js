@@ -698,6 +698,16 @@ function finalRecordForSettlement(pending, settlement, generatedAt, overrides = 
   };
 }
 
+function confirmedFinalizedSettlement(record, expected) {
+  return Boolean(
+    record?.receipt
+      && record.receiptId === expected.receiptId
+      && record.paymentId === expected.paymentId
+      && String(record.settlement?.transaction || "").toLowerCase()
+        === String(expected.settlement?.transaction || "").toLowerCase(),
+  );
+}
+
 export function createHandler(dependencies = {}) {
   let runtimeChain = dependencies.chain;
   let runtimeLedger = dependencies.ledger;
@@ -848,7 +858,11 @@ export function createHandler(dependencies = {}) {
                 relayGrantPayload: existingPayment.relayGrantPayload,
               },
             );
-            finalRecord = await ledger.finalize(finalRecord);
+            const finalized = await ledger.finalize(finalRecord);
+            if (!confirmedFinalizedSettlement(finalized, finalRecord)) {
+              throw new Error("payment_settlement_finalization_not_confirmed");
+            }
+            finalRecord = finalized;
           } catch (error) {
             return sendJson(res, 503, {
               ok: false,
@@ -1356,7 +1370,7 @@ export function createHandler(dependencies = {}) {
       return paymentRequired(req, res, "payment_settlement_failed");
     }
 
-    const finalRecord = finalRecordForSettlement(
+    let finalRecord = finalRecordForSettlement(
       pending,
       settlement,
       new Date(now()).toISOString(),
@@ -1364,7 +1378,11 @@ export function createHandler(dependencies = {}) {
     );
 
     try {
-      await ledger.finalize(finalRecord);
+      const finalized = await ledger.finalize(finalRecord);
+      if (!confirmedFinalizedSettlement(finalized, finalRecord)) {
+        throw new Error("payment_settlement_finalization_not_confirmed");
+      }
+      finalRecord = finalized;
     } catch (error) {
       return sendJson(res, 503, {
         ok: false,

@@ -151,6 +151,24 @@ assert.deepEqual(observedRange, { fromBlock: 99n, toBlock: 110n });
 assert.equal(boundarySettlement.blockNumber, "99");
 assert.equal(boundarySettlement.settledAt, "1970-01-01T00:16:39.000Z");
 
+settlementBlockNumber = 105n;
+observedRanges = [];
+const recoveredBeforeWindowClose = await chain.findProviderSettlement({
+  payer,
+  payTo: provider,
+  asset: PAYMENT.asset,
+  amountAtomic: "500000",
+  authorizationNonce: nonce,
+  notBeforeTimestamp: 1_000,
+  notAfterTimestamp: 2_100,
+  requireCompleteWindow: true,
+});
+assert.equal(recoveredBeforeWindowClose.txHash, transactionHash);
+assert.deepEqual(observedRanges, [
+  { fromBlock: 99n, toBlock: 198n },
+  { fromBlock: 199n, toBlock: 200n },
+]);
+
 returnSettlement = false;
 observedRanges = [];
 assert.equal(await chain.findProviderSettlement({

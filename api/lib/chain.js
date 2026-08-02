@@ -687,10 +687,12 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
     if (latest.number === null) {
       throw new EvidenceError("provider_settlement_search_head_unavailable");
     }
-    if (requireCompleteWindow && Number(latest.timestamp) < throughTimestamp) {
-      throw new EvidenceError("provider_settlement_search_window_incomplete");
+    if (Number(latest.timestamp) < fromTimestamp) {
+      if (requireCompleteWindow && Number(latest.timestamp) < throughTimestamp) {
+        throw new EvidenceError("provider_settlement_search_window_incomplete");
+      }
+      return null;
     }
-    if (Number(latest.timestamp) < fromTimestamp) return null;
     const boundedThrough = Math.min(throughTimestamp, Number(latest.timestamp));
     const firstEligibleBlock = await firstBlockAtOrAfter(fromTimestamp);
     // Include the boundary block in case wall-clock issuance is just ahead of its block timestamp.
@@ -715,7 +717,16 @@ export function createChainService({ rpcUrl = XLAYER.rpcUrl, client } = {}) {
     } catch (error) {
       throw new EvidenceError("provider_settlement_search_failed", error instanceof Error ? error.message : String(error));
     }
-    if (matches.length === 0) return null;
+    if (matches.length === 0) {
+      // Search the elapsed portion first. A nonce-bound AuthorizationUsed event
+      // is final evidence for this payment and does not need to wait for the
+      // remainder of the authorization window. Window completion is required
+      // only before concluding that no settlement exists.
+      if (requireCompleteWindow && Number(latest.timestamp) < throughTimestamp) {
+        throw new EvidenceError("provider_settlement_search_window_incomplete");
+      }
+      return null;
+    }
     if (matches.length !== 1 || !isBytes32(matches[0].transactionHash)) {
       throw new EvidenceError("provider_settlement_search_ambiguous");
     }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { encodePaymentSignatureHeader } from "@okxweb3/x402-core/http";
 import { createHandler } from "../api/covered-job-receipt.js";
 import { PAYMENT, paymentRequirements } from "../api/lib/config.js";
-import { MemoryLedger } from "../api/lib/ledger.js";
+import { MemoryLedger, RedisLedger } from "../api/lib/ledger.js";
 import { createPaymentService } from "../api/lib/payment.js";
 import { createQuoteService } from "../api/lib/quote.js";
 import { sha256 } from "../api/lib/utils.js";
@@ -250,6 +250,62 @@ assert.equal(compensationRecord.state, "compensation_required");
 assert.equal(compensationRecord.compensation.reason, "coverage_fee_not_settled");
 assert.match(compensationRecord.compensation.feeAuthorization.hash, /^0x[a-f0-9]{64}$/);
 assert.equal(compensationRecord.universalCovenant.covenantId, `0x${"34".repeat(32)}`);
+
+const lateMined = runtime({ settlementFails: true, recoveredSettlementStatus: "settled" });
+const lateMinedChallengeResponse = await callHandler(lateMined.handler, { method: "POST", body });
+const lateMinedChallenge = decodePaymentRequired(lateMinedChallengeResponse.headers["payment-required"]);
+const lateMinedRequest = {
+  method: "POST",
+  body,
+  headers: {
+    "payment-signature": paymentHeader("universal-late-mined", lateMinedChallenge.accepts[0]),
+  },
+};
+const lateMinedFirst = await callHandler(lateMined.handler, lateMinedRequest);
+assert.equal(lateMinedFirst.statusCode, 503);
+assert.equal(lateMinedFirst.json().charged, false);
+assert.equal((await lateMined.ledger.list())[0].state, "compensation_required");
+assert.equal((await lateMined.ledger.list())[0].settlement.status, "submitting");
+const lateMinedRecovered = await callHandler(lateMined.handler, lateMinedRequest);
+assert.equal(lateMinedRecovered.statusCode, 200);
+assert.equal(lateMinedRecovered.json().receipt.version, "0.4.0");
+assert.equal(lateMinedRecovered.json().state, "pending_start");
+assert.equal((await lateMined.ledger.list())[0].state, "pending_start");
+assert.ok((await lateMined.ledger.list())[0].receipt);
+assert.equal(lateMined.calls.settle, 1, "a recovered late-mined fee must never settle twice");
+assert.equal(lateMined.calls.reconcile, 1);
+
+let redisStored = JSON.stringify({
+  ...compensationRecord,
+  receiptId: "redis-compensation",
+  settlement: { status: "submitting" },
+});
+const redis = {
+  async eval(script, keys, argv) {
+    assert.match(
+      script,
+      /decoded\.state ~= 'pending' and decoded\.state ~= 'compensation_required'/,
+      "the Redis finalizer must atomically admit a compensated recovery",
+    );
+    assert.equal(keys[0], "test:receipt:redis-compensation");
+    const current = JSON.parse(redisStored);
+    if (!["pending", "compensation_required"].includes(current.state)) {
+      return ["existing", redisStored];
+    }
+    redisStored = argv[0];
+    return ["finalized", redisStored];
+  },
+};
+const redisLedger = new RedisLedger({ redis, prefix: "test" });
+const redisFinal = await redisLedger.finalize({
+  ...compensationRecord,
+  receiptId: "redis-compensation",
+  state: "pending_start",
+  settlement: { transaction: `0x${"91".repeat(32)}` },
+  receipt: { receiptId: "redis-compensation" },
+});
+assert.equal(redisFinal.state, "pending_start");
+assert.equal(redisFinal.receipt.receiptId, "redis-compensation");
 
 const failedCompensationWrite = runtime({
   settlementFails: true,
