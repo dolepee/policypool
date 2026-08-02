@@ -49,6 +49,7 @@ function requiresCompensation(record) {
     || Boolean(
       record?.state === "pending"
       && !record?.receipt
+      && !["submitting", "unknown"].includes(record?.settlement?.status)
       && record?.feeAuthorization?.hash
       && record?.universalCovenant?.covenantId,
     );
@@ -57,7 +58,11 @@ function requiresCompensation(record) {
 function isUniversal(record) {
   return Boolean(
     record?.universalCovenant?.covenantId
-      && (record?.receipt?.version === "0.4.0" || requiresCompensation(record)),
+      && (
+        record?.receipt?.version === "0.4.0"
+        || requiresCompensation(record)
+        || ["submitting", "unknown"].includes(record?.settlement?.status)
+      ),
   );
 }
 
@@ -305,6 +310,12 @@ export function createUniversalReconciler({
   }
 
   async function reconcileRecord(original, dryRun) {
+    if (
+      original?.state === "pending"
+      && ["submitting", "unknown"].includes(original?.settlement?.status)
+    ) {
+      return { changes: [], hold: "payment_settlement_reconciliation_pending" };
+    }
     if (requiresCompensation(original)) {
       const covenantId = original.universalCovenant.covenantId;
       const onchain = await issuer.getCovenant(covenantId);

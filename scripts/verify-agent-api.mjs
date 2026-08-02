@@ -1128,12 +1128,29 @@ assert.ok(submittingSnapshot?.receiptContext?.policy);
 // the handler could persist an outcome. A fresh process receives only that
 // journal snapshot and must recover by nonce without settling a second time.
 const restartedAfterSubmission = makeRuntime({ recoveredSettlementStatus: "settled" });
+const historicalPayTo = "0x2222222222222222222222222222222222222222";
+const historicalSubmittingSnapshot = {
+  ...submittingSnapshot,
+  paymentRequirements: {
+    ...submittingSnapshot.paymentRequirements,
+    payTo: historicalPayTo,
+    amount: "123456",
+  },
+  paymentReceiptTerms: {
+    ...submittingSnapshot.paymentReceiptTerms,
+    payTo: historicalPayTo,
+    amountAtomic: "123456",
+  },
+};
 assert.equal(
-  (await restartedAfterSubmission.ledger.reserve(submittingSnapshot, 5_000_000n)).status,
+  (await restartedAfterSubmission.ledger.reserve(historicalSubmittingSnapshot, 5_000_000n)).status,
   "reserved",
 );
 const restartedResponse = await callHandler(restartedAfterSubmission.handler, journaledRequest);
 assert.equal(restartedResponse.statusCode, 200);
+assert.equal(restartedResponse.json().receipt.servicePayment.recipient, historicalPayTo);
+assert.equal(restartedResponse.json().receipt.servicePayment.amountAtomic, "123456");
+assert.equal(restartedResponse.json().receipt.servicePayment.amountUSDT, "0.123456");
 assert.equal(restartedAfterSubmission.calls.settle, 0);
 assert.equal(restartedAfterSubmission.calls.reconcile, 1);
 assert.deepEqual(restartedAfterSubmission.calls.recoveryNonces, [

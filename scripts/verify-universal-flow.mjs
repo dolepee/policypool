@@ -67,9 +67,14 @@ function paymentHeader(tag, accepted) {
   });
 }
 
-function runtime({ settlementFails = false, issuanceFails = false } = {}) {
+function runtime({
+  settlementFails = false,
+  settlementThrows = false,
+  recoveredSettlementStatus = "pending",
+  issuanceFails = false,
+} = {}) {
   const ledger = new MemoryLedger();
-  const calls = { issue: 0, cancel: 0, settle: 0 };
+  const calls = { issue: 0, cancel: 0, settle: 0, reconcile: 0 };
   const chain = {
     async getReserveBalance() { return 9_000_000n; },
     async getJobStatus() { return 1; },
@@ -102,6 +107,24 @@ function runtime({ settlementFails = false, issuanceFails = false } = {}) {
         amountAtomic,
       };
     },
+    async findProviderSettlement({ payer, payTo, asset, amountAtomic, authorizationNonce }) {
+      calls.reconcile += 1;
+      if (recoveredSettlementStatus === "pending") {
+        const error = new Error("provider_settlement_search_window_incomplete");
+        error.code = "provider_settlement_search_window_incomplete";
+        throw error;
+      }
+      if (recoveredSettlementStatus === "not_found") return null;
+      return {
+        txHash: `0x${"90".repeat(32)}`,
+        blockNumber: "126",
+        asset,
+        from: payer,
+        to: payTo,
+        amountAtomic,
+        authorizationNonce,
+      };
+    },
   };
   const facilitator = {
     async verify(payload) {
@@ -109,6 +132,7 @@ function runtime({ settlementFails = false, issuanceFails = false } = {}) {
     },
     async settle() {
       calls.settle += 1;
+      if (settlementThrows) throw new Error("simulated_settlement_transport_failure");
       if (settlementFails) return { success: false, errorReason: "simulated_failure" };
       return {
         success: true,
@@ -215,6 +239,65 @@ assert.equal(compensationRecord.compensation.reason, "coverage_fee_not_settled")
 assert.match(compensationRecord.compensation.feeAuthorization.hash, /^0x[a-f0-9]{64}$/);
 assert.equal(compensationRecord.universalCovenant.covenantId, `0x${"34".repeat(32)}`);
 
+const ambiguous = runtime({ settlementThrows: true, recoveredSettlementStatus: "settled" });
+const ambiguousChallengeResponse = await callHandler(ambiguous.handler, { method: "POST", body });
+const ambiguousChallenge = decodePaymentRequired(ambiguousChallengeResponse.headers["payment-required"]);
+const ambiguousHeader = paymentHeader("universal-ambiguous", ambiguousChallenge.accepts[0]);
+const ambiguousRequest = {
+  method: "POST",
+  body,
+  headers: { "payment-signature": ambiguousHeader },
+};
+const ambiguousFirst = await callHandler(ambiguous.handler, ambiguousRequest);
+assert.equal(ambiguousFirst.statusCode, 503);
+assert.equal(ambiguousFirst.json().error, "payment_settlement_outcome_unknown");
+assert.equal(ambiguousFirst.json().charged, null);
+const [ambiguousPending] = await ambiguous.ledger.list();
+assert.equal(ambiguousPending.state, "pending");
+assert.equal(ambiguousPending.settlement.status, "unknown");
+assert.equal(ambiguousPending.compensation, undefined);
+assert.equal(ambiguousPending.universalCovenant.covenantId, `0x${"34".repeat(32)}`);
+assert.equal(ambiguousPending.relayGrantPayload.grantId, "pprg-universal-flow");
+
+const ambiguousRecovered = await callHandler(ambiguous.handler, ambiguousRequest);
+assert.equal(ambiguousRecovered.statusCode, 200);
+assert.equal(ambiguousRecovered.json().receipt.version, "0.4.0");
+assert.equal(ambiguousRecovered.json().receipt.covenant.onchain.covenantId, `0x${"34".repeat(32)}`);
+assert.equal(ambiguousRecovered.json().receipt.providerRelay.grantToken, "signed-relay-grant");
+assert.equal(ambiguous.calls.settle, 1, "universal recovery must never settle twice");
+assert.equal(ambiguous.calls.reconcile, 1);
+assert.equal((await ambiguous.ledger.list())[0].state, "pending_start");
+
+const universalNoMatch = runtime({ settlementThrows: true, recoveredSettlementStatus: "not_found" });
+const universalNoMatchChallengeResponse = await callHandler(
+  universalNoMatch.handler,
+  { method: "POST", body },
+);
+const universalNoMatchChallenge = decodePaymentRequired(
+  universalNoMatchChallengeResponse.headers["payment-required"],
+);
+const universalNoMatchRequest = {
+  method: "POST",
+  body,
+  headers: {
+    "payment-signature": paymentHeader("universal-no-match", universalNoMatchChallenge.accepts[0]),
+  },
+};
+assert.equal((await callHandler(universalNoMatch.handler, universalNoMatchRequest)).statusCode, 503);
+const universalNoMatchRecovered = await callHandler(
+  universalNoMatch.handler,
+  universalNoMatchRequest,
+);
+assert.equal(universalNoMatchRecovered.statusCode, 503);
+assert.equal(
+  universalNoMatchRecovered.json().error,
+  "provider_bond_cancellation_pending_authorization_expiry",
+);
+assert.equal(universalNoMatchRecovered.json().charged, false);
+assert.equal((await universalNoMatch.ledger.list())[0].state, "compensation_required");
+assert.equal(universalNoMatch.calls.settle, 1);
+assert.equal(universalNoMatch.calls.reconcile, 1);
+
 const uncertain = runtime({ issuanceFails: true });
 const uncertainChallengeResponse = await callHandler(uncertain.handler, { method: "POST", body });
 const uncertainChallenge = decodePaymentRequired(uncertainChallengeResponse.headers["payment-required"]);
@@ -232,4 +315,4 @@ assert.equal(uncertainRecord.compensation.reason, "coverage_issuance_outcome_unc
 assert.equal(uncertainRecord.universalCovenant.covenantId, `0x${"34".repeat(32)}`);
 
 assert.equal(paymentRequirements().amount, "100000");
-console.log("PolicyPool universal flow passed: provider bond locks before charge and failed or uncertain issuance/settlement stays in authorization-bound reconciliation.");
+console.log("PolicyPool universal flow passed: provider bond locks before charge, ambiguous fees recover without resubmission, and definite failures remain authorization-bound compensation.");
