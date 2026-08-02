@@ -629,6 +629,20 @@ function settlementJournalUnavailable(res, record, releaseConfirmed) {
   });
 }
 
+function universalCompensationStateUnavailable(res, record) {
+  return sendJson(res, 503, {
+    ok: false,
+    error: "durable_universal_compensation_state_unavailable",
+    code: "DURABLE_UNIVERSAL_COMPENSATION_STATE_UNAVAILABLE",
+    message: "The payment was not settled, but the provider-bond compensation state could not be confirmed. Do not retry payment until the durable record is reconciled.",
+    charged: false,
+    settlement: "not_settled",
+    retryable: false,
+    nextAction: "MANUAL_PROVIDER_BOND_RECONCILIATION_REQUIRED",
+    receiptId: record.receiptId,
+  });
+}
+
 function finalRecordForSettlement(pending, settlement, generatedAt, overrides = {}) {
   const context = pending.receiptContext;
   if (!context?.policy) throw new Error("receipt_recovery_context_missing");
@@ -1253,7 +1267,14 @@ export function createHandler(dependencies = {}) {
             feeAuthorization,
           },
         };
-        await ledger.transitionUniversal(compensationPending, ["pending"]).catch(() => undefined);
+        try {
+          const stored = await ledger.transitionUniversal(compensationPending, ["pending"]);
+          if (stored?.state !== "compensation_required") {
+            return universalCompensationStateUnavailable(res, pending);
+          }
+        } catch {
+          return universalCompensationStateUnavailable(res, pending);
+        }
         return sendJson(res, 503, {
           ok: false,
           error: "provider_bond_cancellation_pending_authorization_expiry",
@@ -1313,7 +1334,14 @@ export function createHandler(dependencies = {}) {
             feeAuthorization,
           },
         };
-        await ledger.transitionUniversal(compensationPending, ["pending"]).catch(() => undefined);
+        try {
+          const stored = await ledger.transitionUniversal(compensationPending, ["pending"]);
+          if (stored?.state !== "compensation_required") {
+            return universalCompensationStateUnavailable(res, pending);
+          }
+        } catch {
+          return universalCompensationStateUnavailable(res, pending);
+        }
         return sendJson(res, 503, {
           ok: false,
           error: "provider_bond_cancellation_pending_authorization_expiry",

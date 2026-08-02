@@ -72,6 +72,7 @@ function runtime({
   settlementThrows = false,
   recoveredSettlementStatus = "pending",
   issuanceFails = false,
+  transitionUniversalFailsOnCall = 0,
 } = {}) {
   const ledger = new MemoryLedger();
   const calls = { issue: 0, cancel: 0, settle: 0, reconcile: 0 };
@@ -148,6 +149,17 @@ function runtime({
     secret: "universal-flow-test-secret-at-least-32-characters",
     now: () => now,
   });
+  if (transitionUniversalFailsOnCall > 0) {
+    const transitionUniversal = ledger.transitionUniversal.bind(ledger);
+    let transitions = 0;
+    ledger.transitionUniversal = async (...args) => {
+      transitions += 1;
+      if (transitions === transitionUniversalFailsOnCall) {
+        throw new Error("simulated_universal_transition_failure");
+      }
+      return transitionUniversal(...args);
+    };
+  }
   const universalIssuer = {
     previewCovenantId() { return `0x${"34".repeat(32)}`; },
     async issue({ paymentAuthorization }) {
@@ -238,6 +250,45 @@ assert.equal(compensationRecord.state, "compensation_required");
 assert.equal(compensationRecord.compensation.reason, "coverage_fee_not_settled");
 assert.match(compensationRecord.compensation.feeAuthorization.hash, /^0x[a-f0-9]{64}$/);
 assert.equal(compensationRecord.universalCovenant.covenantId, `0x${"34".repeat(32)}`);
+
+const failedCompensationWrite = runtime({
+  settlementFails: true,
+  transitionUniversalFailsOnCall: 2,
+});
+const failedCompensationChallengeResponse = await callHandler(
+  failedCompensationWrite.handler,
+  { method: "POST", body },
+);
+const failedCompensationChallenge = decodePaymentRequired(
+  failedCompensationChallengeResponse.headers["payment-required"],
+);
+const failedCompensationResponse = await callHandler(failedCompensationWrite.handler, {
+  method: "POST",
+  body,
+  headers: {
+    "payment-signature": paymentHeader(
+      "universal-compensation-write-failure",
+      failedCompensationChallenge.accepts[0],
+    ),
+  },
+});
+assert.equal(failedCompensationResponse.statusCode, 503);
+assert.equal(failedCompensationResponse.headers["payment-required"], undefined);
+assert.equal(
+  failedCompensationResponse.json().error,
+  "durable_universal_compensation_state_unavailable",
+);
+assert.equal(failedCompensationResponse.json().charged, false);
+assert.equal(failedCompensationResponse.json().settlement, "not_settled");
+assert.equal(failedCompensationResponse.json().retryable, false);
+assert.equal(
+  failedCompensationResponse.json().nextAction,
+  "MANUAL_PROVIDER_BOND_RECONCILIATION_REQUIRED",
+);
+const [failedCompensationRecord] = await failedCompensationWrite.ledger.list();
+assert.equal(failedCompensationRecord.state, "pending");
+assert.equal(failedCompensationRecord.settlement.status, "submitting");
+assert.equal(failedCompensationWrite.calls.settle, 1);
 
 const ambiguous = runtime({ settlementThrows: true, recoveredSettlementStatus: "settled" });
 const ambiguousChallengeResponse = await callHandler(ambiguous.handler, { method: "POST", body });
