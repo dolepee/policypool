@@ -570,6 +570,20 @@ function rejectPaymentVerification(req, res, error) {
   return paymentRequired(req, res, "payment_verification_failed");
 }
 
+function settlementOutcomeUnknown(res, record) {
+  return sendJson(res, 503, {
+    ok: false,
+    error: "payment_settlement_outcome_unknown",
+    code: "PAYMENT_SETTLEMENT_OUTCOME_UNKNOWN",
+    message: "The payment submission outcome could not be confirmed. The original reservation remains locked while settlement is reconciled.",
+    charged: null,
+    settlement: "unknown",
+    retryable: false,
+    nextAction: "RECONCILE_PAYMENT_BEFORE_RETRY",
+    receiptId: record.receiptId,
+  });
+}
+
 export function createHandler(dependencies = {}) {
   let runtimeChain = dependencies.chain;
   let runtimeLedger = dependencies.ledger;
@@ -651,6 +665,9 @@ export function createHandler(dependencies = {}) {
         const existingPayment = await ledger.findByPaymentId(paymentId);
         if (existingPayment?.receipt) {
           return respond(res, { ...existingPayment, replayed: true });
+        }
+        if (existingPayment?.settlement?.status === "unknown") {
+          return settlementOutcomeUnknown(res, existingPayment);
         }
         if (existingPayment?.state === "compensation_required") {
           return sendJson(res, 503, {
@@ -1027,6 +1044,21 @@ export function createHandler(dependencies = {}) {
           retryAfter: new Date(Number(feeAuthorization.validBefore) * 1_000).toISOString(),
         });
       } else {
+        if (
+          error instanceof PaymentVerificationError
+          && error.code === "payment_settlement_unavailable"
+        ) {
+          const settlementPending = {
+            ...pending,
+            settlement: {
+              status: "unknown",
+              attemptedAt: new Date(now()).toISOString(),
+              error: error.code,
+            },
+          };
+          await ledger.markSettlementUnknown(settlementPending).catch(() => undefined);
+          return settlementOutcomeUnknown(res, settlementPending);
+        }
         await ledger.release(pending).catch(() => undefined);
       }
       if (error instanceof PaymentVerificationError) return paymentRequired(req, res, error.code);

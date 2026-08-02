@@ -92,6 +92,15 @@ redis.call('SET', KEYS[1], ARGV[1])
 return {'updated', ARGV[1]}
 `;
 
+const MARK_SETTLEMENT_UNKNOWN_SCRIPT = `
+local current = redis.call('GET', KEYS[1])
+if not current then return {'missing'} end
+local decoded = cjson.decode(current)
+if decoded.state ~= 'pending' then return {'state_mismatch', current} end
+redis.call('SET', KEYS[1], ARGV[1])
+return {'updated', ARGV[1]}
+`;
+
 function prefixValue(value = "pp:coverage:v1") {
   return String(value).replace(/:+$/, "");
 }
@@ -176,6 +185,17 @@ export class MemoryLedger {
     this.records.delete(record.receiptId);
     this.requests.delete(record.requestId);
     this.payments.delete(record.paymentId);
+  }
+
+  async markSettlementUnknown(record) {
+    const current = this.records.get(record.receiptId);
+    if (!current) throw new Error("ledger_record_missing");
+    if (current.state !== "pending") return current;
+    if (record.settlement?.status !== "unknown") {
+      throw new Error("settlement_unknown_state_required");
+    }
+    this.records.set(record.receiptId, structuredClone(record));
+    return record;
   }
 
   async markPayoutDue(record) {
@@ -320,6 +340,17 @@ export class RedisLedger {
       this.key("receipt", record.receiptId),
       this.key("liability", "pending"),
     ], [record.liabilityAtomic]);
+  }
+
+  async markSettlementUnknown(record) {
+    if (record.settlement?.status !== "unknown") {
+      throw new Error("settlement_unknown_state_required");
+    }
+    const result = await this.redis.eval(MARK_SETTLEMENT_UNKNOWN_SCRIPT, [
+      this.key("receipt", record.receiptId),
+    ], [JSON.stringify(record)]);
+    if (String(result[0]) === "missing") throw new Error("ledger_record_missing");
+    return parseRecord(result[1]);
   }
 
   async markPayoutDue(record) {

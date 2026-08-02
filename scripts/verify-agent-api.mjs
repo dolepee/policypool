@@ -139,6 +139,7 @@ function makeRuntime({
   reserveAtomic = 5_000_000n,
   targetError,
   settlementFails = false,
+  settlementThrows = false,
   jobStatus = 1,
   targetAmountAtomic = "5000000",
   createdAt = "2026-07-10T09:57:00.000Z",
@@ -213,6 +214,7 @@ function makeRuntime({
     },
     async settle(payload) {
       calls.settle += 1;
+      if (settlementThrows) throw new Error("simulated_settlement_transport_failure");
       if (settlementFails) return { success: false, errorReason: "simulated_settlement_failure" };
       return {
         success: true,
@@ -1003,6 +1005,66 @@ const failedSettlementResponse = await callHandler(failedSettlement.handler, {
 assert.equal(failedSettlementResponse.statusCode, 402);
 assert.equal((await failedSettlement.ledger.stats()).pendingAtomic, "0", "failed settlement must release pending liability");
 assert.equal((await failedSettlement.ledger.stats()).recordCount, 0);
+
+const ambiguousSettlement = makeRuntime({ settlementThrows: true });
+const ambiguousPaymentHeader = makePaymentHeader("settlement-unknown");
+const ambiguousSettlementRequest = {
+  method: "POST",
+  headers: { "payment-signature": ambiguousPaymentHeader },
+  body: { ...sampleBody, targetJobId: `0x${"d".repeat(64)}` },
+};
+const ambiguousSettlementResponse = await callHandler(
+  ambiguousSettlement.handler,
+  ambiguousSettlementRequest,
+);
+assert.equal(ambiguousSettlementResponse.statusCode, 503);
+assert.equal(ambiguousSettlementResponse.headers["payment-required"], undefined);
+assert.deepEqual(
+  {
+    error: ambiguousSettlementResponse.json().error,
+    code: ambiguousSettlementResponse.json().code,
+    charged: ambiguousSettlementResponse.json().charged,
+    settlement: ambiguousSettlementResponse.json().settlement,
+    retryable: ambiguousSettlementResponse.json().retryable,
+    nextAction: ambiguousSettlementResponse.json().nextAction,
+  },
+  {
+    error: "payment_settlement_outcome_unknown",
+    code: "PAYMENT_SETTLEMENT_OUTCOME_UNKNOWN",
+    charged: null,
+    settlement: "unknown",
+    retryable: false,
+    nextAction: "RECONCILE_PAYMENT_BEFORE_RETRY",
+  },
+);
+const ambiguousReceiptId = ambiguousSettlementResponse.json().receiptId;
+assert.ok(ambiguousReceiptId);
+assert.equal((await ambiguousSettlement.ledger.stats()).pendingAtomic, "1000000");
+assert.equal((await ambiguousSettlement.ledger.stats()).recordCount, 1);
+assert.equal(
+  (await ambiguousSettlement.ledger.get(ambiguousReceiptId)).settlement.status,
+  "unknown",
+  "an indeterminate settlement must remain durably recoverable",
+);
+
+const ambiguousSettlementReplay = await callHandler(
+  ambiguousSettlement.handler,
+  ambiguousSettlementRequest,
+);
+assert.equal(ambiguousSettlementReplay.statusCode, 503);
+assert.equal(ambiguousSettlementReplay.headers["payment-required"], undefined);
+assert.equal(ambiguousSettlementReplay.json().receiptId, ambiguousReceiptId);
+assert.equal(ambiguousSettlementReplay.json().charged, null);
+assert.equal(ambiguousSettlementReplay.json().settlement, "unknown");
+assert.equal(ambiguousSettlementReplay.json().retryable, false);
+assert.equal(ambiguousSettlementReplay.json().nextAction, "RECONCILE_PAYMENT_BEFORE_RETRY");
+assert.equal(
+  ambiguousSettlement.calls.settle,
+  1,
+  "an ambiguous payment replay must never submit settlement a second time",
+);
+assert.equal((await ambiguousSettlement.ledger.stats()).pendingAtomic, "1000000");
+assert.equal((await ambiguousSettlement.ledger.stats()).recordCount, 1);
 
 const adminStopped = makeRuntime();
 const adminStoppedIssued = await callHandler(adminStopped.handler, {
