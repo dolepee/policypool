@@ -25,6 +25,14 @@ function optionalHttpsOrigin(value) {
   return url.pathname === "/" && !url.search ? url.origin : null;
 }
 
+export function universalPublicOrigin(environment = process.env) {
+  return optionalHttpsOrigin(
+    environment.POLICYPOOL_UNIVERSAL_PUBLIC_ORIGIN
+      || environment.POLICYPOOL_PUBLIC_ORIGIN
+      || "https://policypool.vercel.app",
+  );
+}
+
 export const UNIVERSAL = {
   version: "0.4.0",
   enabled: process.env.POLICYPOOL_UNIVERSAL_ENABLED === "true",
@@ -37,9 +45,7 @@ export const UNIVERSAL = {
   feeEscrow: optionalAddress(process.env.POLICYPOOL_FEE_ESCROW_ADDRESS),
   directA2mcpEnabled: process.env.POLICYPOOL_DIRECT_A2MCP_ENABLED === "true",
   directFeeAtomic: Number(process.env.POLICYPOOL_DIRECT_FEE_ATOMIC || 100_000),
-  publicOrigin: optionalHttpsOrigin(
-    process.env.POLICYPOOL_PUBLIC_ORIGIN || "https://policypool.vercel.app",
-  ),
+  publicOrigin: universalPublicOrigin(),
   a2aAdapter: optionalAddress(process.env.POLICYPOOL_OKX_A2A_ADAPTER_ADDRESS),
   relayAdapter: optionalAddress(process.env.POLICYPOOL_A2MCP_RELAY_ADAPTER_ADDRESS),
   relaySigner: optionalAddress(process.env.POLICYPOOL_RELAY_SIGNER_ADDRESS),

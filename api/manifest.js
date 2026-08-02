@@ -10,6 +10,7 @@ import {
 import { createLedger } from "./lib/ledger.js";
 import { listPublishedPolicies, policyCoverageCapAtomic } from "./lib/policy-registry.js";
 import { formatUsdtAtomic, sendJson } from "./lib/utils.js";
+import { publicUrl } from "./lib/public-origin.js";
 import { createUniversalManifestHandler } from "./universal-manifest.js";
 
 const CAPACITY_READ_TIMEOUT_MS = 2_500;
@@ -128,10 +129,10 @@ export function createManifestHandler({
         type: "A2MCP",
         priceAtomic: PAYMENT.amountAtomic,
         priceUSDT: formatUsdtAtomic(PAYMENT.amountAtomic, PAYMENT.decimals),
-        endpoint: "https://policypool.vercel.app/api/covered-job-receipt",
-        preflight: "https://policypool.vercel.app/api/coverage-preflight",
-        ledger: "https://policypool.vercel.app/api/coverage-ledger",
-        status: "https://policypool.vercel.app/api/coverage-status?receiptId={receiptId}",
+        endpoint: publicUrl("/api/covered-job-receipt"),
+        preflight: publicUrl("/api/coverage-preflight"),
+        ledger: publicUrl("/api/coverage-ledger"),
+        status: publicUrl("/api/coverage-status?receiptId={receiptId}"),
       },
       payment: {
         protocol: "OKX Agent Payments Protocol",
@@ -142,7 +143,7 @@ export function createManifestHandler({
           validationOrder: "payment_challenge_before_paid_request_validation",
           maximumResponseHeaderBytes: 2048,
           requestSchemaLocation: "json_response_body",
-          freeValidationEndpoint: "https://policypool.vercel.app/api/coverage-preflight",
+          freeValidationEndpoint: publicUrl("/api/coverage-preflight"),
         },
         network: XLAYER.network,
         chainId: XLAYER.id,
@@ -176,7 +177,7 @@ export function createManifestHandler({
         ambiguityBehavior: "fail_closed_without_settlement",
       },
       input: {
-        appliesTo: "https://policypool.vercel.app/api/covered-job-receipt",
+        appliesTo: publicUrl("/api/covered-job-receipt"),
         required: [
           "targetAgent",
           "targetJobId",
@@ -191,7 +192,7 @@ export function createManifestHandler({
       // paid service's contract. It accepts a job by public marketplace
       // reference, exact transactions, or bounded event-hint resolution.
       preflightInput: {
-        appliesTo: "https://policypool.vercel.app/api/coverage-preflight",
+        appliesTo: publicUrl("/api/coverage-preflight"),
         modes: {
           publicReference: {
             required: ["targetAgent", "taskReference"],

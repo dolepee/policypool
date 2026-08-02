@@ -272,6 +272,16 @@ assert.throws(
   /must be true or false/,
   "ambiguous self-hosted facilitator opt-in must fail closed",
 );
+assert.equal(paymentTest.officialFacilitatorRequired({}), false);
+assert.equal(
+  paymentTest.officialFacilitatorRequired({ POLICYPOOL_REQUIRE_OKX_FACILITATOR: "true" }),
+  true,
+);
+assert.throws(
+  () => paymentTest.officialFacilitatorRequired({ POLICYPOOL_REQUIRE_OKX_FACILITATOR: "yes" }),
+  /must be true or false/,
+  "an ambiguous official-facilitator requirement must fail closed",
+);
 assert.throws(
   () => paymentTest.createLocalFacilitator({
     POLICYPOOL_FACILITATOR_PRIVATE_KEY: "not-a-key",
@@ -294,6 +304,23 @@ const officialFacilitator = paymentTest.createOkxFacilitator({
 });
 assert.equal(typeof officialFacilitator.verify, "function");
 assert.equal(typeof officialFacilitator.settle, "function");
+const requiredOfficialPayment = createPaymentService({
+  chain: {},
+  environment: {
+    POLICYPOOL_REQUIRE_OKX_FACILITATOR: "true",
+    POLICYPOOL_SELF_HOSTED_FACILITATOR_ENABLED: "true",
+    POLICYPOOL_FACILITATOR_PRIVATE_KEY: `0x${"1".repeat(64)}`,
+  },
+});
+await assert.rejects(
+  () => requiredOfficialPayment.verify(
+    { headers: { "payment-signature": makePaymentHeader("official-required") } },
+    paymentRequirements(),
+  ),
+  (error) => error?.code === "payment_verifier_unavailable"
+    && /Official OKX facilitator credentials are required/.test(error.message),
+  "production must not silently fall back to a self-hosted facilitator when OKX is required",
+);
 const head = await callHandler(primary.handler, { method: "HEAD" });
 assert.equal(head.statusCode, 200, "HEAD must return 200");
 
@@ -318,6 +345,68 @@ assert.ok(
   Buffer.byteLength(Object.entries(unpaid.headers).map(([name, value]) => `${name}: ${value}\r\n`).join("")) < 2_048,
   "the complete 402 header block must stay below 2 KiB",
 );
+
+const previousPublicOrigin = process.env.POLICYPOOL_PUBLIC_ORIGIN;
+const previousPublicPathPrefix = process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+try {
+  process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://okx-agent-review-relay.onrender.com";
+  process.env.POLICYPOOL_PUBLIC_PATH_PREFIX = "/policypool";
+  const relayedUnpaid = await callHandler(primary.handler, {
+    method: "POST",
+    url: "/api/covered-job-receipt",
+    headers: { "x-forwarded-host": "attacker.invalid" },
+    body: sampleBody,
+  });
+  const relayedChallenge = decodePaymentRequired(relayedUnpaid.headers["payment-required"]);
+  const relayedBody = relayedUnpaid.json();
+  assert.equal(
+    relayedChallenge.resource.url,
+    "https://okx-agent-review-relay.onrender.com/policypool/api/covered-job-receipt",
+  );
+  assert.equal(
+    relayedBody.freePreflight.endpoint,
+    "https://okx-agent-review-relay.onrender.com/policypool/api/coverage-preflight",
+  );
+  assert.doesNotMatch(JSON.stringify(relayedBody), /vercel\.app/i);
+
+  const prefixPreservingUnpaid = await callHandler(primary.handler, {
+    method: "POST",
+    url: "/policypool/api/covered-job-receipt",
+    headers: { "x-forwarded-host": "attacker.invalid" },
+    body: sampleBody,
+  });
+  const prefixPreservingChallenge = decodePaymentRequired(
+    prefixPreservingUnpaid.headers["payment-required"],
+  );
+  assert.equal(
+    prefixPreservingChallenge.resource.url,
+    "https://okx-agent-review-relay.onrender.com/policypool/api/covered-job-receipt",
+  );
+  assert.doesNotMatch(prefixPreservingChallenge.resource.url, /policypool\/policypool/);
+
+  const relayedRuntime = makeRuntime();
+  const relayedPaid = await callHandler(relayedRuntime.handler, {
+    method: "POST",
+    url: "/api/covered-job-receipt",
+    headers: { "payment-signature": makePaymentHeader("relayed-paid-response") },
+    body: sampleBody,
+  });
+  assert.equal(relayedPaid.statusCode, 200);
+  assert.equal(
+    relayedPaid.json().receipt.reserve.publicUrl,
+    "https://okx-agent-review-relay.onrender.com/policypool/api/coverage-ledger#reserve",
+  );
+  assert.doesNotMatch(
+    JSON.stringify(relayedPaid.json()),
+    /vercel\.app/i,
+    "a successful paid response must remain consumable by the reviewer guardrail",
+  );
+} finally {
+  if (typeof previousPublicOrigin === "undefined") delete process.env.POLICYPOOL_PUBLIC_ORIGIN;
+  else process.env.POLICYPOOL_PUBLIC_ORIGIN = previousPublicOrigin;
+  if (typeof previousPublicPathPrefix === "undefined") delete process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+  else process.env.POLICYPOOL_PUBLIC_PATH_PREFIX = previousPublicPathPrefix;
+}
 
 const staleBeforeQuote = makeRuntime({ targetError: "target_job_not_accepted:2" });
 const staleDiscovery = await callHandler(staleBeforeQuote.handler, {

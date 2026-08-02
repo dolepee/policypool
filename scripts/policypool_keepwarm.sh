@@ -2,7 +2,10 @@
 # Exercise PolicyPool's unpaid A2MCP contract, not only its HEAD route.
 set -u
 
-ENDPOINT="${POLICYPOOL_AGENT_ENDPOINT:-https://policypool.vercel.app/api/covered-job-receipt}"
+PUBLIC_ORIGIN="${POLICYPOOL_PUBLIC_ORIGIN:-https://policypool.vercel.app}"
+PUBLIC_ORIGIN="${PUBLIC_ORIGIN%/}"
+PUBLIC_PREFIX="${POLICYPOOL_PUBLIC_PATH_PREFIX:-}"
+ENDPOINT="${POLICYPOOL_AGENT_ENDPOINT:-${PUBLIC_ORIGIN}${PUBLIC_PREFIX}/api/covered-job-receipt}"
 LOG="${POLICYPOOL_KEEPWARM_LOG:-/Users/qdee/.okx-agent-task/logs/policypool-keepwarm.log}"
 NODE_BIN="${POLICYPOOL_NODE_BIN:-}"
 

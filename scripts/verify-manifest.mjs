@@ -119,6 +119,29 @@ assert.equal(manifest.providers.filter((provider) => provider.coverableNow).leng
 assert.equal(manifest.providers.find((provider) => provider.agentId === "3808")?.coverableNow, false);
 assert.doesNotMatch(JSON.stringify(manifest), /private.key|seed phrase|fully autonomous/i);
 
+const previousPublicOrigin = process.env.POLICYPOOL_PUBLIC_ORIGIN;
+const previousPublicPathPrefix = process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+try {
+  process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://okx-agent-review-relay.onrender.com";
+  process.env.POLICYPOOL_PUBLIC_PATH_PREFIX = "/policypool";
+  const relayedManifest = await getManifest();
+  assert.equal(
+    relayedManifest.service.endpoint,
+    "https://okx-agent-review-relay.onrender.com/policypool/api/covered-job-receipt",
+  );
+  assert.equal(
+    relayedManifest.service.preflight,
+    "https://okx-agent-review-relay.onrender.com/policypool/api/coverage-preflight",
+  );
+  assert.equal(relayedManifest.input.appliesTo, relayedManifest.service.endpoint);
+  assert.doesNotMatch(JSON.stringify(relayedManifest), /vercel\.app/i);
+} finally {
+  if (typeof previousPublicOrigin === "undefined") delete process.env.POLICYPOOL_PUBLIC_ORIGIN;
+  else process.env.POLICYPOOL_PUBLIC_ORIGIN = previousPublicOrigin;
+  if (typeof previousPublicPathPrefix === "undefined") delete process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+  else process.env.POLICYPOOL_PUBLIC_PATH_PREFIX = previousPublicPathPrefix;
+}
+
 const configuredCap = await getManifest({ reserveAtomic: 9_000_000 });
 assert.equal(configuredCap.coverage.maximumAtomic, "5000000");
 
