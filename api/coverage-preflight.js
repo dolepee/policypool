@@ -24,7 +24,7 @@ import { createRateLimiter, enforceRateLimit } from "./lib/rate-limit.js";
 import { evaluateGuard } from "./covered-job-receipt.js";
 import { clean, formatUsdtAtomic, header, parseUsdtAtomic, sendJson as rawSendJson, sha256 } from "./lib/utils.js";
 import { enrichCoverageResponse } from "./lib/coverage-state.js";
-import { requestPublicPathUrl } from "./lib/public-origin.js";
+import { canonicalRequestPublicUrl } from "./lib/public-origin.js";
 
 // Every response from this endpoint carries an explicit lifecycle state and
 // next action, so a buyer agent can tell "coverable" from "covered".
@@ -180,7 +180,7 @@ function eventHintEvidenceIntent(input) {
 }
 
 function paidEndpoint(req, quoteToken) {
-  const endpoint = requestPublicPathUrl(req, "/api/covered-job-receipt");
+  const endpoint = canonicalRequestPublicUrl(req, "/api/covered-job-receipt");
   if (quoteToken) endpoint.searchParams.set("quote", quoteToken);
   return endpoint.toString();
 }

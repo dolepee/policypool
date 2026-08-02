@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import {
+  canonicalRequestPublicUrl,
   configuredPublicOrigin,
   publicUrl,
   requestPublicOrigin,
-  requestPublicPathUrl,
-  requestPublicUrl,
   __test,
 } from "../api/lib/public-origin.js";
 import { universalPublicOrigin } from "../api/lib/universal-config.js";
@@ -21,26 +20,40 @@ assert.equal(
   "https://okx-agent-review-relay.onrender.com/policypool/api/covered-job-receipt",
 );
 assert.equal(
-  requestPublicUrl({ url: "/api/covered-job-receipt?quote=bound", headers: {} }, "/api/covered-job-receipt", relayed).toString(),
-  "https://okx-agent-review-relay.onrender.com/policypool/api/covered-job-receipt?quote=bound",
-);
-assert.equal(
-  requestPublicUrl(
-    { url: "/policypool/api/covered-job-receipt?quote=bound", headers: {} },
-    "/api/covered-job-receipt",
+  canonicalRequestPublicUrl(
+    { url: "/api/coverage-preflight?attacker=1", headers: {} },
+    "/api/covered-job-receipt?quote=bound",
     relayed,
   ).toString(),
   "https://okx-agent-review-relay.onrender.com/policypool/api/covered-job-receipt?quote=bound",
-  "a prefix-preserving proxy path must not duplicate the configured prefix",
+  "an exact service link must never inherit the current handler path or query",
 );
 assert.equal(
-  requestPublicPathUrl(
-    { url: "/api/coverage-preflight?attacker=1", headers: {} },
+  canonicalRequestPublicUrl(
+    { url: "/policypool/api/coverage-preflight", headers: {} },
     "/api/covered-job-receipt",
     relayed,
   ).toString(),
   "https://okx-agent-review-relay.onrender.com/policypool/api/covered-job-receipt",
-  "an exact service link must never inherit the current handler path or query",
+  "a prefix-preserving proxy request must not affect the fixed service route",
+);
+const overlappingPrefix = {
+  POLICYPOOL_PUBLIC_ORIGIN: "https://review-relay.example",
+  POLICYPOOL_PUBLIC_PATH_PREFIX: "/api",
+};
+assert.equal(
+  canonicalRequestPublicUrl(
+    { url: "/api/covered-job-receipt", headers: {} },
+    "/api/covered-job-receipt",
+    overlappingPrefix,
+  ).toString(),
+  "https://review-relay.example/api/api/covered-job-receipt",
+  "an overlapping mount prefix must still be applied to the canonical handler path",
+);
+assert.equal(
+  publicUrl("/api/covered-job-receipt", overlappingPrefix),
+  "https://review-relay.example/api/api/covered-job-receipt",
+  "request-time and manifest URLs must agree for an overlapping mount prefix",
 );
 assert.equal(
   requestPublicOrigin({ headers: { "x-forwarded-host": "attacker.invalid" } }, configured),
@@ -69,7 +82,7 @@ assert.equal(
   "https://policypool-xlayer-api.onrender.com",
 );
 assert.equal(
-  requestPublicPathUrl(
+  canonicalRequestPublicUrl(
     { headers: { "x-forwarded-host": "policypool-xlayer-api.onrender.com" } },
     "/api/covered-job-receipt",
     { POLICYPOOL_PUBLIC_PATH_PREFIX: "/policypool" },
@@ -77,12 +90,12 @@ assert.equal(
   "https://policypool-xlayer-api.onrender.com/policypool/api/covered-job-receipt",
 );
 assert.equal(
-  requestPublicUrl({
-    url: "https://attacker.invalid/api/covered-job-receipt?quote=bound",
+  canonicalRequestPublicUrl({
+    url: "https://attacker.invalid/foreign/path?quote=attacker",
     headers: { "x-forwarded-host": "policypool-xlayer-api.onrender.com" },
-  }, "/api/covered-job-receipt", {}).toString(),
+  }, "/api/covered-job-receipt?quote=bound", {}).toString(),
   "https://policypool-xlayer-api.onrender.com/api/covered-job-receipt?quote=bound",
-  "an absolute request URL must never override the selected public origin",
+  "an absolute request URL must never override the canonical service route",
 );
 
 for (const invalid of [

@@ -23,7 +23,7 @@ import {
   QuoteConfigurationError,
   QuoteValidationError,
 } from "./lib/quote.js";
-import { publicUrl, requestPublicPathUrl } from "./lib/public-origin.js";
+import { canonicalRequestPublicUrl, publicUrl } from "./lib/public-origin.js";
 import {
   clean,
   formatUsdtAtomic,
@@ -180,7 +180,7 @@ const OUTPUT_SCHEMA = {
 };
 
 function absoluteUrl(req, quoteToken = "") {
-  const url = requestPublicPathUrl(req, "/api/covered-job-receipt");
+  const url = canonicalRequestPublicUrl(req, "/api/covered-job-receipt");
   if (quoteToken) url.searchParams.set("quote", quoteToken);
   return url.toString();
 }

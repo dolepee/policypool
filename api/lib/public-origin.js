@@ -85,26 +85,14 @@ export function publicUrl(pathname, environment = process.env) {
   ).toString();
 }
 
-export function requestPublicPathUrl(req, pathname, environment = process.env) {
+// Builds a public URL for a known canonical handler path. The pathname argument
+// is deliberately not derived from req.url: reverse proxies may preserve or
+// rewrite their public mount, while the service contract itself is fixed.
+export function canonicalRequestPublicUrl(req, pathname, environment = process.env) {
   const origin = requestPublicOrigin(req, environment);
-  const requested = new URL(pathname, `${DEFAULT_PUBLIC_ORIGIN}/`);
+  const canonical = new URL(pathname, `${DEFAULT_PUBLIC_ORIGIN}/`);
   const prefix = publicPathPrefix(environment);
-  const publicPath = prefix && (
-    requested.pathname === prefix
-    || requested.pathname.startsWith(`${prefix}/`)
-  )
-    ? requested.pathname
-    : `${prefix}${requested.pathname}`;
-  return new URL(`${publicPath}${requested.search}`, `${origin}/`);
-}
-
-export function requestPublicUrl(req, fallbackPath, environment = process.env) {
-  const requested = new URL(req?.url || fallbackPath, `${DEFAULT_PUBLIC_ORIGIN}/`);
-  return requestPublicPathUrl(
-    req,
-    `${requested.pathname}${requested.search}`,
-    environment,
-  );
+  return new URL(`${prefix}${canonical.pathname}${canonical.search}`, `${origin}/`);
 }
 
 export const __test = { publicPathPrefix };
