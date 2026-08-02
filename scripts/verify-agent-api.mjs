@@ -1345,6 +1345,34 @@ assert.equal(definitelyNotSettled.calls.reconcile, 1);
 assert.equal((await definitelyNotSettled.ledger.stats()).pendingAtomic, "0");
 assert.equal((await definitelyNotSettled.ledger.stats()).recordCount, 0);
 
+const unconfirmedNoMatchRelease = makeRuntime({
+  settlementThrows: true,
+  recoveredSettlementStatus: "not_found",
+  releaseReturnsNotPending: true,
+});
+const unconfirmedNoMatchHeader = makePaymentHeader("settlement-not-found-release-unconfirmed");
+const unconfirmedNoMatchRequest = {
+  method: "POST",
+  headers: { "payment-signature": unconfirmedNoMatchHeader },
+  body: { ...sampleBody, targetJobId: `0x${"2".repeat(64)}` },
+};
+assert.equal(
+  (await callHandler(unconfirmedNoMatchRelease.handler, unconfirmedNoMatchRequest)).statusCode,
+  503,
+);
+const unconfirmedNoMatchResponse = await callHandler(
+  unconfirmedNoMatchRelease.handler,
+  unconfirmedNoMatchRequest,
+);
+assert.equal(unconfirmedNoMatchResponse.statusCode, 503);
+assert.equal(unconfirmedNoMatchResponse.headers["payment-required"], undefined);
+assert.equal(
+  unconfirmedNoMatchResponse.json().error,
+  "durable_settlement_reconciliation_unavailable",
+);
+assert.equal(unconfirmedNoMatchResponse.json().charged, null);
+assert.equal(unconfirmedNoMatchRelease.calls.settle, 1);
+
 const markerWriteFailure = makeRuntime({
   settlementThrows: true,
   recoveredSettlementStatus: "settled",

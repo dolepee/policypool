@@ -767,7 +767,10 @@ export function createHandler(dependencies = {}) {
           }
           if (reconciliation.status === "not_found") {
             try {
-              await ledger.release(existingPayment);
+              const released = await ledger.release(existingPayment);
+              if (released?.status !== "released") {
+                return durableSettlementMarkerUnavailable(res, existingPayment);
+              }
             } catch {
               return durableSettlementMarkerUnavailable(res, existingPayment);
             }
