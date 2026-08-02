@@ -19,7 +19,7 @@ function publicPathPrefix(environment = process.env) {
     || raw.includes("//")
     || raw.includes("\\")
     || raw.includes("%")
-    || raw.split("/").includes("..")
+    || raw.split("/").some((segment) => segment === "." || segment === "..")
     || !/^\/[a-zA-Z0-9._~-]+(?:\/[a-zA-Z0-9._~-]+)*$/.test(raw)
   ) {
     throw new PublicOriginConfigurationError(
@@ -88,9 +88,7 @@ export function publicUrl(pathname, environment = process.env) {
 export function requestPublicPathUrl(req, pathname, environment = process.env) {
   const origin = requestPublicOrigin(req, environment);
   const requested = new URL(pathname, `${DEFAULT_PUBLIC_ORIGIN}/`);
-  const prefix = String(environment.POLICYPOOL_PUBLIC_ORIGIN || "").trim()
-    ? publicPathPrefix(environment)
-    : "";
+  const prefix = publicPathPrefix(environment);
   return new URL(`${prefix}${requested.pathname}${requested.search}`, `${origin}/`);
 }
 

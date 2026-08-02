@@ -39,7 +39,17 @@ assert.equal(
   "the configured canonical origin must override forwarded-host input",
 );
 
-for (const invalidPrefix of ["/", "policypool", "/policypool/", "//policypool", "/../x", "/policy%2fpool", "/policy\\pool"]) {
+for (const invalidPrefix of [
+  "/",
+  "policypool",
+  "/policypool/",
+  "//policypool",
+  "/./x",
+  "/x/./y",
+  "/../x",
+  "/policy%2fpool",
+  "/policy\\pool",
+]) {
   assert.throws(
     () => __test.publicPathPrefix({ POLICYPOOL_PUBLIC_PATH_PREFIX: invalidPrefix }),
     /normalized absolute path prefix/,
@@ -48,6 +58,14 @@ for (const invalidPrefix of ["/", "policypool", "/policypool/", "//policypool", 
 assert.equal(
   requestPublicOrigin({ headers: { "x-forwarded-host": "policypool-xlayer-api.onrender.com" } }, {}),
   "https://policypool-xlayer-api.onrender.com",
+);
+assert.equal(
+  requestPublicPathUrl(
+    { headers: { "x-forwarded-host": "policypool-xlayer-api.onrender.com" } },
+    "/api/covered-job-receipt",
+    { POLICYPOOL_PUBLIC_PATH_PREFIX: "/policypool" },
+  ).toString(),
+  "https://policypool-xlayer-api.onrender.com/policypool/api/covered-job-receipt",
 );
 assert.equal(
   requestPublicUrl({
@@ -83,6 +101,11 @@ assert.equal(
   }),
   "https://policypool.vercel.app",
   "the fixed-path v0.3 relay must not rewrite the separate v0.4 origin",
+);
+assert.equal(
+  universalPublicOrigin({ POLICYPOOL_PUBLIC_ORIGIN: "https://legacy-v04.example" }),
+  "https://legacy-v04.example",
+  "existing v0.4 deployments must retain the original public-origin fallback",
 );
 assert.equal(
   universalPublicOrigin({ POLICYPOOL_UNIVERSAL_PUBLIC_ORIGIN: "http://unsafe.example" }),

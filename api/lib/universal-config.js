@@ -27,7 +27,9 @@ function optionalHttpsOrigin(value) {
 
 export function universalPublicOrigin(environment = process.env) {
   return optionalHttpsOrigin(
-    environment.POLICYPOOL_UNIVERSAL_PUBLIC_ORIGIN || "https://policypool.vercel.app",
+    environment.POLICYPOOL_UNIVERSAL_PUBLIC_ORIGIN
+      || environment.POLICYPOOL_PUBLIC_ORIGIN
+      || "https://policypool.vercel.app",
   );
 }
 
