@@ -13,20 +13,39 @@ import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 
 AGENT_ID = "4674"
 AGENT_NAME = "PolicyPool"
 SERVICE_NAME = "Covered Job Receipt"
-ENDPOINT = os.environ.get(
-    "POLICYPOOL_AGENT_ENDPOINT",
-    "https://policypool.vercel.app/api/covered-job-receipt",
-).strip()
-PREFLIGHT_ENDPOINT = os.environ.get(
-    "POLICYPOOL_PREFLIGHT_ENDPOINT",
-    "https://policypool.vercel.app/api/coverage-preflight",
-).strip()
+
+
+def canonical_endpoint(path: str, environment: Mapping[str, str] = os.environ) -> str:
+    origin = environment.get(
+        "POLICYPOOL_PUBLIC_ORIGIN",
+        "https://policypool.vercel.app",
+    ).strip().rstrip("/")
+    prefix = environment.get("POLICYPOOL_PUBLIC_PATH_PREFIX", "").strip().rstrip("/")
+    return f"{origin}{prefix}{path}"
+
+
+def configured_endpoint(
+    override_name: str,
+    path: str,
+    environment: Mapping[str, str] = os.environ,
+) -> str:
+    return environment.get(override_name, "").strip() or canonical_endpoint(
+        path, environment
+    )
+
+
+ENDPOINT = configured_endpoint(
+    "POLICYPOOL_AGENT_ENDPOINT", "/api/covered-job-receipt"
+)
+PREFLIGHT_ENDPOINT = configured_endpoint(
+    "POLICYPOOL_PREFLIGHT_ENDPOINT", "/api/coverage-preflight"
+)
 RESERVE_WALLET = "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7"
 PLATFORM_REVIEW_AGENT_IDS = {
     value.strip()
@@ -570,6 +589,25 @@ def run_self_test() -> None:
     assert ("import " + "sqlite3") not in source
     assert ("command" + "_queue") not in source
     assert okx_a2a_binary([sys.executable]) == sys.executable
+    relay_environment = {
+        "POLICYPOOL_PUBLIC_ORIGIN": "https://review-relay.example",
+        "POLICYPOOL_PUBLIC_PATH_PREFIX": "/policypool",
+    }
+    assert canonical_endpoint(
+        "/api/covered-job-receipt", relay_environment
+    ) == "https://review-relay.example/policypool/api/covered-job-receipt"
+    assert canonical_endpoint(
+        "/api/coverage-preflight", relay_environment
+    ) == "https://review-relay.example/policypool/api/coverage-preflight"
+    explicit_environment = {
+        **relay_environment,
+        "POLICYPOOL_AGENT_ENDPOINT": "https://explicit.example/receipt",
+    }
+    assert configured_endpoint(
+        "POLICYPOOL_AGENT_ENDPOINT",
+        "/api/covered-job-receipt",
+        explicit_environment,
+    ) == "https://explicit.example/receipt"
     print(
         "PolicyPool responder gate passed: supported session polling, one reply, "
         "and replay suppression verified."

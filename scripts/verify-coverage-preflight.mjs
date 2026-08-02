@@ -159,6 +159,7 @@ assert.equal(belowMinimum.json().reason, "requested_coverage_below_minimum");
 
 const eligible = await callHandler(handler, {
   method: "POST",
+  url: "/api/coverage-preflight",
   headers: { host: "policypool.test" },
   body: {
     targetAgent: "GlassDesk#3465",
@@ -191,6 +192,7 @@ try {
   process.env.POLICYPOOL_PUBLIC_PATH_PREFIX = "/policypool";
   const relayedEligible = await callHandler(handler, {
     method: "POST",
+    url: "/policypool/api/coverage-preflight",
     headers: { host: "attacker.invalid" },
     body: {
       targetAgent: "GlassDesk#3465",

@@ -3,6 +3,7 @@ import {
   configuredPublicOrigin,
   publicUrl,
   requestPublicOrigin,
+  requestPublicPathUrl,
   requestPublicUrl,
   __test,
 } from "../api/lib/public-origin.js";
@@ -22,6 +23,15 @@ assert.equal(
 assert.equal(
   requestPublicUrl({ url: "/api/covered-job-receipt?quote=bound", headers: {} }, "/api/covered-job-receipt", relayed).toString(),
   "https://okx-agent-review-relay.onrender.com/policypool/api/covered-job-receipt?quote=bound",
+);
+assert.equal(
+  requestPublicPathUrl(
+    { url: "/api/coverage-preflight?attacker=1", headers: {} },
+    "/api/covered-job-receipt",
+    relayed,
+  ).toString(),
+  "https://okx-agent-review-relay.onrender.com/policypool/api/covered-job-receipt",
+  "an exact service link must never inherit the current handler path or query",
 );
 assert.equal(
   requestPublicOrigin({ headers: { "x-forwarded-host": "attacker.invalid" } }, configured),

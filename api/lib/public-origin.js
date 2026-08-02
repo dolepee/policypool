@@ -85,13 +85,22 @@ export function publicUrl(pathname, environment = process.env) {
   ).toString();
 }
 
-export function requestPublicUrl(req, fallbackPath, environment = process.env) {
+export function requestPublicPathUrl(req, pathname, environment = process.env) {
   const origin = requestPublicOrigin(req, environment);
-  const requested = new URL(req?.url || fallbackPath, `${DEFAULT_PUBLIC_ORIGIN}/`);
+  const requested = new URL(pathname, `${DEFAULT_PUBLIC_ORIGIN}/`);
   const prefix = String(environment.POLICYPOOL_PUBLIC_ORIGIN || "").trim()
     ? publicPathPrefix(environment)
     : "";
   return new URL(`${prefix}${requested.pathname}${requested.search}`, `${origin}/`);
+}
+
+export function requestPublicUrl(req, fallbackPath, environment = process.env) {
+  const requested = new URL(req?.url || fallbackPath, `${DEFAULT_PUBLIC_ORIGIN}/`);
+  return requestPublicPathUrl(
+    req,
+    `${requested.pathname}${requested.search}`,
+    environment,
+  );
 }
 
 export const __test = { publicPathPrefix };
