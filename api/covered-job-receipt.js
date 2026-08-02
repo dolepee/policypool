@@ -23,6 +23,7 @@ import {
   QuoteConfigurationError,
   QuoteValidationError,
 } from "./lib/quote.js";
+import { publicUrl, requestPublicUrl } from "./lib/public-origin.js";
 import {
   clean,
   formatUsdtAtomic,
@@ -179,12 +180,7 @@ const OUTPUT_SCHEMA = {
 };
 
 function absoluteUrl(req, quoteToken = "") {
-  const host = header(req, "x-forwarded-host") || header(req, "host") || "policypool.vercel.app";
-  const proto = header(req, "x-forwarded-proto") || "https";
-  const absolute = req.url?.startsWith("http")
-    ? req.url
-    : `${proto}://${host}${req.url || "/api/covered-job-receipt"}`;
-  const url = new URL(absolute);
+  const url = requestPublicUrl(req, "/api/covered-job-receipt");
   if (quoteToken) url.searchParams.set("quote", quoteToken);
   return url.toString();
 }
@@ -207,7 +203,7 @@ function challengeFor(req, error = "Payment required", quoteToken = "") {
       error,
       outputSchema: OUTPUT_SCHEMA,
       freePreflight: {
-        endpoint: "https://policypool.vercel.app/api/coverage-preflight",
+        endpoint: publicUrl("/api/coverage-preflight"),
         required: REQUIRED_PREFLIGHT_EVIDENCE,
         charged: false,
       },
@@ -443,7 +439,7 @@ function buildReceipt({
       onchain: universalCovenant,
     } : null,
     providerRelay: pendingClock ? {
-      endpoint: "https://policypool.vercel.app/api/provider-relay",
+      endpoint: publicUrl("/api/provider-relay"),
       grantId: relayGrantPayload?.grantId || null,
       grantExpiresAt: relayGrantPayload?.expiresAt || null,
       grantBoundTo: ["covenant", "target job", "buyer", "agent", "service"],
@@ -555,7 +551,7 @@ function rejectStaticGuard(res, guard) {
   if (MISSING_EVIDENCE_REASONS.has(guard.reason)) {
     payload.requiredEvidence = REQUIRED_COVERAGE_EVIDENCE;
     payload.freePreflight = {
-      endpoint: "https://policypool.vercel.app/api/coverage-preflight",
+      endpoint: publicUrl("/api/coverage-preflight"),
       required: REQUIRED_PREFLIGHT_EVIDENCE,
       charged: false,
     };

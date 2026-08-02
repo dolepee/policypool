@@ -50,6 +50,7 @@ const webPackage = JSON.parse(await readFile(new URL("../web/package.json", impo
 const webBuild = webPackage.scripts?.build || "";
 assert.match(webBuild, /rm -rf dist/, "web build must remove stale output before copying assets");
 assert.doesNotMatch(webBuild, /\bagent\.(?:html|js)\b/, "web build must not restore retired agent assets");
+assert.match(webBuild, /agent-avatar-v2\.png/, "web build must publish the reviewed marketplace avatar");
 
 const providers = await readFile(new URL("../web/providers.html", import.meta.url), "utf8");
 assert.match(providers, /FOUNDING REGISTRY \/ 03 POLICIES/, "provider registry must publish all three founding policies");

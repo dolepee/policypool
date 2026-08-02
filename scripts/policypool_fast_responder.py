@@ -19,8 +19,14 @@ from typing import Any, Callable
 AGENT_ID = "4674"
 AGENT_NAME = "PolicyPool"
 SERVICE_NAME = "Covered Job Receipt"
-ENDPOINT = "https://policypool.vercel.app/api/covered-job-receipt"
-PREFLIGHT_ENDPOINT = "https://policypool.vercel.app/api/coverage-preflight"
+ENDPOINT = os.environ.get(
+    "POLICYPOOL_AGENT_ENDPOINT",
+    "https://policypool.vercel.app/api/covered-job-receipt",
+).strip()
+PREFLIGHT_ENDPOINT = os.environ.get(
+    "POLICYPOOL_PREFLIGHT_ENDPOINT",
+    "https://policypool.vercel.app/api/coverage-preflight",
+).strip()
 RESERVE_WALLET = "0x4abbae03afff90f50d4f6b42b3e362f5228ad4c7"
 PLATFORM_REVIEW_AGENT_IDS = {
     value.strip()

@@ -1,4 +1,5 @@
 import { getAddress } from "viem";
+import { publicUrl } from "./public-origin.js";
 
 export const XLAYER = {
   id: 196,
@@ -22,7 +23,7 @@ export const COVERAGE = {
   maxAtomic: process.env.POLICYPOOL_MAX_COVERAGE_ATOMIC || "5000000",
   minAtomic: process.env.POLICYPOOL_MIN_COVERAGE_ATOMIC || "500000",
   maxDurationSeconds: Number(process.env.POLICYPOOL_MAX_DURATION_SECONDS || 7 * 24 * 60 * 60),
-  publicUrl: process.env.POLICYPOOL_RESERVE_URL || "https://policypool.vercel.app/ledger#reserve",
+  publicUrl: process.env.POLICYPOOL_RESERVE_URL || publicUrl("/ledger#reserve"),
 };
 
 // PolicyPool's own listing. A coverage fee paid straight to the generic HTTP

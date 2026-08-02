@@ -183,6 +183,34 @@ assert.equal(eligible.json().paidRequest.body.quoteId, eligible.json().quote.tok
 assert.equal(eligible.json().paidRequest.bodyMayBeOmittedOnReplay, true);
 assert.match(eligible.json().quote.token, /^ppq_[a-f0-9]{32}\.[a-f0-9]{64}$/);
 assert.equal(eligible.json().coverage.enrollmentClosesAt, "2026-07-11T14:01:00.000Z");
+
+const previousPublicOrigin = process.env.POLICYPOOL_PUBLIC_ORIGIN;
+const previousPublicPathPrefix = process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+try {
+  process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://okx-agent-review-relay.onrender.com";
+  process.env.POLICYPOOL_PUBLIC_PATH_PREFIX = "/policypool";
+  const relayedEligible = await callHandler(handler, {
+    method: "POST",
+    headers: { host: "attacker.invalid" },
+    body: {
+      targetAgent: "GlassDesk#3465",
+      taskReference: task.publicUrl,
+      requestedCoverageUSDT: "0.5",
+    },
+  });
+  assert.equal(relayedEligible.statusCode, 200);
+  const relayedEndpoint = new URL(relayedEligible.json().paidRequest.endpoint);
+  assert.equal(
+    `${relayedEndpoint.origin}${relayedEndpoint.pathname}`,
+    "https://okx-agent-review-relay.onrender.com/policypool/api/covered-job-receipt",
+  );
+  assert.doesNotMatch(JSON.stringify(relayedEligible.json()), /vercel\.app/i);
+} finally {
+  if (typeof previousPublicOrigin === "undefined") delete process.env.POLICYPOOL_PUBLIC_ORIGIN;
+  else process.env.POLICYPOOL_PUBLIC_ORIGIN = previousPublicOrigin;
+  if (typeof previousPublicPathPrefix === "undefined") delete process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+  else process.env.POLICYPOOL_PUBLIC_PATH_PREFIX = previousPublicPathPrefix;
+}
 // The public path's evidence.source is an established response value. Adding a
 // direct-evidence source must not overwrite it: this release is additive, and a
 // consumer comparing or displaying that exact string must keep working.

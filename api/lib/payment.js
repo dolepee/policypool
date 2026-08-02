@@ -77,6 +77,17 @@ function selfHostedFacilitatorEnabled(environment = process.env) {
   );
 }
 
+function officialFacilitatorRequired(environment = process.env) {
+  const value = String(environment.POLICYPOOL_REQUIRE_OKX_FACILITATOR || "")
+    .trim()
+    .toLowerCase();
+  if (!value || value === "false") return false;
+  if (value === "true") return true;
+  throw new PaymentConfigurationError(
+    "POLICYPOOL_REQUIRE_OKX_FACILITATOR must be true or false",
+  );
+}
+
 function createLocalFacilitator(environment = process.env) {
   const privateKey = environment.POLICYPOOL_FACILITATOR_PRIVATE_KEY;
   if (!privateKey) return null;
@@ -115,11 +126,20 @@ function createLocalFacilitator(environment = process.env) {
   return facilitator;
 }
 
-export function createPaymentService({ facilitator, chain } = {}) {
+export function createPaymentService({ facilitator, chain, environment = process.env } = {}) {
   let resolvedFacilitator = facilitator;
   function getFacilitator() {
     if (!resolvedFacilitator) {
-      resolvedFacilitator = createOkxFacilitator() || createLocalFacilitator();
+      const okxFacilitator = createOkxFacilitator(environment);
+      if (okxFacilitator) {
+        resolvedFacilitator = okxFacilitator;
+      } else if (officialFacilitatorRequired(environment)) {
+        throw new PaymentConfigurationError(
+          "Official OKX facilitator credentials are required but not configured",
+        );
+      } else {
+        resolvedFacilitator = createLocalFacilitator(environment);
+      }
     }
     if (!resolvedFacilitator) {
       throw new PaymentConfigurationError(
@@ -203,5 +223,6 @@ export const __test = {
   assertAccepted,
   createLocalFacilitator,
   createOkxFacilitator,
+  officialFacilitatorRequired,
   selfHostedFacilitatorEnabled,
 };

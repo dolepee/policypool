@@ -24,6 +24,7 @@ import { createRateLimiter, enforceRateLimit } from "./lib/rate-limit.js";
 import { evaluateGuard } from "./covered-job-receipt.js";
 import { clean, formatUsdtAtomic, header, parseUsdtAtomic, sendJson as rawSendJson, sha256 } from "./lib/utils.js";
 import { enrichCoverageResponse } from "./lib/coverage-state.js";
+import { requestPublicUrl } from "./lib/public-origin.js";
 
 // Every response from this endpoint carries an explicit lifecycle state and
 // next action, so a buyer agent can tell "coverable" from "covered".
@@ -179,9 +180,7 @@ function eventHintEvidenceIntent(input) {
 }
 
 function paidEndpoint(req, quoteToken) {
-  const host = header(req, "x-forwarded-host") || header(req, "host") || "policypool.vercel.app";
-  const proto = header(req, "x-forwarded-proto") || "https";
-  const endpoint = new URL(`${proto}://${host}/api/covered-job-receipt`);
+  const endpoint = requestPublicUrl(req, "/api/covered-job-receipt");
   if (quoteToken) endpoint.searchParams.set("quote", quoteToken);
   return endpoint.toString();
 }
