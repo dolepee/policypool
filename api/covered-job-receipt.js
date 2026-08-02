@@ -1144,6 +1144,7 @@ export function createHandler(dependencies = {}) {
     }
 
     let settlement;
+    const settlementAttemptedAt = now();
     try {
       settlement = await payment.settle(verified, requirements);
     } catch (error) {
@@ -1170,10 +1171,14 @@ export function createHandler(dependencies = {}) {
         if (
           error instanceof PaymentSettlementUnknownError
         ) {
-          const attemptedAt = now();
           let recovery;
           try {
-            recovery = payment.settlementRecovery(verified, requirements, error, attemptedAt);
+            recovery = payment.settlementRecovery(
+              verified,
+              requirements,
+              error,
+              settlementAttemptedAt,
+            );
           } catch {
             return durableSettlementMarkerUnavailable(res, pending);
           }
@@ -1181,7 +1186,7 @@ export function createHandler(dependencies = {}) {
             ...pending,
             settlement: {
               status: "unknown",
-              attemptedAt: new Date(attemptedAt).toISOString(),
+              attemptedAt: new Date(settlementAttemptedAt).toISOString(),
               error: error.code,
               recovery,
             },

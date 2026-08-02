@@ -144,6 +144,7 @@ function makeRuntime({
   settlementVerificationThrows = false,
   recoveredSettlementStatus = "pending",
   markSettlementUnknownFails = false,
+  onSettle,
   jobStatus = 1,
   targetAmountAtomic = "5000000",
   createdAt = "2026-07-10T09:57:00.000Z",
@@ -238,6 +239,7 @@ function makeRuntime({
     },
     async settle(payload) {
       calls.settle += 1;
+      onSettle?.();
       if (settlementThrows) throw new Error("simulated_settlement_transport_failure");
       if (settlementFailsWithTransaction) {
         return {
@@ -1078,6 +1080,33 @@ const ambiguousReceiptId = ambiguousSettlementResponse.json().receiptId;
 assert.ok(ambiguousReceiptId);
 assert.equal((await ambiguousSettlement.ledger.stats()).pendingAtomic, "1000000");
 assert.equal((await ambiguousSettlement.ledger.stats()).recordCount, 1);
+
+let delayedSettlementNow = FIXED_NOW;
+const delayedAmbiguousSettlement = makeRuntime({
+  settlementThrows: true,
+  clock: () => delayedSettlementNow,
+  onSettle: () => {
+    delayedSettlementNow += 2 * 60 * 1_000;
+  },
+});
+const delayedAmbiguousResponse = await callHandler(delayedAmbiguousSettlement.handler, {
+  method: "POST",
+  headers: { "payment-signature": makePaymentHeader("delayed-settlement-unknown") },
+  body: { ...sampleBody, targetJobId: `0x${"c".repeat(64)}` },
+});
+assert.equal(delayedAmbiguousResponse.statusCode, 503);
+const delayedAmbiguousRecord = await delayedAmbiguousSettlement.ledger.get(
+  delayedAmbiguousResponse.json().receiptId,
+);
+assert.equal(
+  delayedAmbiguousRecord.settlement.recovery.notBeforeTimestamp,
+  Math.floor(FIXED_NOW / 1_000) - 30,
+  "the recovery scan must begin before facilitator submission, not after a delayed failure",
+);
+assert.equal(
+  delayedAmbiguousRecord.settlement.attemptedAt,
+  new Date(FIXED_NOW).toISOString(),
+);
 assert.equal(
   (await ambiguousSettlement.ledger.get(ambiguousReceiptId)).settlement.status,
   "unknown",
