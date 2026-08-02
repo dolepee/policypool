@@ -331,6 +331,11 @@ const challengeBody = unpaid.json();
 assert.equal(challenge.x402Version, 2);
 assert.equal(challenge.accepts[0].network, "eip155:196");
 assert.equal(challenge.accepts[0].amount, "100000");
+assert.deepEqual(
+  Object.keys(challenge.accepts[0]).sort(),
+  ["amount", "asset", "extra", "maxTimeoutSeconds", "network", "payTo", "scheme"].sort(),
+  "payment requirements must contain only the canonical x402 v2 fields",
+);
 assert.equal(challenge.accepts[0].extra.name, "USD₮0");
 assert.equal(challenge.accepts[0].extra.version, "1");
 assert.equal(challenge.resource.description, "PolicyPool Covered Job Receipt API");

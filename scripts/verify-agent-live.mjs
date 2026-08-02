@@ -93,16 +93,11 @@ const unpaidBody = await unpaid.json();
 assert.equal(challenge.x402Version, 2);
 assert.equal(challenge.accepts[0].network, "eip155:196");
 assert.equal(challenge.accepts[0].amount, "100000");
-const maybeField = (name, expected) => {
-  const v = challenge.accepts[0][name];
-  if (typeof v !== "undefined") {
-    assert.equal(v, expected, `unexpected ${name}: ${v}`);
-  }
-};
-
-maybeField("maxAmountRequired", "100000");
-maybeField("decimals", 6);
-maybeField("symbol", "USDT");
+assert.deepEqual(
+  Object.keys(challenge.accepts[0]).sort(),
+  ["amount", "asset", "extra", "maxTimeoutSeconds", "network", "payTo", "scheme"].sort(),
+  "live payment requirements must contain only the canonical x402 v2 fields",
+);
 assert.equal(
   ["USD₮0", "Tether USD"].includes(challenge.accepts[0].extra.name),
   true,
