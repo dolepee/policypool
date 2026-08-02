@@ -3,6 +3,7 @@
 set -u
 
 PUBLIC_ORIGIN="${POLICYPOOL_PUBLIC_ORIGIN:-https://policypool.vercel.app}"
+PUBLIC_ORIGIN="${PUBLIC_ORIGIN%/}"
 PUBLIC_PREFIX="${POLICYPOOL_PUBLIC_PATH_PREFIX:-}"
 ENDPOINT="${POLICYPOOL_AGENT_ENDPOINT:-${PUBLIC_ORIGIN}${PUBLIC_PREFIX}/api/covered-job-receipt}"
 LOG="${POLICYPOOL_KEEPWARM_LOG:-/Users/qdee/.okx-agent-task/logs/policypool-keepwarm.log}"

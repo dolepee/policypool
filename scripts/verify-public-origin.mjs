@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   canonicalRequestPublicUrl,
   configuredPublicOrigin,
@@ -7,6 +8,16 @@ import {
   __test,
 } from "../api/lib/public-origin.js";
 import { universalPublicOrigin } from "../api/lib/universal-config.js";
+
+const keepwarmSource = await readFile(
+  new URL("./policypool_keepwarm.sh", import.meta.url),
+  "utf8",
+);
+assert.match(
+  keepwarmSource,
+  /PUBLIC_ORIGIN="\$\{PUBLIC_ORIGIN%\/\}"/,
+  "keep-warm endpoint construction must normalize a valid trailing origin slash",
+);
 
 const configured = { POLICYPOOL_PUBLIC_ORIGIN: "https://policy.example" };
 assert.equal(configuredPublicOrigin(configured), "https://policy.example");
