@@ -45,10 +45,16 @@ function harness({ status, now, records = [record()] }) {
   const released = [];
   const payoutDue = [];
   let chainReads = 0;
+  let backfillCalls = 0;
   const ledger = {
     async list() { return records; },
     async markReleased(updated) { released.push(updated); },
     async markPayoutDue(updated) { payoutDue.push(updated); },
+    async backfillReceiptIntegrityAnchor(receiptId, _expectedReceiptHash, anchor) {
+      backfillCalls += 1;
+      const current = records.find((candidate) => candidate.receiptId === receiptId);
+      return current ? { ...current, receiptIntegrityAnchor: anchor } : null;
+    },
   };
   const handler = createReconcileHandler({
     ledger,
@@ -57,19 +63,29 @@ function harness({ status, now, records = [record()] }) {
     authorized: true,
     now: () => now,
   });
-  return { handler, released, payoutDue, get chainReads() { return chainReads; } };
+  return {
+    handler,
+    released,
+    payoutDue,
+    get chainReads() { return chainReads; },
+    get backfillCalls() { return backfillCalls; },
+  };
 }
 
 async function run(options) {
   const runtime = harness(options);
   const { handler, released, payoutDue } = runtime;
-  const response = await callHandler(handler, { method: "POST" });
+  const response = await callHandler(handler, {
+    method: "POST",
+    body: options.dryRun ? { dryRun: true } : {},
+  });
   return {
     statusCode: response.statusCode,
     body: response.json(),
     released,
     payoutDue,
     chainReads: runtime.chainReads,
+    backfillCalls: runtime.backfillCalls,
   };
 }
 
@@ -136,5 +152,31 @@ assert.equal(rejectedAlteration.body.failures[0].error, "receipt_hash_mismatch")
 assert.equal(rejectedAlteration.chainReads, 0, "an altered receipt must fail before any chain read");
 assert.equal(rejectedAlteration.released.length, 0);
 assert.equal(rejectedAlteration.payoutDue.length, 0);
+
+const previousMigrations = process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS;
+const preAnchorDryRun = record({ receiptId: "ppc-1111111111111111" });
+delete preAnchorDryRun.receiptIntegrityAnchor;
+process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS = JSON.stringify([{
+  receiptId: preAnchorDryRun.receiptId,
+  receiptHash: preAnchorDryRun.receipt.receiptHash,
+  providerRelayEndpoint: null,
+}]);
+try {
+  const preview = await run({
+    status: 1,
+    now: BEFORE_DEADLINE,
+    records: [preAnchorDryRun],
+    dryRun: true,
+  });
+  assert.equal(preview.statusCode, 200);
+  assert.equal(preview.body.dryRun, true);
+  assert.equal(preview.backfillCalls, 0, "a dry run must not persist a receipt sidecar");
+} finally {
+  if (previousMigrations === undefined) {
+    delete process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS;
+  } else {
+    process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS = previousMigrations;
+  }
+}
 
 console.log("PolicyPool reconciler release path verified: delivered covenants release, ambiguous timing holds, breach path unchanged.");

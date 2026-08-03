@@ -266,9 +266,16 @@ export async function ensureReceiptIntegrityAnchor(
 export async function ensureVerifiedReceiptRecord(
   record,
   ledger,
-  { environment = process.env } = {},
+  { environment = process.env, persistAnchor = true } = {},
 ) {
-  const anchored = await ensureReceiptIntegrityAnchor(record, ledger, environment);
+  const anchored = record?.receipt
+    && !record.receiptIntegrityAnchor
+    && !persistAnchor
+    ? {
+      ...record,
+      receiptIntegrityAnchor: buildPreAnchorReceiptIntegrityAnchor(record, environment),
+    }
+    : await ensureReceiptIntegrityAnchor(record, ledger, environment);
   verifyReceiptIntegrity(anchored?.receipt, {
     environment,
     anchor: anchored?.receiptIntegrityAnchor || null,

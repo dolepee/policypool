@@ -94,7 +94,9 @@ export function createReconcileHandler(dependencies = {}) {
             }
             continue;
           }
-          const record = await ensureVerifiedReceiptRecord(candidate, ledger);
+          const record = await ensureVerifiedReceiptRecord(candidate, ledger, {
+            persistAnchor: !dryRun,
+          });
           if (record.state !== "active" || !record.targetOrder?.jobId) continue;
           const status = await chain.getJobStatus(record.targetOrder.jobId);
           const deadlineMs = Date.parse(record.receipt?.covenant?.deadline || "");

@@ -308,8 +308,13 @@ export function createUniversalReconciler({
 
   async function reconcileRecord(candidate, dryRun) {
     let original = candidate;
+    if (original?.receiptIntegrityAnchor && !original?.receipt) {
+      throw new ReceiptIntegrityError("receipt_document_missing");
+    }
     if (original?.receipt) {
-      original = await ensureVerifiedReceiptRecord(original, ledger);
+      original = await ensureVerifiedReceiptRecord(original, ledger, {
+        persistAnchor: !dryRun,
+      });
     } else if (
       !requiresCompensation(original)
       && !(
