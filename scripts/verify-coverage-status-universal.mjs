@@ -267,6 +267,9 @@ const activeRecord = ({ receiptId, universal, clockMode, deadline = PAST_DEADLIN
     version: universal ? "0.4.0" : "0.2.0",
     covenant: { deadline },
     target: { clockMode },
+    ...(clockMode === "policypool_relay"
+      ? { providerRelay: { endpoint: "https://policypool.dolepee.com/api/provider-relay" } }
+      : {}),
   },
   ...(universal ? { universalCovenant: { covenantId: `0x${"cc".repeat(32)}` } } : {}),
   targetOrder: { jobId: `0x${"ab".repeat(32)}` },

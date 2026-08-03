@@ -101,11 +101,12 @@ mixed.providerRelay = {
 mixed.receiptHash = computeReceiptHash(mixed);
 assert.throws(
   () => verifyReceiptIntegrity(mixed),
-  (error) => error?.code === "receipt_public_origin_untrusted",
-  "even a rehashed receipt cannot substitute the configured relay with the Render route",
+  (error) => error?.code === "receipt_public_origin_mismatch",
+  "even a rehashed receipt cannot combine custom and Render PolicyPool routes",
 );
 
 const pendingRelay = structuredClone(custom);
+pendingRelay.target.clockMode = "policypool_relay";
 pendingRelay.providerRelay = {
   endpoint: "https://policypool.dolepee.com/api/provider-relay",
   grantId: "ppg-origin-compatibility",
@@ -165,14 +166,25 @@ for (const [endpoint, expectedRoute] of [
   };
   historicalRelay.receiptHash = computeReceiptHash(historicalRelay);
   assert.equal(
-    verifyReceiptIntegrity(historicalRelay, {
-      environment: {
-        POLICYPOOL_PUBLIC_ORIGIN: expectedRoute.origin,
-        POLICYPOOL_PUBLIC_PATH_PREFIX: expectedRoute.pathPrefix,
-      },
-    }).publicRoute,
+    verifyReceiptIntegrity(historicalRelay).publicRoute,
     expectedRoute,
-    `${endpoint} must remain available when its rollback route is explicitly configured`,
+    `${endpoint} must remain available after the deployment migrates to another public route`,
+  );
+}
+
+for (const providerRelay of [
+  null,
+  {},
+  { endpoint: "" },
+  { endpoint: null },
+]) {
+  const missingRelay = structuredClone(pendingRelay);
+  missingRelay.providerRelay = providerRelay;
+  missingRelay.receiptHash = computeReceiptHash(missingRelay);
+  assert.throws(
+    () => verifyReceiptIntegrity(missingRelay),
+    (error) => error?.code === "receipt_provider_relay_missing",
+    "relay-clock receipts must not verify without a nonempty provider relay endpoint",
   );
 }
 
@@ -192,7 +204,6 @@ assert.equal(configuredBuiltInVerification.publicRoute.origin, CUSTOM_PUBLIC_ROU
 assert.equal(configuredBuiltInVerification.publicRoute.pathPrefix, "/edge");
 
 for (const endpoint of [
-  "https://policypool.dolepee.com/api/provider-relay",
   "https://policypool.dolepee.com/wrong/api/provider-relay",
   "https://policypool.dolepee.com/edge/api/provider-relay/",
   "https://policypool.dolepee.com/edge/api/coverage-status",
@@ -210,6 +221,18 @@ for (const endpoint of [
     `configured built-in relay validation must reject ${endpoint}`,
   );
 }
+
+const preMigrationBuiltInRelay = structuredClone(configuredBuiltInRelay);
+preMigrationBuiltInRelay.providerRelay.endpoint =
+  "https://policypool.dolepee.com/api/provider-relay";
+preMigrationBuiltInRelay.receiptHash = computeReceiptHash(preMigrationBuiltInRelay);
+assert.equal(
+  verifyReceiptIntegrity(preMigrationBuiltInRelay, {
+    environment: configuredBuiltInEnvironment,
+  }).publicRoute,
+  CUSTOM_PUBLIC_ROUTE,
+  "a path-prefix migration must retain the exact pre-migration built-in relay endpoint",
+);
 
 const configuredEnvironment = {
   POLICYPOOL_PUBLIC_ORIGIN: "https://self-hosted-policy.example",

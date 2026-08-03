@@ -54,6 +54,13 @@ function configuredProviderRelayRoute(value, environment) {
   });
 }
 
+function historicalProviderRelayRoute(value) {
+  const route = publicRouteForUrl(value);
+  if (!route) return null;
+  const endpoint = `${route.origin}${route.pathPrefix}/api/provider-relay`;
+  return String(value) === endpoint ? route : null;
+}
+
 function embeddedPolicyPoolRoutes(receipt, environment) {
   const routes = [];
   const reserveUrl = receipt?.reserve?.publicUrl;
@@ -64,12 +71,22 @@ function embeddedPolicyPoolRoutes(receipt, environment) {
     if (route) routes.push({ field: "reserve.publicUrl", route });
   }
   const relayEndpoint = receipt?.providerRelay?.endpoint;
+  if (
+    receipt?.target?.clockMode === "policypool_relay"
+    && (typeof relayEndpoint !== "string" || relayEndpoint.length === 0)
+  ) {
+    throw new ReceiptIntegrityError(
+      "receipt_provider_relay_missing",
+      "Relay-clock receipts require a provider relay endpoint",
+    );
+  }
   if (relayEndpoint) {
-    const route = configuredProviderRelayRoute(relayEndpoint, environment);
+    const route = configuredProviderRelayRoute(relayEndpoint, environment)
+      || historicalProviderRelayRoute(relayEndpoint);
     if (!route) {
       throw new ReceiptIntegrityError(
         "receipt_public_origin_untrusted",
-        "Receipt relay endpoint is not the exact configured PolicyPool provider relay route",
+        "Receipt relay endpoint is not an exact configured or historical PolicyPool relay route",
       );
     }
     routes.push({ field: "providerRelay.endpoint", route });
