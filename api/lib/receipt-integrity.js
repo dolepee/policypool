@@ -3,6 +3,7 @@ import {
   publicRouteForUrl,
   requireCompatiblePublicUrl,
 } from "./public-origin-contract.js";
+import { publicUrl } from "./public-origin.js";
 import { sha256, stableStringify } from "./utils.js";
 
 const RECEIPT_HASH_RE = /^sha256:[a-f0-9]{64}$/;
@@ -36,7 +37,20 @@ export function computeReceiptHash(receipt) {
   return `sha256:${sha256(stableStringify(hashCommitted))}`;
 }
 
-function embeddedPolicyPoolRoutes(receipt) {
+function configuredProviderRelayRoute(value, environment) {
+  const endpoint = publicUrl("/api/provider-relay", environment);
+  if (String(value) !== endpoint) return null;
+  const parsed = new URL(endpoint);
+  const handlerPath = "/api/provider-relay";
+  const pathPrefix = parsed.pathname.slice(0, -handlerPath.length);
+  return Object.freeze({
+    key: `configured-public:${parsed.origin}${pathPrefix}`,
+    origin: parsed.origin,
+    pathPrefix,
+  });
+}
+
+function embeddedPolicyPoolRoutes(receipt, environment) {
   const routes = [];
   const reserveUrl = receipt?.reserve?.publicUrl;
   if (reserveUrl) {
@@ -52,16 +66,18 @@ function embeddedPolicyPoolRoutes(receipt) {
       route = requireCompatiblePublicUrl(relayEndpoint);
     } catch (error) {
       if (error instanceof PublicOriginContractError) {
-        throw new ReceiptIntegrityError(error.code, error.message);
+        route = configuredProviderRelayRoute(relayEndpoint, environment);
+        if (!route) throw new ReceiptIntegrityError(error.code, error.message);
+      } else {
+        throw error;
       }
-      throw error;
     }
     routes.push({ field: "providerRelay.endpoint", route });
   }
   return routes;
 }
 
-export function verifyReceiptIntegrity(receipt) {
+export function verifyReceiptIntegrity(receipt, { environment = process.env } = {}) {
   const claimed = String(receipt?.receiptHash || "");
   if (!RECEIPT_HASH_RE.test(claimed)) {
     throw new ReceiptIntegrityError("receipt_hash_invalid");
@@ -71,7 +87,7 @@ export function verifyReceiptIntegrity(receipt) {
     throw new ReceiptIntegrityError("receipt_hash_mismatch");
   }
 
-  const routes = embeddedPolicyPoolRoutes(receipt);
+  const routes = embeddedPolicyPoolRoutes(receipt, environment);
   const routeKeys = new Set(routes.map(({ route }) => route.key));
   if (routeKeys.size > 1) {
     throw new ReceiptIntegrityError(

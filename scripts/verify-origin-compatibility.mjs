@@ -127,4 +127,43 @@ assert.throws(
   "hash-committed relay grant metadata must remain substitution resistant",
 );
 
-console.log("PolicyPool origin-compatibility gate passed: custom issuance, Render rollback, and historical Vercel receipts remain exact.");
+const configuredEnvironment = {
+  POLICYPOOL_PUBLIC_ORIGIN: "https://self-hosted-policy.example",
+  POLICYPOOL_PUBLIC_PATH_PREFIX: "/policypool",
+};
+const configuredRelay = structuredClone(custom);
+configuredRelay.reserve = null;
+configuredRelay.providerRelay = {
+  endpoint: "https://self-hosted-policy.example/policypool/api/provider-relay",
+  grantId: "ppg-configured-origin",
+  grantExpiresAt: "2026-08-04T00:00:00.000Z",
+};
+configuredRelay.receiptHash = computeReceiptHash(configuredRelay);
+const configuredVerification = verifyReceiptIntegrity(configuredRelay, {
+  environment: configuredEnvironment,
+});
+assert.equal(configuredVerification.publicRoute.origin, "https://self-hosted-policy.example");
+assert.equal(configuredVerification.publicRoute.pathPrefix, "/policypool");
+assert.throws(
+  () => verifyReceiptIntegrity(configuredRelay),
+  (error) => error?.code === "receipt_public_origin_untrusted",
+  "a self-hosted relay is trusted only by the deployment that explicitly configured it",
+);
+
+for (const endpoint of [
+  "https://self-hosted-policy.example/api/provider-relay",
+  "https://self-hosted-policy.example/policypool/api/provider-relay/",
+  "https://self-hosted-policy.example/policypool/api/coverage-status",
+  "https://attacker.example/policypool/api/provider-relay",
+]) {
+  const substituted = structuredClone(configuredRelay);
+  substituted.providerRelay.endpoint = endpoint;
+  substituted.receiptHash = computeReceiptHash(substituted);
+  assert.throws(
+    () => verifyReceiptIntegrity(substituted, { environment: configuredEnvironment }),
+    (error) => error?.code === "receipt_public_origin_untrusted",
+    `configured relay validation must reject ${endpoint}`,
+  );
+}
+
+console.log("PolicyPool origin-compatibility gate passed: configured self-hosting, custom issuance, Render rollback, and historical Vercel receipts remain exact.");
