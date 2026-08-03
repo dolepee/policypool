@@ -2,6 +2,10 @@ import { Receiver } from "@upstash/qstash";
 import { createChainService } from "./lib/chain.js";
 import { createLedger } from "./lib/ledger.js";
 import { createNotifier, reconciliationMessage } from "./lib/notifier.js";
+import {
+  ensureVerifiedReceiptRecord,
+  ReceiptIntegrityError,
+} from "./lib/receipt-integrity.js";
 import { header, sendJson, sha256 } from "./lib/utils.js";
 
 const RELEASE_STATUSES = new Map([
@@ -82,9 +86,16 @@ export function createReconcileHandler(dependencies = {}) {
       const records = await ledger.list(100);
       const changes = [];
       const failures = [];
-      for (const record of records) {
-        if (record.state !== "active" || !record.targetOrder?.jobId) continue;
+      for (const candidate of records) {
         try {
+          if (!candidate?.receipt) {
+            if (candidate?.state === "active") {
+              throw new ReceiptIntegrityError("receipt_document_missing");
+            }
+            continue;
+          }
+          const record = await ensureVerifiedReceiptRecord(candidate, ledger);
+          if (record.state !== "active" || !record.targetOrder?.jobId) continue;
           const status = await chain.getJobStatus(record.targetOrder.jobId);
           const deadlineMs = Date.parse(record.receipt?.covenant?.deadline || "");
           if (status === 1 && Number.isFinite(deadlineMs) && now() > deadlineMs) {
@@ -151,7 +162,7 @@ export function createReconcileHandler(dependencies = {}) {
           }
         } catch (error) {
           failures.push({
-            receiptId: record.receiptId,
+            receiptId: candidate?.receiptId || null,
             error: error instanceof Error ? error.message : String(error),
           });
         }

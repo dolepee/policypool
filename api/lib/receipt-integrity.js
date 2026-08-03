@@ -242,12 +242,16 @@ export function buildPreAnchorReceiptIntegrityAnchor(
   return anchor;
 }
 
-export async function ensureReceiptIntegrityAnchor(record, ledger) {
+export async function ensureReceiptIntegrityAnchor(
+  record,
+  ledger,
+  environment = process.env,
+) {
   if (!record?.receipt || record.receiptIntegrityAnchor) return record;
   if (!ledger?.backfillReceiptIntegrityAnchor) {
     throw new ReceiptIntegrityError("receipt_integrity_anchor_backfill_unavailable");
   }
-  const anchor = buildPreAnchorReceiptIntegrityAnchor(record);
+  const anchor = buildPreAnchorReceiptIntegrityAnchor(record, environment);
   const persisted = await ledger.backfillReceiptIntegrityAnchor(
     record.receiptId,
     anchor.receiptHash,
@@ -257,6 +261,19 @@ export async function ensureReceiptIntegrityAnchor(record, ledger) {
     throw new ReceiptIntegrityError("receipt_integrity_anchor_backfill_conflict");
   }
   return record.replayed ? { ...persisted, replayed: true } : persisted;
+}
+
+export async function ensureVerifiedReceiptRecord(
+  record,
+  ledger,
+  { environment = process.env } = {},
+) {
+  const anchored = await ensureReceiptIntegrityAnchor(record, ledger, environment);
+  verifyReceiptIntegrity(anchored?.receipt, {
+    environment,
+    anchor: anchored?.receiptIntegrityAnchor || null,
+  });
+  return anchored;
 }
 
 function embeddedPolicyPoolRoutes(receipt, environment, anchor) {

@@ -1,5 +1,9 @@
 import { observeOkxA2AClock, observeRelayClock } from "./coverage-clock.js";
 import { verifyProviderRelayReceipt } from "./provider-relay.js";
+import {
+  ensureVerifiedReceiptRecord,
+  ReceiptIntegrityError,
+} from "./receipt-integrity.js";
 import { sha256 } from "./utils.js";
 
 const ONCHAIN_STATES = new Map([
@@ -56,14 +60,7 @@ function requiresCompensation(record) {
 }
 
 function isUniversal(record) {
-  return Boolean(
-    record?.universalCovenant?.covenantId
-      && (
-        record?.receipt?.version === "0.4.0"
-        || requiresCompensation(record)
-        || ["submitting", "unknown"].includes(record?.settlement?.status)
-      ),
-  );
+  return Boolean(record?.universalCovenant?.covenantId);
 }
 
 function covenantDeadline(record) {
@@ -309,7 +306,19 @@ export function createUniversalReconciler({
     throw new Error(`universal_reconciliation_action_unsupported:${action}`);
   }
 
-  async function reconcileRecord(original, dryRun) {
+  async function reconcileRecord(candidate, dryRun) {
+    let original = candidate;
+    if (original?.receipt) {
+      original = await ensureVerifiedReceiptRecord(original, ledger);
+    } else if (
+      !requiresCompensation(original)
+      && !(
+        original?.state === "pending"
+        && ["submitting", "unknown"].includes(original?.settlement?.status)
+      )
+    ) {
+      throw new ReceiptIntegrityError("receipt_document_missing");
+    }
     if (
       original?.state === "pending"
       && ["submitting", "unknown"].includes(original?.settlement?.status)

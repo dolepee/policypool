@@ -730,6 +730,26 @@ const redisAnchorReplay = await redisAnchorLedger.backfillReceiptIntegrityAnchor
   { ...redisAnchor, providerRelayEndpoint: "https://wrong.example/api/provider-relay" },
 );
 assert.deepEqual(redisAnchorReplay.receiptIntegrityAnchor, redisAnchor);
+
+const embeddedOnlyRecord = {
+  ...redisAnchorRecord,
+  receiptIntegrityAnchor: {
+    receiptHash: redisAnchorRecord.receipt.receiptHash,
+    providerRelayEndpoint: "https://attacker.example/api/provider-relay",
+  },
+};
+const embeddedOnlyMemoryLedger = new MemoryLedger();
+embeddedOnlyMemoryLedger.records.set(embeddedOnlyRecord.receiptId, embeddedOnlyRecord);
+assert.equal(
+  (await embeddedOnlyMemoryLedger.get(embeddedOnlyRecord.receiptId)).receiptIntegrityAnchor,
+  undefined,
+  "an embedded mutable anchor must not substitute for the MemoryLedger sidecar",
+);
+assert.equal(
+  redisAnchorLedger.attachReceiptIntegrityAnchor(embeddedOnlyRecord, null).receiptIntegrityAnchor,
+  undefined,
+  "an embedded mutable anchor must not substitute for the Redis sidecar",
+);
 const redisStaleTransition = await redisAnchorLedger.transitionUniversal(
   { ...redisAnchorRecord, state: "active" },
   ["pending_start"],

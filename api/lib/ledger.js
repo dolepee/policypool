@@ -130,6 +130,12 @@ function parseRecord(value) {
   return value;
 }
 
+function withoutReceiptIntegrityAnchor(record) {
+  if (!record) return null;
+  const { receiptIntegrityAnchor: _untrustedEmbeddedAnchor, ...storedRecord } = record;
+  return storedRecord;
+}
+
 export class MemoryLedger {
   constructor() {
     this.records = new Map();
@@ -145,11 +151,11 @@ export class MemoryLedger {
 
   withReceiptIntegrityAnchor(record) {
     if (!record) return null;
-    const anchor = this.receiptIntegrityAnchors.get(record.receiptId)
-      || record.receiptIntegrityAnchor;
+    const storedRecord = withoutReceiptIntegrityAnchor(record);
+    const anchor = this.receiptIntegrityAnchors.get(record.receiptId);
     return anchor
-      ? { ...record, receiptIntegrityAnchor: structuredClone(anchor) }
-      : record;
+      ? { ...storedRecord, receiptIntegrityAnchor: structuredClone(anchor) }
+      : storedRecord;
   }
 
   storeRecord(record) {
@@ -162,9 +168,9 @@ export class MemoryLedger {
         structuredClone(record.receiptIntegrityAnchor),
       );
     }
-    const anchored = this.withReceiptIntegrityAnchor(record);
-    this.records.set(record.receiptId, structuredClone(anchored));
-    return anchored;
+    const storedRecord = withoutReceiptIntegrityAnchor(record);
+    this.records.set(record.receiptId, structuredClone(storedRecord));
+    return this.withReceiptIntegrityAnchor(storedRecord);
   }
 
   async findByPaymentId(paymentId) {
@@ -178,8 +184,7 @@ export class MemoryLedger {
 
   async backfillReceiptIntegrityAnchor(receiptId, expectedReceiptHash, anchor) {
     const current = this.records.get(receiptId);
-    const existing = this.receiptIntegrityAnchors.get(receiptId)
-      || current?.receiptIntegrityAnchor;
+    const existing = this.receiptIntegrityAnchors.get(receiptId);
     if (!current || existing) return this.withReceiptIntegrityAnchor(current);
     if (current.receipt?.receiptHash !== expectedReceiptHash) return current;
     this.receiptIntegrityAnchors.set(receiptId, structuredClone(anchor));
@@ -325,8 +330,8 @@ export class RedisLedger {
 
   attachReceiptIntegrityAnchor(record, anchor) {
     if (!record) return null;
-    const resolved = anchor || record.receiptIntegrityAnchor;
-    return resolved ? { ...record, receiptIntegrityAnchor: resolved } : record;
+    const storedRecord = withoutReceiptIntegrityAnchor(record);
+    return anchor ? { ...storedRecord, receiptIntegrityAnchor: anchor } : storedRecord;
   }
 
   async withReceiptIntegrityAnchor(record) {
