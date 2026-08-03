@@ -243,6 +243,14 @@ assert.equal((await success.ledger.stats()).committedAtomic, "0");
 
 const savedPublicOrigin = process.env.POLICYPOOL_PUBLIC_ORIGIN;
 const savedPublicPathPrefix = process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+const savedReceiptIntegrityMigrations = process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS;
+const approveReceiptMigration = (record) => {
+  process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS = JSON.stringify([{
+    receiptId: record.receiptId,
+    receiptHash: record.receipt.receiptHash,
+    providerRelayEndpoint: record.receipt.providerRelay.endpoint,
+  }]);
+};
 try {
   process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://policypool.vercel.app";
   delete process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
@@ -272,6 +280,24 @@ try {
   legacy.ledger.receiptIntegrityAnchors.delete(preAnchorRecord.receiptId);
 
   process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://policypool.dolepee.com";
+  delete process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS;
+  const unmappedLegacyLedger = new MemoryLedger();
+  unmappedLegacyLedger.records.set(preAnchorRecord.receiptId, preAnchorRecord);
+  const unmappedLegacyStatus = await callHandler(createCoverageStatusHandler({
+    ledger: unmappedLegacyLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: preAnchorRecord.receiptId },
+  });
+  assert.equal(unmappedLegacyStatus.statusCode, 409);
+  assert.equal(
+    unmappedLegacyStatus.json().error,
+    "receipt_integrity_anchor_backfill_ineligible",
+  );
+
+  approveReceiptMigration(preAnchorRecord);
   const ineligibleLegacy = structuredClone(preAnchorRecord);
   delete ineligibleLegacy.settlement.transaction;
   const ineligibleLedger = new MemoryLedger();
@@ -298,6 +324,7 @@ try {
   delete missingGrant.relayGrantPayload.grantId;
   delete missingGrant.receipt.providerRelay.grantId;
   missingGrant.receipt.receiptHash = computeReceiptHash(missingGrant.receipt);
+  approveReceiptMigration(missingGrant);
   const missingGrantLedger = new MemoryLedger();
   missingGrantLedger.records.set(missingGrant.receiptId, missingGrant);
   const missingGrantStatus = await callHandler(createCoverageStatusHandler({
@@ -318,6 +345,7 @@ try {
   caseChangedGrant.receipt.providerRelay.grantId = caseChangedGrant.receipt
     .providerRelay.grantId.toUpperCase();
   caseChangedGrant.receipt.receiptHash = computeReceiptHash(caseChangedGrant.receipt);
+  approveReceiptMigration(caseChangedGrant);
   const caseChangedGrantLedger = new MemoryLedger();
   caseChangedGrantLedger.records.set(caseChangedGrant.receiptId, caseChangedGrant);
   const caseChangedGrantStatus = await callHandler(createCoverageStatusHandler({
@@ -340,6 +368,7 @@ try {
   configuredLegacy.receipt.providerRelay.endpoint =
     "https://self-hosted-policy.example/policypool/api/provider-relay";
   configuredLegacy.receipt.receiptHash = computeReceiptHash(configuredLegacy.receipt);
+  approveReceiptMigration(configuredLegacy);
   const configuredLegacyLedger = new MemoryLedger();
   configuredLegacyLedger.records.set(configuredLegacy.receiptId, configuredLegacy);
   const configuredLegacyStatus = await callHandler(createCoverageStatusHandler({
@@ -350,7 +379,11 @@ try {
     method: "GET",
     query: { receiptId: configuredLegacy.receiptId },
   });
-  assert.equal(configuredLegacyStatus.statusCode, 200);
+  assert.equal(
+    configuredLegacyStatus.statusCode,
+    200,
+    JSON.stringify(configuredLegacyStatus.json()),
+  );
   assert.equal(
     (await configuredLegacyLedger.get(configuredLegacy.receiptId))
       .receiptIntegrityAnchor.providerRelayEndpoint,
@@ -378,8 +411,56 @@ try {
     "receipt_integrity_anchor_backfill_ineligible",
   );
 
+  const substitutedHistoricalRoute = structuredClone(configuredLegacy);
+  substitutedHistoricalRoute.receipt.providerRelay.endpoint =
+    "https://policypool.vercel.app/api/provider-relay";
+  substitutedHistoricalRoute.receipt.receiptHash = computeReceiptHash(
+    substitutedHistoricalRoute.receipt,
+  );
+  const substitutedHistoricalLedger = new MemoryLedger();
+  substitutedHistoricalLedger.records.set(
+    substitutedHistoricalRoute.receiptId,
+    substitutedHistoricalRoute,
+  );
+  const substitutedHistoricalStatus = await callHandler(createCoverageStatusHandler({
+    ledger: substitutedHistoricalLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: substitutedHistoricalRoute.receiptId },
+  });
+  assert.equal(substitutedHistoricalStatus.statusCode, 409);
+  assert.equal(
+    substitutedHistoricalStatus.json().error,
+    "receipt_integrity_anchor_backfill_ineligible",
+  );
+
+  const changedCoverageCap = structuredClone(preAnchorRecord);
+  changedCoverageCap.receipt.covenant.coverageCapAtomic = "600000";
+  changedCoverageCap.receipt.covenant.coverageCapUSDT = "0.6";
+  changedCoverageCap.receipt.providerBond.lockedAtomic = "600000";
+  changedCoverageCap.receipt.receiptHash = computeReceiptHash(changedCoverageCap.receipt);
+  approveReceiptMigration(changedCoverageCap);
+  const changedCoverageCapLedger = new MemoryLedger();
+  changedCoverageCapLedger.records.set(changedCoverageCap.receiptId, changedCoverageCap);
+  const changedCoverageCapStatus = await callHandler(createCoverageStatusHandler({
+    ledger: changedCoverageCapLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: changedCoverageCap.receiptId },
+  });
+  assert.equal(changedCoverageCapStatus.statusCode, 409);
+  assert.equal(
+    changedCoverageCapStatus.json().error,
+    "receipt_integrity_anchor_backfill_ineligible",
+  );
+
   process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://policypool.dolepee.com";
   delete process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+  approveReceiptMigration(preAnchorRecord);
 
   const migratedStatus = await callHandler(createCoverageStatusHandler({
     ledger: legacy.ledger,
@@ -445,6 +526,11 @@ try {
   else process.env.POLICYPOOL_PUBLIC_ORIGIN = savedPublicOrigin;
   if (savedPublicPathPrefix === undefined) delete process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
   else process.env.POLICYPOOL_PUBLIC_PATH_PREFIX = savedPublicPathPrefix;
+  if (savedReceiptIntegrityMigrations === undefined) {
+    delete process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS;
+  } else {
+    process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS = savedReceiptIntegrityMigrations;
+  }
 }
 
 const failed = runtime({ settlementFails: true });
