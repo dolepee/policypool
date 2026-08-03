@@ -942,6 +942,124 @@ try {
   assert.equal(crossOrigin.calls.settle, 1, "cross-origin replay must never settle twice");
 
   const stored = await crossOrigin.ledger.get(historicalReceipt.receiptId);
+  assert.equal(stored.receiptDocumentKind, "issued");
+  const missingHash = structuredClone(stored);
+  delete missingHash.receipt.receiptHash;
+  crossOrigin.ledger.records.set(missingHash.receiptId, missingHash);
+  const missingHashStatus = await callHandler(createCoverageStatusHandler({
+    ledger: crossOrigin.ledger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => FIXED_NOW,
+  }), {
+    method: "GET",
+    query: { receiptId: missingHash.receiptId },
+  });
+  assert.equal(missingHashStatus.statusCode, 409);
+  assert.equal(missingHashStatus.json().error, "receipt_hash_invalid");
+
+  const historicalMissingHash = structuredClone(missingHash);
+  delete historicalMissingHash.receiptDocumentKind;
+  crossOrigin.ledger.records.set(historicalMissingHash.receiptId, historicalMissingHash);
+  const historicalMissingHashStatus = await callHandler(createCoverageStatusHandler({
+    ledger: crossOrigin.ledger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => FIXED_NOW,
+  }), {
+    method: "GET",
+    query: { receiptId: historicalMissingHash.receiptId },
+  });
+  assert.equal(historicalMissingHashStatus.statusCode, 409);
+  assert.equal(historicalMissingHashStatus.json().error, "receipt_hash_invalid");
+
+  const relabeledMissingHash = structuredClone(missingHash);
+  relabeledMissingHash.receiptDocumentKind = "reconciliation_projection";
+  relabeledMissingHash.universalReconciliation = {
+    from: "active",
+    to: "released",
+    reason: "substitution_attempt",
+    observedAt: "2026-08-03T00:00:00.000Z",
+  };
+  crossOrigin.ledger.records.set(relabeledMissingHash.receiptId, relabeledMissingHash);
+  const relabeledMissingHashStatus = await callHandler(createCoverageStatusHandler({
+    ledger: crossOrigin.ledger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => FIXED_NOW,
+  }), {
+    method: "GET",
+    query: { receiptId: relabeledMissingHash.receiptId },
+  });
+  assert.equal(relabeledMissingHashStatus.statusCode, 409);
+  assert.equal(relabeledMissingHashStatus.json().error, "receipt_hash_invalid");
+
+  const strippedIssuedReceipt = structuredClone(relabeledMissingHash);
+  for (const field of [
+    "receiptId",
+    "generatedAt",
+    "outcome",
+    "servicePayment",
+    "guard",
+    "coverageQuote",
+  ]) delete strippedIssuedReceipt.receipt[field];
+  strippedIssuedReceipt.transitions = [{
+    from: "active",
+    to: "released",
+    reason: "substitution_attempt",
+    observedAt: "2026-08-03T00:00:00.000Z",
+  }];
+  crossOrigin.ledger.records.set(strippedIssuedReceipt.receiptId, strippedIssuedReceipt);
+  const strippedIssuedReceiptStatus = await callHandler(createCoverageStatusHandler({
+    ledger: crossOrigin.ledger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => FIXED_NOW,
+  }), {
+    method: "GET",
+    query: { receiptId: strippedIssuedReceipt.receiptId },
+  });
+  assert.equal(strippedIssuedReceiptStatus.statusCode, 409);
+  assert.equal(strippedIssuedReceiptStatus.json().error, "receipt_hash_invalid");
+
+  const deletedIssuedReceipt = structuredClone(stored);
+  deletedIssuedReceipt.receipt = null;
+  deletedIssuedReceipt.receiptDocumentKind = "reconciliation_only";
+  deletedIssuedReceipt.universalReconciliation = {
+    from: "active",
+    to: "released",
+    reason: "substitution_attempt",
+    observedAt: "2026-08-03T00:00:00.000Z",
+  };
+  deletedIssuedReceipt.transitions = [{
+    ...deletedIssuedReceipt.universalReconciliation,
+    transitionHash: `sha256:${"f".repeat(64)}`,
+  }];
+  crossOrigin.ledger.records.set(deletedIssuedReceipt.receiptId, deletedIssuedReceipt);
+  const deletedIssuedReceiptStatus = await callHandler(createCoverageStatusHandler({
+    ledger: crossOrigin.ledger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => FIXED_NOW,
+  }), {
+    method: "GET",
+    query: { receiptId: deletedIssuedReceipt.receiptId },
+  });
+  assert.equal(deletedIssuedReceiptStatus.statusCode, 409);
+  assert.equal(deletedIssuedReceiptStatus.json().error, "receipt_hash_invalid");
+
+  const fullyStrippedIssuedReceipt = structuredClone(deletedIssuedReceipt);
+  delete fullyStrippedIssuedReceipt.finalizedAt;
+  delete fullyStrippedIssuedReceipt.paymentResponseHeader;
+  delete fullyStrippedIssuedReceipt.settlement;
+  fullyStrippedIssuedReceipt.receiptDocumentKind = "reconciliation_only";
+  crossOrigin.ledger.records.set(fullyStrippedIssuedReceipt.receiptId, fullyStrippedIssuedReceipt);
+  const fullyStrippedIssuedReceiptStatus = await callHandler(createCoverageStatusHandler({
+    ledger: crossOrigin.ledger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => FIXED_NOW,
+  }), {
+    method: "GET",
+    query: { receiptId: fullyStrippedIssuedReceipt.receiptId },
+  });
+  assert.equal(fullyStrippedIssuedReceiptStatus.statusCode, 409);
+  assert.equal(fullyStrippedIssuedReceiptStatus.json().error, "receipt_hash_invalid");
+
   const mixed = structuredClone(stored);
   mixed.receipt.providerRelay = {
     endpoint: "https://policypool.dolepee.com/api/provider-relay",

@@ -28,6 +28,7 @@ import { canonicalRequestPublicUrl, publicUrl } from "./lib/public-origin.js";
 import {
   computeReceiptHash,
   ReceiptIntegrityError,
+  STORED_RECEIPT_SHAPES,
   verifyReceiptIntegrity,
 } from "./lib/receipt-integrity.js";
 import {
@@ -690,6 +691,7 @@ function finalRecordForSettlement(pending, settlement, generatedAt, overrides = 
   });
   return {
     ...pending,
+    receiptDocumentKind: STORED_RECEIPT_SHAPES.issued,
     state: pending.guard.verdict === "ALLOW"
       ? context.policy.clockMode === "policypool_relay" ? "pending_start" : "active"
       : "declined",

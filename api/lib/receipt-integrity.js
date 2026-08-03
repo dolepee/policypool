@@ -7,6 +7,10 @@ import { sha256, stableStringify } from "./utils.js";
 
 const RECEIPT_HASH_RE = /^sha256:[a-f0-9]{64}$/;
 
+export const STORED_RECEIPT_SHAPES = Object.freeze({
+  issued: "issued",
+});
+
 export class ReceiptIntegrityError extends Error {
   constructor(code, message = code) {
     super(message);
