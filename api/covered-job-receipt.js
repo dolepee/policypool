@@ -26,6 +26,11 @@ import {
 } from "./lib/quote.js";
 import { canonicalRequestPublicUrl, publicUrl } from "./lib/public-origin.js";
 import {
+  computeReceiptHash,
+  ReceiptIntegrityError,
+  verifyReceiptIntegrity,
+} from "./lib/receipt-integrity.js";
+import {
   clean,
   formatUsdtAtomic,
   header,
@@ -33,7 +38,6 @@ import {
   parseUsdtAtomic,
   sendJson as rawSendJson,
   sha256,
-  stableStringify,
 } from "./lib/utils.js";
 import { enrichCoverageResponse } from "./lib/coverage-state.js";
 
@@ -357,10 +361,6 @@ function minBigInt(...values) {
   return values.reduce((minimum, value) => (value < minimum ? value : minimum));
 }
 
-function receiptHash(receipt) {
-  return `sha256:${sha256(stableStringify(receipt))}`;
-}
-
 function buildReceipt({
   receiptId,
   input,
@@ -511,15 +511,27 @@ function buildReceipt({
       "A payout is paid only after its X Layer token transfer is independently verified.",
     ],
   };
-  return { ...draft, receiptHash: receiptHash(draft) };
+  return { ...draft, receiptHash: computeReceiptHash(draft) };
 }
 
 function respondWithRecord(res, record, relayGrantService = null) {
+  let receipt = record.receipt;
+  try {
+    verifyReceiptIntegrity(receipt);
+  } catch (error) {
+    if (!(error instanceof ReceiptIntegrityError)) throw error;
+    return sendJson(res, 409, {
+      ok: false,
+      error: error.code,
+      charged: true,
+      receiptId: record.receiptId,
+      nextAction: "VERIFY_THE_ORIGINAL_STORED_RECEIPT",
+    });
+  }
   if (record.paymentResponseHeader) {
     res.setHeader("PAYMENT-RESPONSE", record.paymentResponseHeader);
     res.setHeader("X-PAYMENT-RESPONSE", record.paymentResponseHeader);
   }
-  let receipt = record.receipt;
   if (record.relayGrantPayload && relayGrantService?.tokenForPayload && receipt?.providerRelay) {
     receipt = {
       ...receipt,

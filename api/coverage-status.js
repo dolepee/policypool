@@ -2,6 +2,10 @@ import { createChainService } from "./lib/chain.js";
 import { createLedger } from "./lib/ledger.js";
 import { clean, sendJson as rawSendJson } from "./lib/utils.js";
 import { enrichCoverageResponse } from "./lib/coverage-state.js";
+import {
+  ReceiptIntegrityError,
+  verifyReceiptIntegrity,
+} from "./lib/receipt-integrity.js";
 
 // Receipt lookups report the lifecycle state explicitly, so a reader never has
 // to infer whether coverage is still in force from the raw receipt shape.
@@ -93,6 +97,22 @@ export function createCoverageStatusHandler(dependencies = {}) {
       chain ||= createChainService();
       const record = await ledger.get(receiptId);
       if (!record) return sendJson(res, 404, { ok: false, error: "coverage_receipt_not_found" });
+      // Reconciliation can persist a deliberately partial receipt projection
+      // while a covenant transitions. Only a hash-bearing issued document is
+      // a portable receipt and therefore subject to cross-origin integrity
+      // verification here; paid replay remains strict for every receipt.
+      if (record.receipt?.receiptHash) {
+        try {
+          verifyReceiptIntegrity(record.receipt);
+        } catch (error) {
+          if (!(error instanceof ReceiptIntegrityError)) throw error;
+          return sendJson(res, 409, {
+            ok: false,
+            error: error.code,
+            receiptId,
+          });
+        }
+      }
       const jobStatus = record.targetOrder?.jobId
         ? await chain.getJobStatus(record.targetOrder.jobId)
         : null;

@@ -12,6 +12,7 @@ import { MemoryLedger } from "../api/lib/ledger.js";
 import { createPaymentService, __test as paymentTest } from "../api/lib/payment.js";
 import { findPublishedPolicy, policyCoverageCapAtomic } from "../api/lib/policy-registry.js";
 import { createQuoteService } from "../api/lib/quote.js";
+import { computeReceiptHash } from "../api/lib/receipt-integrity.js";
 import { sha256 } from "../api/lib/utils.js";
 import { callHandler, decodePaymentRequired } from "./lib/fake-vercel.mjs";
 
@@ -896,6 +897,83 @@ assert.equal(replay.json().idempotentReplay, true);
 assert.equal(replay.json().receipt.receiptHash, paidBody.receipt.receiptHash);
 assert.equal(primary.calls.settle, 1, "replay must not settle twice");
 
+const crossOrigin = makeRuntime();
+const crossOriginHeader = makePaymentHeader("cross-origin-replay");
+const savedOrigin = process.env.POLICYPOOL_PUBLIC_ORIGIN;
+const savedPrefix = process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+try {
+  delete process.env.POLICYPOOL_PUBLIC_ORIGIN;
+  delete process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+  const historicalIssue = await callHandler(crossOrigin.handler, {
+    method: "POST",
+    headers: { "payment-signature": crossOriginHeader },
+    body: sampleBody,
+  });
+  assert.equal(historicalIssue.statusCode, 200);
+  const historicalReceipt = structuredClone(historicalIssue.json().receipt);
+  assert.match(historicalReceipt.reserve.publicUrl, /^https:\/\/policypool\.vercel\.app\//);
+
+  // Production issuance remains pinned to the Render route. A request that
+  // arrives through the custom verification/recovery host must replay the
+  // already-stored historical receipt rather than rewriting its public URLs.
+  process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://okx-agent-review-relay.onrender.com";
+  process.env.POLICYPOOL_PUBLIC_PATH_PREFIX = "/policypool";
+  const customOriginReplay = await callHandler(crossOrigin.handler, {
+    method: "POST",
+    url: "/api/covered-job-receipt",
+    headers: {
+      "payment-signature": crossOriginHeader,
+      host: "policypool.dolepee.com",
+      "x-forwarded-host": "policypool.dolepee.com",
+    },
+    body: {
+      ...sampleBody,
+      origin: "https://policypool.dolepee.com",
+      endpoint: "https://policypool.dolepee.com/api/covered-job-receipt",
+    },
+  });
+  assert.equal(customOriginReplay.statusCode, 200);
+  assert.equal(customOriginReplay.json().idempotentReplay, true);
+  assert.deepEqual(
+    customOriginReplay.json().receipt,
+    historicalReceipt,
+    "custom-origin recovery must replay the original Vercel receipt without rewriting it",
+  );
+  assert.equal(crossOrigin.calls.settle, 1, "cross-origin replay must never settle twice");
+
+  const stored = await crossOrigin.ledger.get(historicalReceipt.receiptId);
+  const mixed = structuredClone(stored);
+  mixed.receipt.providerRelay = {
+    endpoint: "https://policypool.dolepee.com/api/provider-relay",
+  };
+  mixed.receipt.receiptHash = computeReceiptHash(mixed.receipt);
+  crossOrigin.ledger.records.set(mixed.receiptId, mixed);
+  const mixedReplay = await callHandler(crossOrigin.handler, {
+    method: "POST",
+    headers: { "payment-signature": crossOriginHeader },
+    body: sampleBody,
+  });
+  assert.equal(mixedReplay.statusCode, 409);
+  assert.equal(mixedReplay.json().error, "receipt_public_origin_mismatch");
+  assert.equal(crossOrigin.calls.settle, 1);
+  const mixedStatus = await callHandler(createCoverageStatusHandler({
+    ledger: crossOrigin.ledger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => FIXED_NOW,
+  }), {
+    method: "GET",
+    headers: { host: "policypool.dolepee.com" },
+    query: { receiptId: mixed.receiptId },
+  });
+  assert.equal(mixedStatus.statusCode, 409);
+  assert.equal(mixedStatus.json().error, "receipt_public_origin_mismatch");
+} finally {
+  if (savedOrigin === undefined) delete process.env.POLICYPOOL_PUBLIC_ORIGIN;
+  else process.env.POLICYPOOL_PUBLIC_ORIGIN = savedOrigin;
+  if (savedPrefix === undefined) delete process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+  else process.env.POLICYPOOL_PUBLIC_PATH_PREFIX = savedPrefix;
+}
+
 const duplicateRequest = await callHandler(primary.handler, {
   method: "POST",
   headers: { "payment-signature": makePaymentHeader("duplicate-request") },
@@ -1569,6 +1647,24 @@ assert.equal(statusBeforeDeadline.statusCode, 200);
 assert.equal(statusBeforeDeadline.json().state, "active");
 assert.equal(statusBeforeDeadline.json().liabilityAtomic, "1000000");
 assert.equal(statusBeforeDeadline.json().reconciliation.payoutDueCandidate, false);
+const customOriginStatus = await callHandler(createCoverageStatusHandler({
+  ledger: primary.ledger,
+  chain: { async getJobStatus() { return 1; } },
+  now: () => FIXED_NOW,
+}), {
+  method: "GET",
+  headers: {
+    host: "policypool.dolepee.com",
+    "x-forwarded-host": "policypool.dolepee.com",
+  },
+  query: { receiptId: issuedReceiptId },
+});
+assert.equal(customOriginStatus.statusCode, 200);
+assert.equal(
+  customOriginStatus.json().receipt.receiptHash,
+  paidBody.receipt.receiptHash,
+  "custom-origin verification must return the original receipt hash",
+);
 
 const payoutChain = {
   async getJobStatus() { return 1; },
