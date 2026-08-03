@@ -103,6 +103,20 @@ redis.call('SET', KEYS[1], ARGV[1])
 return {'updated', ARGV[1]}
 `;
 
+const BACKFILL_RECEIPT_INTEGRITY_ANCHOR_SCRIPT = `
+local current = redis.call('GET', KEYS[1])
+if not current then return {'missing'} end
+local decoded = cjson.decode(current)
+if decoded.receiptIntegrityAnchor then return {'existing', current} end
+if not decoded.receipt or decoded.receipt.receiptHash ~= ARGV[1] then
+  return {'receipt_mismatch', current}
+end
+decoded.receiptIntegrityAnchor = cjson.decode(ARGV[2])
+local updated = cjson.encode(decoded)
+redis.call('SET', KEYS[1], updated)
+return {'backfilled', updated}
+`;
+
 function prefixValue(value = "pp:coverage:v1") {
   return String(value).replace(/:+$/, "");
 }
@@ -132,6 +146,18 @@ export class MemoryLedger {
 
   async get(receiptId) {
     return this.records.get(receiptId) || null;
+  }
+
+  async backfillReceiptIntegrityAnchor(receiptId, expectedReceiptHash, anchor) {
+    const current = this.records.get(receiptId);
+    if (!current || current.receiptIntegrityAnchor) return current || null;
+    if (current.receipt?.receiptHash !== expectedReceiptHash) return current;
+    const updated = {
+      ...current,
+      receiptIntegrityAnchor: structuredClone(anchor),
+    };
+    this.records.set(receiptId, structuredClone(updated));
+    return updated;
   }
 
   async saveQuote(record) {
@@ -276,6 +302,13 @@ export class RedisLedger {
 
   async get(receiptId) {
     return parseRecord(await this.redis.get(this.key("receipt", receiptId)));
+  }
+
+  async backfillReceiptIntegrityAnchor(receiptId, expectedReceiptHash, anchor) {
+    const result = await this.redis.eval(BACKFILL_RECEIPT_INTEGRITY_ANCHOR_SCRIPT, [
+      this.key("receipt", receiptId),
+    ], [expectedReceiptHash, JSON.stringify(anchor)]);
+    return parseRecord(result[1]);
   }
 
   async saveQuote(record, ttlSeconds) {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { encodePaymentSignatureHeader } from "@okxweb3/x402-core/http";
 import { createHandler } from "../api/covered-job-receipt.js";
+import { createCoverageStatusHandler } from "../api/coverage-status.js";
 import { PAYMENT, paymentRequirements } from "../api/lib/config.js";
 import { MemoryLedger, RedisLedger } from "../api/lib/ledger.js";
 import { createPaymentService } from "../api/lib/payment.js";
@@ -239,6 +240,95 @@ assert.equal(success.calls.issue, 1);
 assert.equal(success.calls.settle, 1);
 assert.equal((await success.ledger.stats()).committedAtomic, "0");
 
+const savedPublicOrigin = process.env.POLICYPOOL_PUBLIC_ORIGIN;
+const savedPublicPathPrefix = process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+try {
+  process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://policypool.vercel.app";
+  delete process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+  const legacy = runtime();
+  const legacyChallengeResponse = await callHandler(legacy.handler, { method: "POST", body });
+  const legacyChallenge = decodePaymentRequired(
+    legacyChallengeResponse.headers["payment-required"],
+  );
+  const legacyRequest = {
+    method: "POST",
+    body,
+    headers: {
+      "payment-signature": paymentHeader("universal-legacy-anchor", legacyChallenge.accepts[0]),
+    },
+  };
+  const legacyPaid = await callHandler(legacy.handler, legacyRequest);
+  assert.equal(legacyPaid.statusCode, 200);
+  assert.equal(
+    legacyPaid.json().receipt.providerRelay.endpoint,
+    "https://policypool.vercel.app/api/provider-relay",
+  );
+  const legacyStored = await legacy.ledger.get(legacyPaid.json().receipt.receiptId);
+  const preAnchorRecord = structuredClone(legacyStored);
+  delete preAnchorRecord.receiptIntegrityAnchor;
+  delete preAnchorRecord.receiptDocumentKind;
+  legacy.ledger.records.set(preAnchorRecord.receiptId, preAnchorRecord);
+
+  process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://policypool.dolepee.com";
+  const ineligibleLegacy = structuredClone(preAnchorRecord);
+  delete ineligibleLegacy.settlement.transaction;
+  const ineligibleLedger = new MemoryLedger();
+  ineligibleLedger.records.set(ineligibleLegacy.receiptId, ineligibleLegacy);
+  const ineligibleStatus = await callHandler(createCoverageStatusHandler({
+    ledger: ineligibleLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: ineligibleLegacy.receiptId },
+  });
+  assert.equal(ineligibleStatus.statusCode, 409);
+  assert.equal(
+    ineligibleStatus.json().error,
+    "receipt_integrity_anchor_backfill_ineligible",
+  );
+  assert.equal(
+    (await ineligibleLedger.get(ineligibleLegacy.receiptId)).receiptIntegrityAnchor,
+    undefined,
+  );
+
+  const migratedStatus = await callHandler(createCoverageStatusHandler({
+    ledger: legacy.ledger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: preAnchorRecord.receiptId },
+  });
+  assert.equal(migratedStatus.statusCode, 200);
+  assert.equal(
+    migratedStatus.json().receipt.providerRelay.endpoint,
+    "https://policypool.vercel.app/api/provider-relay",
+  );
+  const migratedReplay = await callHandler(legacy.handler, legacyRequest);
+  assert.equal(migratedReplay.statusCode, 200);
+  assert.equal(migratedReplay.json().idempotentReplay, true);
+  assert.equal(
+    migratedReplay.json().receipt.providerRelay.endpoint,
+    "https://policypool.vercel.app/api/provider-relay",
+  );
+  const migratedStored = await legacy.ledger.get(preAnchorRecord.receiptId);
+  assert.equal(
+    migratedStored.receiptIntegrityAnchor.receiptHash,
+    preAnchorRecord.receipt.receiptHash,
+  );
+  assert.equal(
+    migratedStored.receiptIntegrityAnchor.providerRelayEndpoint,
+    "https://policypool.vercel.app/api/provider-relay",
+  );
+  assert.equal(legacy.calls.settle, 1, "anchor backfill must not settle twice");
+} finally {
+  if (savedPublicOrigin === undefined) delete process.env.POLICYPOOL_PUBLIC_ORIGIN;
+  else process.env.POLICYPOOL_PUBLIC_ORIGIN = savedPublicOrigin;
+  if (savedPublicPathPrefix === undefined) delete process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+  else process.env.POLICYPOOL_PUBLIC_PATH_PREFIX = savedPublicPathPrefix;
+}
+
 const failed = runtime({ settlementFails: true });
 const failedChallengeResponse = await callHandler(failed.handler, { method: "POST", body });
 const failedChallenge = decodePaymentRequired(failedChallengeResponse.headers["payment-required"]);
@@ -327,6 +417,45 @@ const redisFinal = await redisLedger.finalize({
 });
 assert.equal(redisFinal.state, "pending_start");
 assert.equal(redisFinal.receipt.receiptId, "redis-compensation");
+
+const redisAnchorRecord = {
+  receiptId: "redis-anchor",
+  receipt: { receiptHash: `sha256:${"ab".repeat(32)}` },
+};
+let redisAnchorStored = JSON.stringify(redisAnchorRecord);
+const redisAnchor = {
+  receiptHash: redisAnchorRecord.receipt.receiptHash,
+  providerRelayEndpoint: "https://policypool.vercel.app/api/provider-relay",
+};
+const redisAnchorLedger = new RedisLedger({
+  prefix: "test",
+  redis: {
+    async eval(script, keys, argv) {
+      assert.match(script, /if decoded\.receiptIntegrityAnchor then return/);
+      assert.match(script, /decoded\.receipt\.receiptHash ~= ARGV\[1\]/);
+      assert.equal(keys[0], "test:receipt:redis-anchor");
+      assert.equal(argv[0], redisAnchor.receiptHash);
+      const current = JSON.parse(redisAnchorStored);
+      if (current.receiptIntegrityAnchor) return ["existing", redisAnchorStored];
+      if (current.receipt?.receiptHash !== argv[0]) return ["receipt_mismatch", redisAnchorStored];
+      current.receiptIntegrityAnchor = JSON.parse(argv[1]);
+      redisAnchorStored = JSON.stringify(current);
+      return ["backfilled", redisAnchorStored];
+    },
+  },
+});
+const redisAnchored = await redisAnchorLedger.backfillReceiptIntegrityAnchor(
+  redisAnchorRecord.receiptId,
+  redisAnchorRecord.receipt.receiptHash,
+  redisAnchor,
+);
+assert.deepEqual(redisAnchored.receiptIntegrityAnchor, redisAnchor);
+const redisAnchorReplay = await redisAnchorLedger.backfillReceiptIntegrityAnchor(
+  redisAnchorRecord.receiptId,
+  redisAnchorRecord.receipt.receiptHash,
+  { ...redisAnchor, providerRelayEndpoint: "https://wrong.example/api/provider-relay" },
+);
+assert.deepEqual(redisAnchorReplay.receiptIntegrityAnchor, redisAnchor);
 
 const failedCompensationWrite = runtime({
   settlementThrows: true,

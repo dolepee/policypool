@@ -3,6 +3,7 @@ import { createLedger } from "./lib/ledger.js";
 import { clean, sendJson as rawSendJson } from "./lib/utils.js";
 import { enrichCoverageResponse } from "./lib/coverage-state.js";
 import {
+  ensureReceiptIntegrityAnchor,
   ReceiptIntegrityError,
   STORED_RECEIPT_SHAPES,
   verifyReceiptIntegrity,
@@ -100,13 +101,14 @@ export function createCoverageStatusHandler(dependencies = {}) {
     try {
       ledger ||= createLedger();
       chain ||= createChainService();
-      const record = await ledger.get(receiptId);
+      let record = await ledger.get(receiptId);
       if (!record) return sendJson(res, 404, { ok: false, error: "coverage_receipt_not_found" });
       // Status is authoritative only when anchored to the portable,
       // hash-verified receipt issued at settlement. Reconciliation remains a
       // separate derived projection; a missing receipt can never become valid
       // by relabelling the same mutable ledger record.
       try {
+        record = await ensureReceiptIntegrityAnchor(record, ledger);
         verifyReceiptIntegrity(record.receipt, {
           anchor: record.receiptIntegrityAnchor || null,
         });

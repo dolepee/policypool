@@ -28,6 +28,7 @@ import { canonicalRequestPublicUrl, publicUrl } from "./lib/public-origin.js";
 import {
   buildReceiptIntegrityAnchor,
   computeReceiptHash,
+  ensureReceiptIntegrityAnchor,
   ReceiptIntegrityError,
   STORED_RECEIPT_SHAPES,
   verifyReceiptIntegrity,
@@ -516,7 +517,19 @@ function buildReceipt({
   return { ...draft, receiptHash: computeReceiptHash(draft) };
 }
 
-function respondWithRecord(res, record, relayGrantService = null) {
+async function respondWithRecord(res, record, ledger, relayGrantService = null) {
+  try {
+    record = await ensureReceiptIntegrityAnchor(record, ledger);
+  } catch (error) {
+    if (!(error instanceof ReceiptIntegrityError)) throw error;
+    return sendJson(res, 409, {
+      ok: false,
+      error: error.code,
+      charged: true,
+      receiptId: record.receiptId,
+      nextAction: "VERIFY_THE_ORIGINAL_STORED_RECEIPT",
+    });
+  }
   let receipt = record.receipt;
   try {
     verifyReceiptIntegrity(receipt, { anchor: record.receiptIntegrityAnchor || null });
@@ -750,6 +763,7 @@ export function createHandler(dependencies = {}) {
   const respond = (res, record) => respondWithRecord(
     res,
     record,
+    getLedger(),
     record.relayGrantPayload ? getRelayGrantService() : null,
   );
 

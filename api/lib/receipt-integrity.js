@@ -94,6 +94,13 @@ function anchoredProviderRelayRoute(value, anchor) {
   return providerRelayRoute(endpoint, "issued-public");
 }
 
+function legacyProviderRelayRoute(value) {
+  const route = publicRouteForUrl(value);
+  if (!route) return null;
+  const endpoint = `${route.origin}${route.pathPrefix}/api/provider-relay`;
+  return String(value) === endpoint ? route : null;
+}
+
 export function buildReceiptIntegrityAnchor(receipt) {
   const receiptHash = String(receipt?.receiptHash || "");
   if (!RECEIPT_HASH_RE.test(receiptHash)) {
@@ -107,6 +114,57 @@ export function buildReceiptIntegrityAnchor(receipt) {
     receiptHash,
     providerRelayEndpoint: relayEndpoint || null,
   });
+}
+
+function sameNonemptyValue(left, right) {
+  const expected = String(left || "");
+  return Boolean(expected) && expected.toLowerCase() === String(right || "").toLowerCase();
+}
+
+export function buildLegacyRelayReceiptIntegrityAnchor(record) {
+  const receipt = record?.receipt;
+  const endpoint = receipt?.providerRelay?.endpoint;
+  if (
+    !receipt
+    || receipt.version !== "0.4.0"
+    || receipt.target?.clockMode !== "policypool_relay"
+    || receipt.outcome?.type !== "ISSUED"
+    || (record.receiptDocumentKind && record.receiptDocumentKind !== STORED_RECEIPT_SHAPES.issued)
+    || record.receiptId !== receipt.receiptId
+    || !legacyProviderRelayRoute(endpoint)
+    || !sameNonemptyValue(record.finalizedAt, receipt.generatedAt)
+    || !sameNonemptyValue(record.settlement?.transaction, receipt.servicePayment?.transaction)
+    || !sameNonemptyValue(
+      record.universalCovenant?.covenantId,
+      receipt.covenant?.onchain?.covenantId,
+    )
+    || String(record.relayGrantPayload?.grantId || "")
+      !== String(receipt.providerRelay?.grantId || "")
+  ) {
+    throw new ReceiptIntegrityError("receipt_integrity_anchor_backfill_ineligible");
+  }
+  const anchor = buildReceiptIntegrityAnchor(receipt);
+  verifyReceiptIntegrity(receipt, { anchor });
+  return anchor;
+}
+
+export async function ensureReceiptIntegrityAnchor(record, ledger) {
+  if (record?.receiptIntegrityAnchor || record?.receipt?.target?.clockMode !== "policypool_relay") {
+    return record;
+  }
+  if (!ledger?.backfillReceiptIntegrityAnchor) {
+    throw new ReceiptIntegrityError("receipt_integrity_anchor_backfill_unavailable");
+  }
+  const anchor = buildLegacyRelayReceiptIntegrityAnchor(record);
+  const persisted = await ledger.backfillReceiptIntegrityAnchor(
+    record.receiptId,
+    anchor.receiptHash,
+    anchor,
+  );
+  if (!persisted?.receiptIntegrityAnchor) {
+    throw new ReceiptIntegrityError("receipt_integrity_anchor_backfill_conflict");
+  }
+  return record.replayed ? { ...persisted, replayed: true } : persisted;
 }
 
 function embeddedPolicyPoolRoutes(receipt, environment, anchor) {
