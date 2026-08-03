@@ -26,6 +26,7 @@ import {
 } from "./lib/quote.js";
 import { canonicalRequestPublicUrl, publicUrl } from "./lib/public-origin.js";
 import {
+  buildReceiptIntegrityAnchor,
   computeReceiptHash,
   ReceiptIntegrityError,
   STORED_RECEIPT_SHAPES,
@@ -518,7 +519,7 @@ function buildReceipt({
 function respondWithRecord(res, record, relayGrantService = null) {
   let receipt = record.receipt;
   try {
-    verifyReceiptIntegrity(receipt);
+    verifyReceiptIntegrity(receipt, { anchor: record.receiptIntegrityAnchor || null });
   } catch (error) {
     if (!(error instanceof ReceiptIntegrityError)) throw error;
     return sendJson(res, 409, {
@@ -709,6 +710,7 @@ function finalRecordForSettlement(pending, settlement, generatedAt, overrides = 
     },
     paymentResponseHeader: settlement.responseHeader,
     receipt,
+    receiptIntegrityAnchor: buildReceiptIntegrityAnchor(receipt),
   };
 }
 

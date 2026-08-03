@@ -107,7 +107,9 @@ export function createCoverageStatusHandler(dependencies = {}) {
       // separate derived projection; a missing receipt can never become valid
       // by relabelling the same mutable ledger record.
       try {
-        verifyReceiptIntegrity(record.receipt);
+        verifyReceiptIntegrity(record.receipt, {
+          anchor: record.receiptIntegrityAnchor || null,
+        });
       } catch (error) {
         if (!(error instanceof ReceiptIntegrityError)) throw error;
         return sendJson(res, 409, {

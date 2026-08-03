@@ -12,6 +12,7 @@ import {
   canonicalRequestPublicUrl,
 } from "../api/lib/public-origin.js";
 import {
+  buildReceiptIntegrityAnchor,
   computeReceiptHash,
   verifyReceiptIntegrity,
 } from "../api/lib/receipt-integrity.js";
@@ -100,7 +101,9 @@ mixed.providerRelay = {
 };
 mixed.receiptHash = computeReceiptHash(mixed);
 assert.throws(
-  () => verifyReceiptIntegrity(mixed),
+  () => verifyReceiptIntegrity(mixed, {
+    anchor: buildReceiptIntegrityAnchor(mixed),
+  }),
   (error) => error?.code === "receipt_public_origin_mismatch",
   "even a rehashed receipt cannot combine custom and Render PolicyPool routes",
 );
@@ -166,9 +169,16 @@ for (const [endpoint, expectedRoute] of [
   };
   historicalRelay.receiptHash = computeReceiptHash(historicalRelay);
   assert.equal(
-    verifyReceiptIntegrity(historicalRelay).publicRoute,
+    verifyReceiptIntegrity(historicalRelay, {
+      anchor: buildReceiptIntegrityAnchor(historicalRelay),
+    }).publicRoute,
     expectedRoute,
-    `${endpoint} must remain available after the deployment migrates to another public route`,
+    `${endpoint} must remain available when its issuance route is anchored`,
+  );
+  assert.throws(
+    () => verifyReceiptIntegrity(historicalRelay),
+    (error) => error?.code === "receipt_public_origin_untrusted",
+    `${endpoint} must not be trusted outside its issuance cohort`,
   );
 }
 
@@ -229,9 +239,24 @@ preMigrationBuiltInRelay.receiptHash = computeReceiptHash(preMigrationBuiltInRel
 assert.equal(
   verifyReceiptIntegrity(preMigrationBuiltInRelay, {
     environment: configuredBuiltInEnvironment,
+    anchor: buildReceiptIntegrityAnchor(preMigrationBuiltInRelay),
   }).publicRoute,
   CUSTOM_PUBLIC_ROUTE,
   "a path-prefix migration must retain the exact pre-migration built-in relay endpoint",
+);
+
+const currentRelayAnchor = buildReceiptIntegrityAnchor(configuredBuiltInRelay);
+const currentRelayWithLegacyEndpoint = structuredClone(configuredBuiltInRelay);
+currentRelayWithLegacyEndpoint.providerRelay.endpoint =
+  "https://policypool.vercel.app/api/provider-relay";
+currentRelayWithLegacyEndpoint.receiptHash = computeReceiptHash(currentRelayWithLegacyEndpoint);
+assert.throws(
+  () => verifyReceiptIntegrity(currentRelayWithLegacyEndpoint, {
+    environment: configuredBuiltInEnvironment,
+    anchor: currentRelayAnchor,
+  }),
+  (error) => error?.code === "receipt_hash_anchor_mismatch",
+  "a current provider-funded receipt cannot be rehashed into a historical relay cohort",
 );
 
 const configuredEnvironment = {

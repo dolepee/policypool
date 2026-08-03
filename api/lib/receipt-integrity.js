@@ -33,9 +33,40 @@ export function computeReceiptHash(receipt) {
   return `sha256:${sha256(stableStringify(hashCommitted))}`;
 }
 
-function configuredProviderRelayRoute(value, environment) {
-  const endpoint = publicUrl("/api/provider-relay", environment);
-  if (String(value) !== endpoint) return null;
+function providerRelayRoute(endpoint, keyPrefix) {
+  let parsed;
+  try {
+    parsed = new URL(endpoint);
+  } catch {
+    return null;
+  }
+  const handlerPath = "/api/provider-relay";
+  if (
+    parsed.protocol !== "https:"
+    || parsed.username
+    || parsed.password
+    || parsed.search
+    || parsed.hash
+    || parsed.toString() !== endpoint
+    || !parsed.pathname.endsWith(handlerPath)
+  ) {
+    return null;
+  }
+  const pathPrefix = parsed.pathname.slice(0, -handlerPath.length);
+  if (
+    pathPrefix
+    && (
+      !pathPrefix.startsWith("/")
+      || pathPrefix.endsWith("/")
+      || pathPrefix.includes("//")
+      || pathPrefix.includes("\\")
+      || pathPrefix.includes("%")
+      || pathPrefix.split("/").some((segment) => segment === "." || segment === "..")
+      || !/^\/[a-zA-Z0-9._~-]+(?:\/[a-zA-Z0-9._~-]+)*$/.test(pathPrefix)
+    )
+  ) {
+    return null;
+  }
   const compatibleRoute = publicRouteForUrl(endpoint);
   if (
     compatibleRoute
@@ -44,24 +75,41 @@ function configuredProviderRelayRoute(value, environment) {
   ) {
     return compatibleRoute;
   }
-  const parsed = new URL(endpoint);
-  const handlerPath = "/api/provider-relay";
-  const pathPrefix = parsed.pathname.slice(0, -handlerPath.length);
   return Object.freeze({
-    key: `configured-public:${parsed.origin}${pathPrefix}`,
+    key: `${keyPrefix}:${parsed.origin}${pathPrefix}`,
     origin: parsed.origin,
     pathPrefix,
   });
 }
 
-function historicalProviderRelayRoute(value) {
-  const route = publicRouteForUrl(value);
-  if (!route) return null;
-  const endpoint = `${route.origin}${route.pathPrefix}/api/provider-relay`;
-  return String(value) === endpoint ? route : null;
+function configuredProviderRelayRoute(value, environment) {
+  const endpoint = publicUrl("/api/provider-relay", environment);
+  if (String(value) !== endpoint) return null;
+  return providerRelayRoute(endpoint, "configured-public");
 }
 
-function embeddedPolicyPoolRoutes(receipt, environment) {
+function anchoredProviderRelayRoute(value, anchor) {
+  const endpoint = anchor?.providerRelayEndpoint;
+  if (typeof endpoint !== "string" || String(value) !== endpoint) return null;
+  return providerRelayRoute(endpoint, "issued-public");
+}
+
+export function buildReceiptIntegrityAnchor(receipt) {
+  const receiptHash = String(receipt?.receiptHash || "");
+  if (!RECEIPT_HASH_RE.test(receiptHash)) {
+    throw new ReceiptIntegrityError("receipt_hash_invalid");
+  }
+  const relayEndpoint = receipt?.providerRelay?.endpoint;
+  if (relayEndpoint !== undefined && relayEndpoint !== null && typeof relayEndpoint !== "string") {
+    throw new ReceiptIntegrityError("receipt_provider_relay_invalid");
+  }
+  return Object.freeze({
+    receiptHash,
+    providerRelayEndpoint: relayEndpoint || null,
+  });
+}
+
+function embeddedPolicyPoolRoutes(receipt, environment, anchor) {
   const routes = [];
   const reserveUrl = receipt?.reserve?.publicUrl;
   if (reserveUrl) {
@@ -82,11 +130,11 @@ function embeddedPolicyPoolRoutes(receipt, environment) {
   }
   if (relayEndpoint) {
     const route = configuredProviderRelayRoute(relayEndpoint, environment)
-      || historicalProviderRelayRoute(relayEndpoint);
+      || anchoredProviderRelayRoute(relayEndpoint, anchor);
     if (!route) {
       throw new ReceiptIntegrityError(
         "receipt_public_origin_untrusted",
-        "Receipt relay endpoint is not an exact configured or historical PolicyPool relay route",
+        "Receipt relay endpoint is not the exact configured or issuance-anchored PolicyPool route",
       );
     }
     routes.push({ field: "providerRelay.endpoint", route });
@@ -94,17 +142,32 @@ function embeddedPolicyPoolRoutes(receipt, environment) {
   return routes;
 }
 
-export function verifyReceiptIntegrity(receipt, { environment = process.env } = {}) {
+export function verifyReceiptIntegrity(
+  receipt,
+  { environment = process.env, anchor = null } = {},
+) {
   const claimed = String(receipt?.receiptHash || "");
   if (!RECEIPT_HASH_RE.test(claimed)) {
     throw new ReceiptIntegrityError("receipt_hash_invalid");
+  }
+  if (anchor !== null) {
+    if (!anchor || typeof anchor !== "object" || Array.isArray(anchor)) {
+      throw new ReceiptIntegrityError("receipt_integrity_anchor_invalid");
+    }
+    if (String(anchor.receiptHash || "") !== claimed) {
+      throw new ReceiptIntegrityError("receipt_hash_anchor_mismatch");
+    }
+    const relayEndpoint = receipt?.providerRelay?.endpoint || null;
+    if ((anchor.providerRelayEndpoint || null) !== relayEndpoint) {
+      throw new ReceiptIntegrityError("receipt_provider_relay_anchor_mismatch");
+    }
   }
   const computed = computeReceiptHash(receipt);
   if (computed !== claimed) {
     throw new ReceiptIntegrityError("receipt_hash_mismatch");
   }
 
-  const routes = embeddedPolicyPoolRoutes(receipt, environment);
+  const routes = embeddedPolicyPoolRoutes(receipt, environment, anchor);
   const routeKeys = new Set(routes.map(({ route }) => route.key));
   if (routeKeys.size > 1) {
     throw new ReceiptIntegrityError(

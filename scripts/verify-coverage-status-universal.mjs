@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createCoverageStatusHandler } from "../api/coverage-status.js";
 import {
+  buildReceiptIntegrityAnchor,
   computeReceiptHash,
   STORED_RECEIPT_SHAPES,
 } from "../api/lib/receipt-integrity.js";
@@ -36,6 +37,9 @@ async function fetchStatus(record, options) {
   if (stored.receipt && !stored.receipt.receiptHash) {
     stored.receipt.receiptHash = computeReceiptHash(stored.receipt);
     stored.receiptDocumentKind = STORED_RECEIPT_SHAPES.issued;
+  }
+  if (stored.receipt && !stored.receiptIntegrityAnchor) {
+    stored.receiptIntegrityAnchor = buildReceiptIntegrityAnchor(stored.receipt);
   }
   const { handler } = handlerFor(stored, options);
   const response = await callHandler(handler, { method: "GET", query: { receiptId: stored.receiptId } });

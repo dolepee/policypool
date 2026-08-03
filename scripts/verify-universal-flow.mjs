@@ -228,7 +228,13 @@ assert.equal(paid.json().receipt.providerRelay.grantToken, "signed-relay-grant")
 assert.equal(paid.json().receipt.reserve, null);
 assert.equal(paid.json().receipt.providerBond.sharedReserveUsed, false);
 assert.equal(paid.json().receipt.providerBond.lockedAtomic, "500000");
-assert.equal((await success.ledger.list())[0].receipt.providerRelay.grantToken, undefined);
+const [storedSuccess] = await success.ledger.list();
+assert.equal(storedSuccess.receipt.providerRelay.grantToken, undefined);
+assert.equal(storedSuccess.receiptIntegrityAnchor.receiptHash, storedSuccess.receipt.receiptHash);
+assert.equal(
+  storedSuccess.receiptIntegrityAnchor.providerRelayEndpoint,
+  "https://policypool.dolepee.com/api/provider-relay",
+);
 assert.equal(success.calls.issue, 1);
 assert.equal(success.calls.settle, 1);
 assert.equal((await success.ledger.stats()).committedAtomic, "0");

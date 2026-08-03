@@ -942,6 +942,8 @@ try {
 
   const stored = await crossOrigin.ledger.get(historicalReceipt.receiptId);
   assert.equal(stored.receiptDocumentKind, "issued");
+  assert.equal(stored.receiptIntegrityAnchor.receiptHash, historicalReceipt.receiptHash);
+  assert.equal(stored.receiptIntegrityAnchor.providerRelayEndpoint, null);
   const missingHash = structuredClone(stored);
   delete missingHash.receipt.receiptHash;
   crossOrigin.ledger.records.set(missingHash.receiptId, missingHash);
@@ -1071,7 +1073,7 @@ try {
     body: sampleBody,
   });
   assert.equal(mixedReplay.statusCode, 409);
-  assert.equal(mixedReplay.json().error, "receipt_public_origin_mismatch");
+  assert.equal(mixedReplay.json().error, "receipt_hash_anchor_mismatch");
   assert.equal(crossOrigin.calls.settle, 1);
   const mixedStatus = await callHandler(createCoverageStatusHandler({
     ledger: crossOrigin.ledger,
@@ -1083,7 +1085,7 @@ try {
     query: { receiptId: mixed.receiptId },
   });
   assert.equal(mixedStatus.statusCode, 409);
-  assert.equal(mixedStatus.json().error, "receipt_public_origin_mismatch");
+  assert.equal(mixedStatus.json().error, "receipt_hash_anchor_mismatch");
 } finally {
   if (savedOrigin === undefined) delete process.env.POLICYPOOL_PUBLIC_ORIGIN;
   else process.env.POLICYPOOL_PUBLIC_ORIGIN = savedOrigin;
