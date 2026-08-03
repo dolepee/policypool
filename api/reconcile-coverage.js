@@ -28,7 +28,7 @@ function rawRequestBody(req) {
 function requestUrl(req) {
   if (req.url?.startsWith("http")) return req.url;
   const proto = header(req, "x-forwarded-proto") || "https";
-  const host = header(req, "x-forwarded-host") || header(req, "host") || "policypool.vercel.app";
+  const host = header(req, "x-forwarded-host") || header(req, "host") || "policypool.dolepee.com";
   return `${proto}://${host}${req.url || "/api/reconcile-coverage"}`;
 }
 

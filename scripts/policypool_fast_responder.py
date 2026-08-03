@@ -24,7 +24,7 @@ SERVICE_NAME = "Covered Job Receipt"
 def canonical_endpoint(path: str, environment: Mapping[str, str] = os.environ) -> str:
     origin = environment.get(
         "POLICYPOOL_PUBLIC_ORIGIN",
-        "https://policypool.vercel.app",
+        "https://policypool.dolepee.com",
     ).strip().rstrip("/")
     prefix = environment.get("POLICYPOOL_PUBLIC_PATH_PREFIX", "").strip().rstrip("/")
     return f"{origin}{prefix}{path}"

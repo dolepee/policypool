@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
+  DEFAULT_PUBLIC_ORIGIN,
   canonicalRequestPublicUrl,
   configuredPublicOrigin,
   publicUrl,
@@ -9,17 +10,48 @@ import {
 } from "../api/lib/public-origin.js";
 import { universalPublicOrigin } from "../api/lib/universal-config.js";
 
-const keepwarmSource = await readFile(
-  new URL("./policypool_keepwarm.sh", import.meta.url),
-  "utf8",
-);
+const [keepwarmSource, responderSource, scheduleSource, reconcileSource, environmentExample] =
+  await Promise.all([
+    "./policypool_keepwarm.sh",
+    "./policypool_fast_responder.py",
+    "./setup-qstash-schedule.mjs",
+    "../api/reconcile-coverage.js",
+    "../.env.example",
+  ].map((relative) => readFile(new URL(relative, import.meta.url), "utf8")));
 assert.match(
   keepwarmSource,
   /PUBLIC_ORIGIN="\$\{PUBLIC_ORIGIN%\/\}"/,
   "keep-warm endpoint construction must normalize a valid trailing origin slash",
 );
+assert.match(
+  keepwarmSource,
+  /POLICYPOOL_PUBLIC_ORIGIN:-https:\/\/policypool\.dolepee\.com/,
+  "keep-warm must default to the canonical custom front door",
+);
+assert.match(
+  responderSource,
+  /"https:\/\/policypool\.dolepee\.com"/,
+  "the marketplace responder must default to the canonical custom front door",
+);
+assert.match(
+  scheduleSource,
+  /https:\/\/policypool\.dolepee\.com\/api\/reconcile-coverage/,
+  "new v0.3 reconciliation schedules must target the canonical custom front door",
+);
+assert.match(
+  reconcileSource,
+  /\|\| "policypool\.dolepee\.com"/,
+  "signed reconciliation must use the canonical host when proxy headers are absent",
+);
+assert.match(
+  environmentExample,
+  /^POLICYPOOL_PUBLIC_ORIGIN=https:\/\/policypool\.dolepee\.com$/m,
+  "operator configuration must name the canonical custom front door",
+);
 
 const configured = { POLICYPOOL_PUBLIC_ORIGIN: "https://policy.example" };
+assert.equal(DEFAULT_PUBLIC_ORIGIN, "https://policypool.dolepee.com");
+assert.equal(configuredPublicOrigin({}), DEFAULT_PUBLIC_ORIGIN);
 assert.equal(configuredPublicOrigin(configured), "https://policy.example");
 assert.equal(publicUrl("/api/covered-job-receipt", configured), "https://policy.example/api/covered-job-receipt");
 const relayed = {
@@ -124,7 +156,7 @@ for (const invalid of [
 
 assert.equal(
   requestPublicOrigin({ headers: { "x-forwarded-host": "attacker.invalid/path" } }, {}),
-  "https://policypool.vercel.app",
+  "https://policypool.dolepee.com",
   "an invalid forwarded host must fall back to the known production origin",
 );
 assert.equal(
