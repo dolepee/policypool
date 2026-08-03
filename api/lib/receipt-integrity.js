@@ -121,6 +121,11 @@ function sameNonemptyValue(left, right) {
   return Boolean(expected) && expected.toLowerCase() === String(right || "").toLowerCase();
 }
 
+function sameNonemptyIdentifier(left, right) {
+  const expected = String(left || "");
+  return Boolean(expected) && expected === String(right || "");
+}
+
 export function buildLegacyRelayReceiptIntegrityAnchor(record) {
   const receipt = record?.receipt;
   const endpoint = receipt?.providerRelay?.endpoint;
@@ -138,7 +143,7 @@ export function buildLegacyRelayReceiptIntegrityAnchor(record) {
       record.universalCovenant?.covenantId,
       receipt.covenant?.onchain?.covenantId,
     )
-    || !sameNonemptyValue(
+    || !sameNonemptyIdentifier(
       record.relayGrantPayload?.grantId,
       receipt.providerRelay?.grantId,
     )

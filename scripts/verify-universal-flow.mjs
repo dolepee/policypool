@@ -314,6 +314,26 @@ try {
     "receipt_integrity_anchor_backfill_ineligible",
   );
 
+  const caseChangedGrant = structuredClone(preAnchorRecord);
+  caseChangedGrant.receipt.providerRelay.grantId = caseChangedGrant.receipt
+    .providerRelay.grantId.toUpperCase();
+  caseChangedGrant.receipt.receiptHash = computeReceiptHash(caseChangedGrant.receipt);
+  const caseChangedGrantLedger = new MemoryLedger();
+  caseChangedGrantLedger.records.set(caseChangedGrant.receiptId, caseChangedGrant);
+  const caseChangedGrantStatus = await callHandler(createCoverageStatusHandler({
+    ledger: caseChangedGrantLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: caseChangedGrant.receiptId },
+  });
+  assert.equal(caseChangedGrantStatus.statusCode, 409);
+  assert.equal(
+    caseChangedGrantStatus.json().error,
+    "receipt_integrity_anchor_backfill_ineligible",
+  );
+
   const migratedStatus = await callHandler(createCoverageStatusHandler({
     ledger: legacy.ledger,
     chain: { async getJobStatus() { return 1; } },
