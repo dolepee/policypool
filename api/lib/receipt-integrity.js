@@ -126,9 +126,14 @@ function sameNonemptyIdentifier(left, right) {
   return Boolean(expected) && expected === String(right || "");
 }
 
-export function buildLegacyRelayReceiptIntegrityAnchor(record) {
+export function buildLegacyRelayReceiptIntegrityAnchor(
+  record,
+  environment = process.env,
+) {
   const receipt = record?.receipt;
   const endpoint = receipt?.providerRelay?.endpoint;
+  const issuanceRoute = configuredProviderRelayRoute(endpoint, environment)
+    || legacyProviderRelayRoute(endpoint);
   if (
     !receipt
     || receipt.version !== "0.4.0"
@@ -136,7 +141,7 @@ export function buildLegacyRelayReceiptIntegrityAnchor(record) {
     || receipt.outcome?.type !== "ISSUED"
     || (record.receiptDocumentKind && record.receiptDocumentKind !== STORED_RECEIPT_SHAPES.issued)
     || record.receiptId !== receipt.receiptId
-    || !legacyProviderRelayRoute(endpoint)
+    || !issuanceRoute
     || !sameNonemptyValue(record.finalizedAt, receipt.generatedAt)
     || !sameNonemptyValue(record.settlement?.transaction, receipt.servicePayment?.transaction)
     || !sameNonemptyValue(

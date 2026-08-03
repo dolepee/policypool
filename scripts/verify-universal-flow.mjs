@@ -334,6 +334,53 @@ try {
     "receipt_integrity_anchor_backfill_ineligible",
   );
 
+  process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://self-hosted-policy.example";
+  process.env.POLICYPOOL_PUBLIC_PATH_PREFIX = "/policypool";
+  const configuredLegacy = structuredClone(preAnchorRecord);
+  configuredLegacy.receipt.providerRelay.endpoint =
+    "https://self-hosted-policy.example/policypool/api/provider-relay";
+  configuredLegacy.receipt.receiptHash = computeReceiptHash(configuredLegacy.receipt);
+  const configuredLegacyLedger = new MemoryLedger();
+  configuredLegacyLedger.records.set(configuredLegacy.receiptId, configuredLegacy);
+  const configuredLegacyStatus = await callHandler(createCoverageStatusHandler({
+    ledger: configuredLegacyLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: configuredLegacy.receiptId },
+  });
+  assert.equal(configuredLegacyStatus.statusCode, 200);
+  assert.equal(
+    (await configuredLegacyLedger.get(configuredLegacy.receiptId))
+      .receiptIntegrityAnchor.providerRelayEndpoint,
+    configuredLegacy.receipt.providerRelay.endpoint,
+  );
+
+  const wrongConfiguredRoute = structuredClone(configuredLegacy);
+  delete wrongConfiguredRoute.receiptIntegrityAnchor;
+  wrongConfiguredRoute.receipt.providerRelay.endpoint =
+    "https://self-hosted-policy.example/wrong/api/provider-relay";
+  wrongConfiguredRoute.receipt.receiptHash = computeReceiptHash(wrongConfiguredRoute.receipt);
+  const wrongConfiguredLedger = new MemoryLedger();
+  wrongConfiguredLedger.records.set(wrongConfiguredRoute.receiptId, wrongConfiguredRoute);
+  const wrongConfiguredStatus = await callHandler(createCoverageStatusHandler({
+    ledger: wrongConfiguredLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: wrongConfiguredRoute.receiptId },
+  });
+  assert.equal(wrongConfiguredStatus.statusCode, 409);
+  assert.equal(
+    wrongConfiguredStatus.json().error,
+    "receipt_integrity_anchor_backfill_ineligible",
+  );
+
+  process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://policypool.dolepee.com";
+  delete process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+
   const migratedStatus = await callHandler(createCoverageStatusHandler({
     ledger: legacy.ledger,
     chain: { async getJobStatus() { return 1; } },
