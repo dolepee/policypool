@@ -1,0 +1,7 @@
+{
+  "ok": true,
+  "service": "PolicyPool",
+  "status": "ready",
+  "check": "shallow",
+  "dependenciesQueried": false
+}

@@ -1,6 +1,6 @@
 import { header } from "./utils.js";
 
-export const DEFAULT_PUBLIC_ORIGIN = "https://policypool.vercel.app";
+export const DEFAULT_PUBLIC_ORIGIN = "https://policypool.dolepee.com";
 
 export class PublicOriginConfigurationError extends Error {
   constructor(message) {

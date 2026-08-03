@@ -2,7 +2,7 @@
 # Exercise PolicyPool's unpaid A2MCP contract, not only its HEAD route.
 set -u
 
-PUBLIC_ORIGIN="${POLICYPOOL_PUBLIC_ORIGIN:-https://policypool.vercel.app}"
+PUBLIC_ORIGIN="${POLICYPOOL_PUBLIC_ORIGIN:-https://policypool.dolepee.com}"
 PUBLIC_ORIGIN="${PUBLIC_ORIGIN%/}"
 PUBLIC_PREFIX="${POLICYPOOL_PUBLIC_PATH_PREFIX:-}"
 ENDPOINT="${POLICYPOOL_AGENT_ENDPOINT:-${PUBLIC_ORIGIN}${PUBLIC_PREFIX}/api/covered-job-receipt}"

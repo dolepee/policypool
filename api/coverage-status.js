@@ -2,6 +2,12 @@ import { createChainService } from "./lib/chain.js";
 import { createLedger } from "./lib/ledger.js";
 import { clean, sendJson as rawSendJson } from "./lib/utils.js";
 import { enrichCoverageResponse } from "./lib/coverage-state.js";
+import {
+  ensureReceiptIntegrityAnchor,
+  ReceiptIntegrityError,
+  STORED_RECEIPT_SHAPES,
+  verifyReceiptIntegrity,
+} from "./lib/receipt-integrity.js";
 
 // Receipt lookups report the lifecycle state explicitly, so a reader never has
 // to infer whether coverage is still in force from the raw receipt shape.
@@ -36,6 +42,10 @@ function reconciledDeadline(record) {
 // away certainty the record actually has.
 function isUniversalRecord(record) {
   return Boolean(record?.universalCovenant?.covenantId && record?.receipt?.version === "0.4.0");
+}
+
+function reconciledClockMode(record) {
+  return record.receipt.target?.clockMode || "verified_acceptance";
 }
 
 const DELIVERED_STATUS = 2;
@@ -91,8 +101,26 @@ export function createCoverageStatusHandler(dependencies = {}) {
     try {
       ledger ||= createLedger();
       chain ||= createChainService();
-      const record = await ledger.get(receiptId);
+      let record = await ledger.get(receiptId);
       if (!record) return sendJson(res, 404, { ok: false, error: "coverage_receipt_not_found" });
+      // Status is authoritative only when anchored to the portable,
+      // hash-verified receipt issued at settlement. Reconciliation remains a
+      // separate derived projection; a missing receipt can never become valid
+      // by relabelling the same mutable ledger record.
+      try {
+        record = await ensureReceiptIntegrityAnchor(record, ledger);
+        verifyReceiptIntegrity(record.receipt, {
+          anchor: record.receiptIntegrityAnchor || null,
+        });
+      } catch (error) {
+        if (!(error instanceof ReceiptIntegrityError)) throw error;
+        return sendJson(res, 409, {
+          ok: false,
+          error: error.code,
+          receiptId,
+        });
+      }
+      const receiptShape = STORED_RECEIPT_SHAPES.issued;
       const jobStatus = record.targetOrder?.jobId
         ? await chain.getJobStatus(record.targetOrder.jobId)
         : null;
@@ -111,7 +139,7 @@ export function createCoverageStatusHandler(dependencies = {}) {
       // deadline without ever reading marketplace job status. Applying the
       // legacy accepted-job predicate to it would report a covenant the
       // reconciler is about to pay out as not a candidate.
-      const clockMode = record.receipt?.target?.clockMode || "verified_acceptance";
+      const clockMode = reconciledClockMode(record);
       const payoutDueCandidate = candidacy({ record, clockMode, deadlinePassed, jobStatus });
       // v0.4 transitions record their reason and evidence in
       // universalReconciliation and never populate record.release, so a
@@ -134,6 +162,15 @@ export function createCoverageStatusHandler(dependencies = {}) {
         receiptId,
         state: record.state,
         receipt: record.receipt,
+        receiptDocumentKind: receiptShape,
+        reconciliationProjection: isUniversalRecord(record) && universal
+          ? {
+            version: "0.4.0",
+            source: "universal_reconciliation",
+            deadline: effectiveDeadline,
+            clockMode,
+          }
+          : null,
         liabilityAtomic: record.liabilityAtomic,
         targetJobStatus: jobStatus,
         reconciliation: {

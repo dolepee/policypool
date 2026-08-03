@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { MemoryLedger } from "../api/lib/ledger.js";
 import { MemoryProviderPolicyStore } from "../api/lib/provider-policy-store.js";
+import {
+  buildReceiptIntegrityAnchor,
+  computeReceiptHash,
+} from "../api/lib/receipt-integrity.js";
 import { createUniversalReconciler } from "../api/lib/universal-reconciler.js";
 
 const now = Date.parse("2026-07-16T13:00:00.000Z");
@@ -45,6 +49,18 @@ async function seed({
     agentId: "3808",
     serviceId: "33461",
   } : null;
+  const receipt = {
+    receiptId: `ppc-${id}`,
+    version: "0.4.0",
+    target: { clockMode, slaSeconds: 300 },
+    covenant: { deadline, enrollmentClosedAt, coverageCapAtomic: "500000" },
+    ...(clockMode === "policypool_relay" ? {
+      providerRelay: {
+        endpoint: "https://policypool.dolepee.com/api/provider-relay",
+      },
+    } : {}),
+  };
+  receipt.receiptHash = computeReceiptHash(receipt);
   const record = {
     receiptId: `ppc-${id}`,
     requestId: `request-${id}`,
@@ -55,11 +71,8 @@ async function seed({
     universalCovenant: { covenantId },
     relayGrantPayload,
     targetOrder: { jobId, publicTaskReference, amountAtomic: "500000" },
-    receipt: {
-      version: "0.4.0",
-      target: { clockMode, slaSeconds: 300 },
-      covenant: { deadline, enrollmentClosedAt, coverageCapAtomic: "500000" },
-    },
+    receipt,
+    receiptIntegrityAnchor: buildReceiptIntegrityAnchor(receipt),
   };
   await ledger.reserve(record, 0n);
   await ledger.finalize({ ...record, state });
@@ -458,6 +471,108 @@ const misindexedReconciler = createUniversalReconciler({
   verifyRelayReceipt: async () => true,
   now: () => now,
 });
+
+const alteredRecord = structuredClone(await ledger.get(breach.receiptId));
+alteredRecord.receipt.covenant.deadline = "2026-07-17T12:59:00.000Z";
+let alteredIssuerReads = 0;
+const alteredReconciler = createUniversalReconciler({
+  ledger: {
+    async list() { return [alteredRecord]; },
+    async transitionUniversal() { throw new Error("altered_receipt_transition_attempted"); },
+  },
+  store,
+  issuer: {
+    async getCovenant() {
+      alteredIssuerReads += 1;
+      throw new Error("altered_receipt_chain_read_attempted");
+    },
+  },
+  chain: { async getJobStatus() { throw new Error("altered_receipt_job_read_attempted"); } },
+  taskFetcher: async () => { throw new Error("altered_receipt_task_read_attempted"); },
+  relaySigner: "0x1000000000000000000000000000000000000001",
+  relayVerifier: "0x2000000000000000000000000000000000000002",
+  verifyRelayReceipt: async () => true,
+  now: () => now,
+});
+const alteredResult = await alteredReconciler.reconcile();
+assert.equal(alteredResult.ok, false);
+assert.equal(alteredResult.failures[0].error, "receipt_hash_mismatch");
+assert.equal(alteredIssuerReads, 0, "receipt verification must precede issuer reads and writes");
+
+const missingReceiptRecord = structuredClone(await ledger.get(breach.receiptId));
+delete missingReceiptRecord.receipt;
+missingReceiptRecord.state = "compensation_required";
+let missingReceiptIssuerReads = 0;
+const missingReceiptReconciler = createUniversalReconciler({
+  ledger: {
+    async list() { return [missingReceiptRecord]; },
+    async transitionUniversal() { throw new Error("missing_receipt_transition_attempted"); },
+  },
+  store,
+  issuer: {
+    async getCovenant() {
+      missingReceiptIssuerReads += 1;
+      throw new Error("missing_receipt_issuer_read_attempted");
+    },
+  },
+  chain: { async getJobStatus() { throw new Error("missing_receipt_job_read_attempted"); } },
+  taskFetcher: async () => { throw new Error("missing_receipt_task_read_attempted"); },
+  relaySigner: "0x1000000000000000000000000000000000000001",
+  relayVerifier: "0x2000000000000000000000000000000000000002",
+  verifyRelayReceipt: async () => true,
+  now: () => now,
+});
+const missingReceiptResult = await missingReceiptReconciler.reconcile();
+assert.equal(missingReceiptResult.ok, false);
+assert.equal(missingReceiptResult.failures[0].error, "receipt_document_missing");
+assert.equal(
+  missingReceiptIssuerReads,
+  0,
+  "an anchored record without its receipt must fail before compensation reads or writes",
+);
+
+const previousMigrations = process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS;
+const universalDryRunRecord = structuredClone(await ledger.get(breach.receiptId));
+universalDryRunRecord.receiptId = "ppc-2222222222222222";
+universalDryRunRecord.receipt.receiptId = universalDryRunRecord.receiptId;
+universalDryRunRecord.receipt.receiptHash = computeReceiptHash(universalDryRunRecord.receipt);
+delete universalDryRunRecord.receiptIntegrityAnchor;
+process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS = JSON.stringify([{
+  receiptId: universalDryRunRecord.receiptId,
+  receiptHash: universalDryRunRecord.receipt.receiptHash,
+  providerRelayEndpoint: null,
+}]);
+let universalDryRunBackfills = 0;
+try {
+  const universalDryRunReconciler = createUniversalReconciler({
+    ledger: {
+      async list() { return [universalDryRunRecord]; },
+      async backfillReceiptIntegrityAnchor() {
+        universalDryRunBackfills += 1;
+        throw new Error("universal_dry_run_backfill_attempted");
+      },
+      async transitionUniversal() { throw new Error("universal_dry_run_transition_attempted"); },
+    },
+    store,
+    issuer,
+    chain: { async getJobStatus(jobId) { return chainStates.get(jobId); } },
+    taskFetcher: async (reference) => structuredClone(tasks.get(String(reference))),
+    relaySigner: "0x1000000000000000000000000000000000000001",
+    relayVerifier: "0x2000000000000000000000000000000000000002",
+    verifyRelayReceipt: async () => true,
+    now: () => now,
+  });
+  const universalPreview = await universalDryRunReconciler.reconcile({ dryRun: true });
+  assert.equal(universalPreview.ok, true);
+  assert.equal(universalDryRunBackfills, 0, "a universal dry run must not persist a receipt sidecar");
+} finally {
+  if (previousMigrations === undefined) {
+    delete process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS;
+  } else {
+    process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS = previousMigrations;
+  }
+}
+
 const replacementRecord = await ledger.get(replacementRelay.receiptId);
 await assert.rejects(
   () => misindexedReconciler.reconcileRecord(replacementRecord, false),

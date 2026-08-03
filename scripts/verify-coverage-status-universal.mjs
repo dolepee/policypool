@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import { createCoverageStatusHandler } from "../api/coverage-status.js";
+import {
+  buildReceiptIntegrityAnchor,
+  computeReceiptHash,
+  STORED_RECEIPT_SHAPES,
+} from "../api/lib/receipt-integrity.js";
 import { callHandler } from "./lib/fake-vercel.mjs";
 
 // v0.4 transitions record their outcome in `universalReconciliation` and never
@@ -28,11 +33,45 @@ function handlerFor(record, { jobStatus = null } = {}) {
 }
 
 async function fetchStatus(record, options) {
-  const { handler } = handlerFor(record, options);
-  const response = await callHandler(handler, { method: "GET", query: { receiptId: record.receiptId } });
+  let stored = structuredClone(record);
+  if (stored.receipt && !stored.receipt.receiptHash) {
+    stored.receipt.receiptHash = computeReceiptHash(stored.receipt);
+    stored.receiptDocumentKind = STORED_RECEIPT_SHAPES.issued;
+  }
+  if (stored.receipt && !stored.receiptIntegrityAnchor) {
+    stored.receiptIntegrityAnchor = buildReceiptIntegrityAnchor(stored.receipt);
+  }
+  const { handler } = handlerFor(stored, options);
+  const response = await callHandler(handler, { method: "GET", query: { receiptId: stored.receiptId } });
   assert.equal(response.statusCode, 200);
   return response.json();
 }
+
+// Reconciliation is exposed as a separate projection derived only after the
+// issued receipt passes its integrity check. It is never a hashless receipt.
+const explicitProjection = await fetchStatus({
+  receiptId: "ppc-explicit-reconciliation-projection",
+  state: "released",
+  liabilityAtomic: "0",
+  receipt: {
+    version: "0.4.0",
+    covenant: { deadline: PAST_DEADLINE },
+    target: { clockMode: "verified_acceptance" },
+  },
+  universalCovenant: { covenantId: `0x${"ef".repeat(32)}` },
+  universalReconciliation: {
+    from: "active",
+    to: "released",
+    reason: "service_delivered_within_sla",
+    observedAt: "2026-07-25T09:59:00.000Z",
+    deadline: PAST_DEADLINE,
+  },
+});
+assert.equal(explicitProjection.coverageState, "COVERAGE_RELEASED");
+assert.equal(explicitProjection.receiptDocumentKind, STORED_RECEIPT_SHAPES.issued);
+assert.match(explicitProjection.receipt.receiptHash, /^sha256:[a-f0-9]{64}$/);
+assert.equal(explicitProjection.reconciliationProjection.version, "0.4.0");
+assert.equal(explicitProjection.reconciliationProjection.deadline, PAST_DEADLINE);
 
 // A universally released covenant must report its verified reason, not null.
 const universallyReleased = await fetchStatus({
@@ -232,6 +271,9 @@ const activeRecord = ({ receiptId, universal, clockMode, deadline = PAST_DEADLIN
     version: universal ? "0.4.0" : "0.2.0",
     covenant: { deadline },
     target: { clockMode },
+    ...(clockMode === "policypool_relay"
+      ? { providerRelay: { endpoint: "https://policypool.dolepee.com/api/provider-relay" } }
+      : {}),
   },
   ...(universal ? { universalCovenant: { covenantId: `0x${"cc".repeat(32)}` } } : {}),
   targetOrder: { jobId: `0x${"ab".repeat(32)}` },

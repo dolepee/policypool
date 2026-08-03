@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { encodePaymentSignatureHeader } from "@okxweb3/x402-core/http";
 import { createHandler } from "../api/covered-job-receipt.js";
+import { createCoverageStatusHandler } from "../api/coverage-status.js";
 import { PAYMENT, paymentRequirements } from "../api/lib/config.js";
 import { MemoryLedger, RedisLedger } from "../api/lib/ledger.js";
 import { createPaymentService } from "../api/lib/payment.js";
 import { createQuoteService } from "../api/lib/quote.js";
+import { computeReceiptHash } from "../api/lib/receipt-integrity.js";
 import { sha256 } from "../api/lib/utils.js";
 import { callHandler, decodePaymentRequired } from "./lib/fake-vercel.mjs";
 
@@ -228,10 +231,352 @@ assert.equal(paid.json().receipt.providerRelay.grantToken, "signed-relay-grant")
 assert.equal(paid.json().receipt.reserve, null);
 assert.equal(paid.json().receipt.providerBond.sharedReserveUsed, false);
 assert.equal(paid.json().receipt.providerBond.lockedAtomic, "500000");
-assert.equal((await success.ledger.list())[0].receipt.providerRelay.grantToken, undefined);
+const [storedSuccess] = await success.ledger.list();
+assert.equal(storedSuccess.receipt.providerRelay.grantToken, undefined);
+assert.equal(storedSuccess.receiptIntegrityAnchor.receiptHash, storedSuccess.receipt.receiptHash);
+assert.equal(
+  storedSuccess.receiptIntegrityAnchor.providerRelayEndpoint,
+  "https://policypool.dolepee.com/api/provider-relay",
+);
 assert.equal(success.calls.issue, 1);
 assert.equal(success.calls.settle, 1);
 assert.equal((await success.ledger.stats()).committedAtomic, "0");
+
+const savedPublicOrigin = process.env.POLICYPOOL_PUBLIC_ORIGIN;
+const savedPublicPathPrefix = process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+const savedReceiptIntegrityMigrations = process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS;
+const approveReceiptMigration = (record) => {
+  process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS = JSON.stringify([{
+    receiptId: record.receiptId,
+    receiptHash: record.receipt.receiptHash,
+    providerRelayEndpoint: record.receipt.providerRelay.endpoint,
+  }]);
+};
+try {
+  delete process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS;
+  const productionFixtures = JSON.parse(
+    await readFile(new URL("./fixtures/coverage-receipts.json", import.meta.url), "utf8"),
+  );
+  const historicalNonRelay = structuredClone(
+    productionFixtures["ppc-0b0e52828eb26727"],
+  );
+  const historicalNonRelayLedger = new MemoryLedger();
+  historicalNonRelayLedger.records.set(historicalNonRelay.receiptId, historicalNonRelay);
+  const historicalNonRelayStatus = await callHandler(createCoverageStatusHandler({
+    ledger: historicalNonRelayLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: historicalNonRelay.receiptId },
+  });
+  assert.equal(historicalNonRelayStatus.statusCode, 200);
+  assert.equal(
+    (await historicalNonRelayLedger.get(historicalNonRelay.receiptId))
+      .receiptIntegrityAnchor.receiptHash,
+    historicalNonRelay.receipt.receiptHash,
+  );
+
+  process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://policypool.vercel.app";
+  delete process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+  const legacy = runtime();
+  const legacyChallengeResponse = await callHandler(legacy.handler, { method: "POST", body });
+  const legacyChallenge = decodePaymentRequired(
+    legacyChallengeResponse.headers["payment-required"],
+  );
+  const legacyRequest = {
+    method: "POST",
+    body,
+    headers: {
+      "payment-signature": paymentHeader("universal-legacy-anchor", legacyChallenge.accepts[0]),
+    },
+  };
+  const legacyPaid = await callHandler(legacy.handler, legacyRequest);
+  assert.equal(legacyPaid.statusCode, 200);
+  assert.equal(
+    legacyPaid.json().receipt.providerRelay.endpoint,
+    "https://policypool.vercel.app/api/provider-relay",
+  );
+  const legacyStored = await legacy.ledger.get(legacyPaid.json().receipt.receiptId);
+  const preAnchorRecord = structuredClone(legacyStored);
+  delete preAnchorRecord.receiptIntegrityAnchor;
+  delete preAnchorRecord.receiptDocumentKind;
+  legacy.ledger.records.set(preAnchorRecord.receiptId, preAnchorRecord);
+  legacy.ledger.receiptIntegrityAnchors.delete(preAnchorRecord.receiptId);
+
+  process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://policypool.dolepee.com";
+  delete process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS;
+  const unmappedLegacyLedger = new MemoryLedger();
+  unmappedLegacyLedger.records.set(preAnchorRecord.receiptId, preAnchorRecord);
+  const unmappedLegacyStatus = await callHandler(createCoverageStatusHandler({
+    ledger: unmappedLegacyLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: preAnchorRecord.receiptId },
+  });
+  assert.equal(unmappedLegacyStatus.statusCode, 409);
+  assert.equal(
+    unmappedLegacyStatus.json().error,
+    "receipt_integrity_anchor_backfill_ineligible",
+  );
+
+  approveReceiptMigration(preAnchorRecord);
+  const ineligibleLegacy = structuredClone(preAnchorRecord);
+  delete ineligibleLegacy.settlement.transaction;
+  const ineligibleLedger = new MemoryLedger();
+  ineligibleLedger.records.set(ineligibleLegacy.receiptId, ineligibleLegacy);
+  const ineligibleStatus = await callHandler(createCoverageStatusHandler({
+    ledger: ineligibleLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: ineligibleLegacy.receiptId },
+  });
+  assert.equal(ineligibleStatus.statusCode, 409);
+  assert.equal(
+    ineligibleStatus.json().error,
+    "receipt_integrity_anchor_backfill_ineligible",
+  );
+  assert.equal(
+    (await ineligibleLedger.get(ineligibleLegacy.receiptId)).receiptIntegrityAnchor,
+    undefined,
+  );
+
+  const missingGrant = structuredClone(preAnchorRecord);
+  delete missingGrant.relayGrantPayload.grantId;
+  delete missingGrant.receipt.providerRelay.grantId;
+  missingGrant.receipt.receiptHash = computeReceiptHash(missingGrant.receipt);
+  approveReceiptMigration(missingGrant);
+  const missingGrantLedger = new MemoryLedger();
+  missingGrantLedger.records.set(missingGrant.receiptId, missingGrant);
+  const missingGrantStatus = await callHandler(createCoverageStatusHandler({
+    ledger: missingGrantLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: missingGrant.receiptId },
+  });
+  assert.equal(missingGrantStatus.statusCode, 409);
+  assert.equal(
+    missingGrantStatus.json().error,
+    "receipt_integrity_anchor_backfill_ineligible",
+  );
+
+  const caseChangedGrant = structuredClone(preAnchorRecord);
+  caseChangedGrant.receipt.providerRelay.grantId = caseChangedGrant.receipt
+    .providerRelay.grantId.toUpperCase();
+  caseChangedGrant.receipt.receiptHash = computeReceiptHash(caseChangedGrant.receipt);
+  approveReceiptMigration(caseChangedGrant);
+  const caseChangedGrantLedger = new MemoryLedger();
+  caseChangedGrantLedger.records.set(caseChangedGrant.receiptId, caseChangedGrant);
+  const caseChangedGrantStatus = await callHandler(createCoverageStatusHandler({
+    ledger: caseChangedGrantLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: caseChangedGrant.receiptId },
+  });
+  assert.equal(caseChangedGrantStatus.statusCode, 409);
+  assert.equal(
+    caseChangedGrantStatus.json().error,
+    "receipt_integrity_anchor_backfill_ineligible",
+  );
+
+  const changedClockMode = structuredClone(preAnchorRecord);
+  changedClockMode.receipt.target.clockMode = "verified_acceptance";
+  changedClockMode.receipt.receiptHash = computeReceiptHash(changedClockMode.receipt);
+  approveReceiptMigration(changedClockMode);
+  const changedClockModeLedger = new MemoryLedger();
+  changedClockModeLedger.records.set(changedClockMode.receiptId, changedClockMode);
+  const changedClockModeStatus = await callHandler(createCoverageStatusHandler({
+    ledger: changedClockModeLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: changedClockMode.receiptId },
+  });
+  assert.equal(changedClockModeStatus.statusCode, 409);
+  assert.equal(
+    changedClockModeStatus.json().error,
+    "receipt_integrity_anchor_backfill_ineligible",
+  );
+
+  process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://self-hosted-policy.example";
+  process.env.POLICYPOOL_PUBLIC_PATH_PREFIX = "/policypool";
+  const configuredLegacy = structuredClone(preAnchorRecord);
+  configuredLegacy.receipt.providerRelay.endpoint =
+    "https://self-hosted-policy.example/policypool/api/provider-relay";
+  configuredLegacy.receipt.receiptHash = computeReceiptHash(configuredLegacy.receipt);
+  approveReceiptMigration(configuredLegacy);
+  const configuredLegacyLedger = new MemoryLedger();
+  configuredLegacyLedger.records.set(configuredLegacy.receiptId, configuredLegacy);
+  const configuredLegacyStatus = await callHandler(createCoverageStatusHandler({
+    ledger: configuredLegacyLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: configuredLegacy.receiptId },
+  });
+  assert.equal(
+    configuredLegacyStatus.statusCode,
+    200,
+    JSON.stringify(configuredLegacyStatus.json()),
+  );
+  assert.equal(
+    (await configuredLegacyLedger.get(configuredLegacy.receiptId))
+      .receiptIntegrityAnchor.providerRelayEndpoint,
+    configuredLegacy.receipt.providerRelay.endpoint,
+  );
+
+  const wrongConfiguredRoute = structuredClone(configuredLegacy);
+  delete wrongConfiguredRoute.receiptIntegrityAnchor;
+  wrongConfiguredRoute.receipt.providerRelay.endpoint =
+    "https://self-hosted-policy.example/wrong/api/provider-relay";
+  wrongConfiguredRoute.receipt.receiptHash = computeReceiptHash(wrongConfiguredRoute.receipt);
+  const wrongConfiguredLedger = new MemoryLedger();
+  wrongConfiguredLedger.records.set(wrongConfiguredRoute.receiptId, wrongConfiguredRoute);
+  const wrongConfiguredStatus = await callHandler(createCoverageStatusHandler({
+    ledger: wrongConfiguredLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: wrongConfiguredRoute.receiptId },
+  });
+  assert.equal(wrongConfiguredStatus.statusCode, 409);
+  assert.equal(
+    wrongConfiguredStatus.json().error,
+    "receipt_integrity_anchor_backfill_ineligible",
+  );
+
+  const substitutedHistoricalRoute = structuredClone(configuredLegacy);
+  substitutedHistoricalRoute.receipt.providerRelay.endpoint =
+    "https://policypool.vercel.app/api/provider-relay";
+  substitutedHistoricalRoute.receipt.receiptHash = computeReceiptHash(
+    substitutedHistoricalRoute.receipt,
+  );
+  const substitutedHistoricalLedger = new MemoryLedger();
+  substitutedHistoricalLedger.records.set(
+    substitutedHistoricalRoute.receiptId,
+    substitutedHistoricalRoute,
+  );
+  const substitutedHistoricalStatus = await callHandler(createCoverageStatusHandler({
+    ledger: substitutedHistoricalLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: substitutedHistoricalRoute.receiptId },
+  });
+  assert.equal(substitutedHistoricalStatus.statusCode, 409);
+  assert.equal(
+    substitutedHistoricalStatus.json().error,
+    "receipt_integrity_anchor_backfill_ineligible",
+  );
+
+  const changedCoverageCap = structuredClone(preAnchorRecord);
+  changedCoverageCap.receipt.covenant.coverageCapAtomic = "600000";
+  changedCoverageCap.receipt.covenant.coverageCapUSDT = "0.6";
+  changedCoverageCap.receipt.providerBond.lockedAtomic = "600000";
+  changedCoverageCap.receipt.receiptHash = computeReceiptHash(changedCoverageCap.receipt);
+  approveReceiptMigration(changedCoverageCap);
+  const changedCoverageCapLedger = new MemoryLedger();
+  changedCoverageCapLedger.records.set(changedCoverageCap.receiptId, changedCoverageCap);
+  const changedCoverageCapStatus = await callHandler(createCoverageStatusHandler({
+    ledger: changedCoverageCapLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: changedCoverageCap.receiptId },
+  });
+  assert.equal(changedCoverageCapStatus.statusCode, 409);
+  assert.equal(
+    changedCoverageCapStatus.json().error,
+    "receipt_integrity_anchor_backfill_ineligible",
+  );
+
+  process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://policypool.dolepee.com";
+  delete process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+  approveReceiptMigration(preAnchorRecord);
+
+  const migratedStatus = await callHandler(createCoverageStatusHandler({
+    ledger: legacy.ledger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: preAnchorRecord.receiptId },
+  });
+  assert.equal(migratedStatus.statusCode, 200);
+  assert.equal(
+    migratedStatus.json().receipt.providerRelay.endpoint,
+    "https://policypool.vercel.app/api/provider-relay",
+  );
+  const migratedReplay = await callHandler(legacy.handler, legacyRequest);
+  assert.equal(migratedReplay.statusCode, 200);
+  assert.equal(migratedReplay.json().idempotentReplay, true);
+  assert.equal(
+    migratedReplay.json().receipt.providerRelay.endpoint,
+    "https://policypool.vercel.app/api/provider-relay",
+  );
+  const migratedStored = await legacy.ledger.get(preAnchorRecord.receiptId);
+  assert.equal(
+    migratedStored.receiptIntegrityAnchor.receiptHash,
+    preAnchorRecord.receipt.receiptHash,
+  );
+  assert.equal(
+    migratedStored.receiptIntegrityAnchor.providerRelayEndpoint,
+    "https://policypool.vercel.app/api/provider-relay",
+  );
+  const staleTransition = await legacy.ledger.transitionUniversal(
+    { ...preAnchorRecord, state: "active" },
+    ["pending_start"],
+  );
+  assert.deepEqual(
+    staleTransition.receiptIntegrityAnchor,
+    migratedStored.receiptIntegrityAnchor,
+    "a stale transition must retain the sidecar anchor",
+  );
+  assert.deepEqual(
+    (await legacy.ledger.get(preAnchorRecord.receiptId)).receiptIntegrityAnchor,
+    migratedStored.receiptIntegrityAnchor,
+  );
+  const conflictingTransition = await legacy.ledger.transitionUniversal(
+    {
+      ...staleTransition,
+      state: "released",
+      receiptIntegrityAnchor: {
+        ...migratedStored.receiptIntegrityAnchor,
+        providerRelayEndpoint: "https://wrong.example/api/provider-relay",
+      },
+    },
+    ["active"],
+  );
+  assert.deepEqual(
+    conflictingTransition.receiptIntegrityAnchor,
+    migratedStored.receiptIntegrityAnchor,
+    "an existing sidecar anchor must be immutable",
+  );
+  assert.equal(legacy.calls.settle, 1, "anchor backfill must not settle twice");
+} finally {
+  if (savedPublicOrigin === undefined) delete process.env.POLICYPOOL_PUBLIC_ORIGIN;
+  else process.env.POLICYPOOL_PUBLIC_ORIGIN = savedPublicOrigin;
+  if (savedPublicPathPrefix === undefined) delete process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
+  else process.env.POLICYPOOL_PUBLIC_PATH_PREFIX = savedPublicPathPrefix;
+  if (savedReceiptIntegrityMigrations === undefined) {
+    delete process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS;
+  } else {
+    process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS = savedReceiptIntegrityMigrations;
+  }
+}
 
 const failed = runtime({ settlementFails: true });
 const failedChallengeResponse = await callHandler(failed.handler, { method: "POST", body });
@@ -296,6 +641,7 @@ const compensationRecord = {
 };
 let redisStored = JSON.stringify(compensationRecord);
 const redis = {
+  async get() { return null; },
   async eval(script, keys, argv) {
     assert.match(
       script,
@@ -321,6 +667,95 @@ const redisFinal = await redisLedger.finalize({
 });
 assert.equal(redisFinal.state, "pending_start");
 assert.equal(redisFinal.receipt.receiptId, "redis-compensation");
+
+const redisAnchorRecord = {
+  receiptId: "redis-anchor",
+  state: "pending_start",
+  universalCovenant: { covenantId: `0x${"cd".repeat(32)}` },
+  receipt: {
+    receiptHash: `sha256:${"ab".repeat(32)}`,
+    target: { exclusions: [] },
+  },
+};
+let redisAnchorStored = JSON.stringify(redisAnchorRecord);
+const redisAnchorStoredBefore = redisAnchorStored;
+let redisAnchorSidecar = null;
+const redisAnchor = {
+  receiptHash: redisAnchorRecord.receipt.receiptHash,
+  providerRelayEndpoint: "https://policypool.vercel.app/api/provider-relay",
+};
+const redisAnchorLedger = new RedisLedger({
+  prefix: "test",
+  redis: {
+    async get(key) {
+      return key === "test:receipt-anchor:redis-anchor" ? redisAnchorSidecar : null;
+    },
+    async eval(script, keys, argv) {
+      if (script.includes("local allowed = false")) {
+        assert.equal(keys[0], "test:receipt:redis-anchor");
+        const current = JSON.parse(redisAnchorStored);
+        if (!argv.slice(1).includes(current.state)) {
+          return ["state_mismatch", redisAnchorStored];
+        }
+        redisAnchorStored = argv[0];
+        return ["updated", redisAnchorStored];
+      }
+      assert.match(script, /local existing = redis\.call\('GET', KEYS\[2\]\)/);
+      assert.match(script, /redis\.call\('SET', KEYS\[2\], ARGV\[2\], 'NX'\)/);
+      assert.match(script, /decoded\.receipt\.receiptHash ~= ARGV\[1\]/);
+      assert.equal(keys[0], "test:receipt:redis-anchor");
+      assert.equal(keys[1], "test:receipt-anchor:redis-anchor");
+      assert.equal(argv[0], redisAnchor.receiptHash);
+      const current = JSON.parse(redisAnchorStored);
+      if (redisAnchorSidecar) return ["existing", redisAnchorStored, redisAnchorSidecar];
+      if (current.receipt?.receiptHash !== argv[0]) {
+        return ["receipt_mismatch", redisAnchorStored];
+      }
+      redisAnchorSidecar = argv[1];
+      return ["backfilled", redisAnchorStored, redisAnchorSidecar];
+    },
+  },
+});
+const redisAnchored = await redisAnchorLedger.backfillReceiptIntegrityAnchor(
+  redisAnchorRecord.receiptId,
+  redisAnchorRecord.receipt.receiptHash,
+  redisAnchor,
+);
+assert.deepEqual(redisAnchored.receiptIntegrityAnchor, redisAnchor);
+assert.equal(redisAnchorStored, redisAnchorStoredBefore);
+assert.deepEqual(JSON.parse(redisAnchorStored).receipt.target.exclusions, []);
+const redisAnchorReplay = await redisAnchorLedger.backfillReceiptIntegrityAnchor(
+  redisAnchorRecord.receiptId,
+  redisAnchorRecord.receipt.receiptHash,
+  { ...redisAnchor, providerRelayEndpoint: "https://wrong.example/api/provider-relay" },
+);
+assert.deepEqual(redisAnchorReplay.receiptIntegrityAnchor, redisAnchor);
+
+const embeddedOnlyRecord = {
+  ...redisAnchorRecord,
+  receiptIntegrityAnchor: {
+    receiptHash: redisAnchorRecord.receipt.receiptHash,
+    providerRelayEndpoint: "https://attacker.example/api/provider-relay",
+  },
+};
+const embeddedOnlyMemoryLedger = new MemoryLedger();
+embeddedOnlyMemoryLedger.records.set(embeddedOnlyRecord.receiptId, embeddedOnlyRecord);
+assert.equal(
+  (await embeddedOnlyMemoryLedger.get(embeddedOnlyRecord.receiptId)).receiptIntegrityAnchor,
+  undefined,
+  "an embedded mutable anchor must not substitute for the MemoryLedger sidecar",
+);
+assert.equal(
+  redisAnchorLedger.attachReceiptIntegrityAnchor(embeddedOnlyRecord, null).receiptIntegrityAnchor,
+  undefined,
+  "an embedded mutable anchor must not substitute for the Redis sidecar",
+);
+const redisStaleTransition = await redisAnchorLedger.transitionUniversal(
+  { ...redisAnchorRecord, state: "active" },
+  ["pending_start"],
+);
+assert.deepEqual(redisStaleTransition.receiptIntegrityAnchor, redisAnchor);
+assert.deepEqual(JSON.parse(redisAnchorStored).receipt.target.exclusions, []);
 
 const failedCompensationWrite = runtime({
   settlementThrows: true,

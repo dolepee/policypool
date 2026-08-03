@@ -72,6 +72,15 @@
       "dest": "/api/manifest.js?surface=universal"
     },
     {
+      "src": "/api/health",
+      "dest": "/web/health.json",
+      "headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json; charset=utf-8",
+        "X-Content-Type-Options": "nosniff"
+      }
+    },
+    {
       "src": "/api/(.*)",
       "dest": "/api/$1.js"
     },

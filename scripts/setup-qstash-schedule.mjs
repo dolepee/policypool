@@ -3,7 +3,7 @@ import { Client } from "@upstash/qstash";
 const token = process.env.QSTASH_TOKEN || "";
 const operatorToken = process.env.POLICYPOOL_OPERATOR_TOKEN || "";
 const destination = process.env.POLICYPOOL_RECONCILE_URL
-  || "https://policypool.vercel.app/api/reconcile-coverage";
+  || "https://policypool.dolepee.com/api/reconcile-coverage";
 
 if (!token) throw new Error("QSTASH_TOKEN is required");
 if (!operatorToken) throw new Error("POLICYPOOL_OPERATOR_TOKEN is required");

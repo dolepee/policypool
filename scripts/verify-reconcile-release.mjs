@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { createReconcileHandler } from "../api/reconcile-coverage.js";
+import {
+  buildReceiptIntegrityAnchor,
+  computeReceiptHash,
+} from "../api/lib/receipt-integrity.js";
 import { callHandler } from "./lib/fake-vercel.mjs";
 
 // A submitted job (status 2) means the provider delivered and the buyer has not
@@ -12,37 +16,77 @@ const BEFORE_DEADLINE = Date.parse("2026-07-24T21:00:00.000Z");
 const AFTER_DEADLINE = Date.parse("2026-07-26T09:00:00.000Z");
 
 function record(overrides = {}) {
+  const {
+    receipt: receiptOverrides,
+    receiptIntegrityAnchor: _ignoredAnchor,
+    ...recordOverrides
+  } = overrides;
+  const receiptId = recordOverrides.receiptId || "ppc-test";
+  const receipt = {
+    receiptId,
+    ...(receiptOverrides || {}),
+    covenant: receiptOverrides && Object.hasOwn(receiptOverrides, "covenant")
+      ? receiptOverrides.covenant
+      : { deadline: DEADLINE },
+  };
+  delete receipt.receiptHash;
+  receipt.receiptHash = computeReceiptHash(receipt);
   return {
-    receiptId: "ppc-test",
+    receiptId,
     state: "active",
     targetOrder: { jobId: `0x${"ab".repeat(32)}` },
-    receipt: { covenant: { deadline: DEADLINE } },
-    ...overrides,
+    ...recordOverrides,
+    receipt,
+    receiptIntegrityAnchor: buildReceiptIntegrityAnchor(receipt),
   };
 }
 
 function harness({ status, now, records = [record()] }) {
   const released = [];
   const payoutDue = [];
+  let chainReads = 0;
+  let backfillCalls = 0;
   const ledger = {
     async list() { return records; },
     async markReleased(updated) { released.push(updated); },
     async markPayoutDue(updated) { payoutDue.push(updated); },
+    async backfillReceiptIntegrityAnchor(receiptId, _expectedReceiptHash, anchor) {
+      backfillCalls += 1;
+      const current = records.find((candidate) => candidate.receiptId === receiptId);
+      return current ? { ...current, receiptIntegrityAnchor: anchor } : null;
+    },
   };
   const handler = createReconcileHandler({
     ledger,
-    chain: { async getJobStatus() { return status; } },
+    chain: { async getJobStatus() { chainReads += 1; return status; } },
     notifier: { async send() {} },
     authorized: true,
     now: () => now,
   });
-  return { handler, released, payoutDue };
+  return {
+    handler,
+    released,
+    payoutDue,
+    get chainReads() { return chainReads; },
+    get backfillCalls() { return backfillCalls; },
+  };
 }
 
 async function run(options) {
-  const { handler, released, payoutDue } = harness(options);
-  const response = await callHandler(handler, { method: "POST" });
-  return { statusCode: response.statusCode, body: response.json(), released, payoutDue };
+  const runtime = harness(options);
+  const { handler, released, payoutDue } = runtime;
+  const response = await callHandler(handler, {
+    method: "POST",
+    body: options.dryRun ? { dryRun: true } : {},
+  });
+  return {
+    statusCode: response.statusCode,
+    body: response.json(),
+    released,
+    payoutDue,
+    chainReads: runtime.chainReads,
+    backfillCalls: runtime.backfillCalls,
+  };
 }
 
 // The regression: delivered, observed while the deadline is still ahead.
@@ -94,6 +138,45 @@ for (const status of [0, 3, 4]) {
   const untouched = await run({ status, now: BEFORE_DEADLINE });
   assert.equal(untouched.released.length, 0, `status ${status} must not release`);
   assert.equal(untouched.payoutDue.length, 0, `status ${status} must not mark a payout due`);
+}
+
+const alteredReceipt = record({ receiptId: "ppc-altered-reconcile" });
+alteredReceipt.receipt.covenant.deadline = "2026-07-20T00:00:00.000Z";
+const rejectedAlteration = await run({
+  status: 1,
+  now: AFTER_DEADLINE,
+  records: [alteredReceipt],
+});
+assert.equal(rejectedAlteration.statusCode, 503);
+assert.equal(rejectedAlteration.body.failures[0].error, "receipt_hash_mismatch");
+assert.equal(rejectedAlteration.chainReads, 0, "an altered receipt must fail before any chain read");
+assert.equal(rejectedAlteration.released.length, 0);
+assert.equal(rejectedAlteration.payoutDue.length, 0);
+
+const previousMigrations = process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS;
+const preAnchorDryRun = record({ receiptId: "ppc-1111111111111111" });
+delete preAnchorDryRun.receiptIntegrityAnchor;
+process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS = JSON.stringify([{
+  receiptId: preAnchorDryRun.receiptId,
+  receiptHash: preAnchorDryRun.receipt.receiptHash,
+  providerRelayEndpoint: null,
+}]);
+try {
+  const preview = await run({
+    status: 1,
+    now: BEFORE_DEADLINE,
+    records: [preAnchorDryRun],
+    dryRun: true,
+  });
+  assert.equal(preview.statusCode, 200);
+  assert.equal(preview.body.dryRun, true);
+  assert.equal(preview.backfillCalls, 0, "a dry run must not persist a receipt sidecar");
+} finally {
+  if (previousMigrations === undefined) {
+    delete process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS;
+  } else {
+    process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS = previousMigrations;
+  }
 }
 
 console.log("PolicyPool reconciler release path verified: delivered covenants release, ambiguous timing holds, breach path unchanged.");

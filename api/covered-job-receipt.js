@@ -26,6 +26,14 @@ import {
 } from "./lib/quote.js";
 import { canonicalRequestPublicUrl, publicUrl } from "./lib/public-origin.js";
 import {
+  buildReceiptIntegrityAnchor,
+  computeReceiptHash,
+  ensureReceiptIntegrityAnchor,
+  ReceiptIntegrityError,
+  STORED_RECEIPT_SHAPES,
+  verifyReceiptIntegrity,
+} from "./lib/receipt-integrity.js";
+import {
   clean,
   formatUsdtAtomic,
   header,
@@ -33,7 +41,6 @@ import {
   parseUsdtAtomic,
   sendJson as rawSendJson,
   sha256,
-  stableStringify,
 } from "./lib/utils.js";
 import { enrichCoverageResponse } from "./lib/coverage-state.js";
 
@@ -357,10 +364,6 @@ function minBigInt(...values) {
   return values.reduce((minimum, value) => (value < minimum ? value : minimum));
 }
 
-function receiptHash(receipt) {
-  return `sha256:${sha256(stableStringify(receipt))}`;
-}
-
 function buildReceipt({
   receiptId,
   input,
@@ -511,15 +514,39 @@ function buildReceipt({
       "A payout is paid only after its X Layer token transfer is independently verified.",
     ],
   };
-  return { ...draft, receiptHash: receiptHash(draft) };
+  return { ...draft, receiptHash: computeReceiptHash(draft) };
 }
 
-function respondWithRecord(res, record, relayGrantService = null) {
+async function respondWithRecord(res, record, ledger, relayGrantService = null) {
+  try {
+    record = await ensureReceiptIntegrityAnchor(record, ledger);
+  } catch (error) {
+    if (!(error instanceof ReceiptIntegrityError)) throw error;
+    return sendJson(res, 409, {
+      ok: false,
+      error: error.code,
+      charged: true,
+      receiptId: record.receiptId,
+      nextAction: "VERIFY_THE_ORIGINAL_STORED_RECEIPT",
+    });
+  }
+  let receipt = record.receipt;
+  try {
+    verifyReceiptIntegrity(receipt, { anchor: record.receiptIntegrityAnchor || null });
+  } catch (error) {
+    if (!(error instanceof ReceiptIntegrityError)) throw error;
+    return sendJson(res, 409, {
+      ok: false,
+      error: error.code,
+      charged: true,
+      receiptId: record.receiptId,
+      nextAction: "VERIFY_THE_ORIGINAL_STORED_RECEIPT",
+    });
+  }
   if (record.paymentResponseHeader) {
     res.setHeader("PAYMENT-RESPONSE", record.paymentResponseHeader);
     res.setHeader("X-PAYMENT-RESPONSE", record.paymentResponseHeader);
   }
-  let receipt = record.receipt;
   if (record.relayGrantPayload && relayGrantService?.tokenForPayload && receipt?.providerRelay) {
     receipt = {
       ...receipt,
@@ -678,6 +705,7 @@ function finalRecordForSettlement(pending, settlement, generatedAt, overrides = 
   });
   return {
     ...pending,
+    receiptDocumentKind: STORED_RECEIPT_SHAPES.issued,
     state: pending.guard.verdict === "ALLOW"
       ? context.policy.clockMode === "policypool_relay" ? "pending_start" : "active"
       : "declined",
@@ -695,6 +723,7 @@ function finalRecordForSettlement(pending, settlement, generatedAt, overrides = 
     },
     paymentResponseHeader: settlement.responseHeader,
     receipt,
+    receiptIntegrityAnchor: buildReceiptIntegrityAnchor(receipt),
   };
 }
 
@@ -734,6 +763,7 @@ export function createHandler(dependencies = {}) {
   const respond = (res, record) => respondWithRecord(
     res,
     record,
+    getLedger(),
     record.relayGrantPayload ? getRelayGrantService() : null,
   );
 

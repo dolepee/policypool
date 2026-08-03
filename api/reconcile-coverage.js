@@ -2,6 +2,10 @@ import { Receiver } from "@upstash/qstash";
 import { createChainService } from "./lib/chain.js";
 import { createLedger } from "./lib/ledger.js";
 import { createNotifier, reconciliationMessage } from "./lib/notifier.js";
+import {
+  ensureVerifiedReceiptRecord,
+  ReceiptIntegrityError,
+} from "./lib/receipt-integrity.js";
 import { header, sendJson, sha256 } from "./lib/utils.js";
 
 const RELEASE_STATUSES = new Map([
@@ -28,7 +32,7 @@ function rawRequestBody(req) {
 function requestUrl(req) {
   if (req.url?.startsWith("http")) return req.url;
   const proto = header(req, "x-forwarded-proto") || "https";
-  const host = header(req, "x-forwarded-host") || header(req, "host") || "policypool.vercel.app";
+  const host = header(req, "x-forwarded-host") || header(req, "host") || "policypool.dolepee.com";
   return `${proto}://${host}${req.url || "/api/reconcile-coverage"}`;
 }
 
@@ -82,9 +86,18 @@ export function createReconcileHandler(dependencies = {}) {
       const records = await ledger.list(100);
       const changes = [];
       const failures = [];
-      for (const record of records) {
-        if (record.state !== "active" || !record.targetOrder?.jobId) continue;
+      for (const candidate of records) {
         try {
+          if (!candidate?.receipt) {
+            if (candidate?.state === "active") {
+              throw new ReceiptIntegrityError("receipt_document_missing");
+            }
+            continue;
+          }
+          const record = await ensureVerifiedReceiptRecord(candidate, ledger, {
+            persistAnchor: !dryRun,
+          });
+          if (record.state !== "active" || !record.targetOrder?.jobId) continue;
           const status = await chain.getJobStatus(record.targetOrder.jobId);
           const deadlineMs = Date.parse(record.receipt?.covenant?.deadline || "");
           if (status === 1 && Number.isFinite(deadlineMs) && now() > deadlineMs) {
@@ -151,7 +164,7 @@ export function createReconcileHandler(dependencies = {}) {
           }
         } catch (error) {
           failures.push({
-            receiptId: record.receiptId,
+            receiptId: candidate?.receiptId || null,
             error: error instanceof Error ? error.message : String(error),
           });
         }
