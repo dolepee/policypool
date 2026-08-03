@@ -138,8 +138,10 @@ export function buildLegacyRelayReceiptIntegrityAnchor(record) {
       record.universalCovenant?.covenantId,
       receipt.covenant?.onchain?.covenantId,
     )
-    || String(record.relayGrantPayload?.grantId || "")
-      !== String(receipt.providerRelay?.grantId || "")
+    || !sameNonemptyValue(
+      record.relayGrantPayload?.grantId,
+      receipt.providerRelay?.grantId,
+    )
   ) {
     throw new ReceiptIntegrityError("receipt_integrity_anchor_backfill_ineligible");
   }

@@ -6,6 +6,7 @@ import { PAYMENT, paymentRequirements } from "../api/lib/config.js";
 import { MemoryLedger, RedisLedger } from "../api/lib/ledger.js";
 import { createPaymentService } from "../api/lib/payment.js";
 import { createQuoteService } from "../api/lib/quote.js";
+import { computeReceiptHash } from "../api/lib/receipt-integrity.js";
 import { sha256 } from "../api/lib/utils.js";
 import { callHandler, decodePaymentRequired } from "./lib/fake-vercel.mjs";
 
@@ -268,6 +269,7 @@ try {
   delete preAnchorRecord.receiptIntegrityAnchor;
   delete preAnchorRecord.receiptDocumentKind;
   legacy.ledger.records.set(preAnchorRecord.receiptId, preAnchorRecord);
+  legacy.ledger.receiptIntegrityAnchors.delete(preAnchorRecord.receiptId);
 
   process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://policypool.dolepee.com";
   const ineligibleLegacy = structuredClone(preAnchorRecord);
@@ -290,6 +292,26 @@ try {
   assert.equal(
     (await ineligibleLedger.get(ineligibleLegacy.receiptId)).receiptIntegrityAnchor,
     undefined,
+  );
+
+  const missingGrant = structuredClone(preAnchorRecord);
+  delete missingGrant.relayGrantPayload.grantId;
+  delete missingGrant.receipt.providerRelay.grantId;
+  missingGrant.receipt.receiptHash = computeReceiptHash(missingGrant.receipt);
+  const missingGrantLedger = new MemoryLedger();
+  missingGrantLedger.records.set(missingGrant.receiptId, missingGrant);
+  const missingGrantStatus = await callHandler(createCoverageStatusHandler({
+    ledger: missingGrantLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: missingGrant.receiptId },
+  });
+  assert.equal(missingGrantStatus.statusCode, 409);
+  assert.equal(
+    missingGrantStatus.json().error,
+    "receipt_integrity_anchor_backfill_ineligible",
   );
 
   const migratedStatus = await callHandler(createCoverageStatusHandler({
@@ -320,6 +342,35 @@ try {
   assert.equal(
     migratedStored.receiptIntegrityAnchor.providerRelayEndpoint,
     "https://policypool.vercel.app/api/provider-relay",
+  );
+  const staleTransition = await legacy.ledger.transitionUniversal(
+    { ...preAnchorRecord, state: "active" },
+    ["pending_start"],
+  );
+  assert.deepEqual(
+    staleTransition.receiptIntegrityAnchor,
+    migratedStored.receiptIntegrityAnchor,
+    "a stale transition must retain the sidecar anchor",
+  );
+  assert.deepEqual(
+    (await legacy.ledger.get(preAnchorRecord.receiptId)).receiptIntegrityAnchor,
+    migratedStored.receiptIntegrityAnchor,
+  );
+  const conflictingTransition = await legacy.ledger.transitionUniversal(
+    {
+      ...staleTransition,
+      state: "released",
+      receiptIntegrityAnchor: {
+        ...migratedStored.receiptIntegrityAnchor,
+        providerRelayEndpoint: "https://wrong.example/api/provider-relay",
+      },
+    },
+    ["active"],
+  );
+  assert.deepEqual(
+    conflictingTransition.receiptIntegrityAnchor,
+    migratedStored.receiptIntegrityAnchor,
+    "an existing sidecar anchor must be immutable",
   );
   assert.equal(legacy.calls.settle, 1, "anchor backfill must not settle twice");
 } finally {
@@ -392,6 +443,7 @@ const compensationRecord = {
 };
 let redisStored = JSON.stringify(compensationRecord);
 const redis = {
+  async get() { return null; },
   async eval(script, keys, argv) {
     assert.match(
       script,
@@ -420,9 +472,16 @@ assert.equal(redisFinal.receipt.receiptId, "redis-compensation");
 
 const redisAnchorRecord = {
   receiptId: "redis-anchor",
-  receipt: { receiptHash: `sha256:${"ab".repeat(32)}` },
+  state: "pending_start",
+  universalCovenant: { covenantId: `0x${"cd".repeat(32)}` },
+  receipt: {
+    receiptHash: `sha256:${"ab".repeat(32)}`,
+    target: { exclusions: [] },
+  },
 };
 let redisAnchorStored = JSON.stringify(redisAnchorRecord);
+const redisAnchorStoredBefore = redisAnchorStored;
+let redisAnchorSidecar = null;
 const redisAnchor = {
   receiptHash: redisAnchorRecord.receipt.receiptHash,
   providerRelayEndpoint: "https://policypool.vercel.app/api/provider-relay",
@@ -430,17 +489,32 @@ const redisAnchor = {
 const redisAnchorLedger = new RedisLedger({
   prefix: "test",
   redis: {
+    async get(key) {
+      return key === "test:receipt-anchor:redis-anchor" ? redisAnchorSidecar : null;
+    },
     async eval(script, keys, argv) {
-      assert.match(script, /if decoded\.receiptIntegrityAnchor then return/);
+      if (script.includes("local allowed = false")) {
+        assert.equal(keys[0], "test:receipt:redis-anchor");
+        const current = JSON.parse(redisAnchorStored);
+        if (!argv.slice(1).includes(current.state)) {
+          return ["state_mismatch", redisAnchorStored];
+        }
+        redisAnchorStored = argv[0];
+        return ["updated", redisAnchorStored];
+      }
+      assert.match(script, /local existing = redis\.call\('GET', KEYS\[2\]\)/);
+      assert.match(script, /redis\.call\('SET', KEYS\[2\], ARGV\[2\], 'NX'\)/);
       assert.match(script, /decoded\.receipt\.receiptHash ~= ARGV\[1\]/);
       assert.equal(keys[0], "test:receipt:redis-anchor");
+      assert.equal(keys[1], "test:receipt-anchor:redis-anchor");
       assert.equal(argv[0], redisAnchor.receiptHash);
       const current = JSON.parse(redisAnchorStored);
-      if (current.receiptIntegrityAnchor) return ["existing", redisAnchorStored];
-      if (current.receipt?.receiptHash !== argv[0]) return ["receipt_mismatch", redisAnchorStored];
-      current.receiptIntegrityAnchor = JSON.parse(argv[1]);
-      redisAnchorStored = JSON.stringify(current);
-      return ["backfilled", redisAnchorStored];
+      if (redisAnchorSidecar) return ["existing", redisAnchorStored, redisAnchorSidecar];
+      if (current.receipt?.receiptHash !== argv[0]) {
+        return ["receipt_mismatch", redisAnchorStored];
+      }
+      redisAnchorSidecar = argv[1];
+      return ["backfilled", redisAnchorStored, redisAnchorSidecar];
     },
   },
 });
@@ -450,12 +524,20 @@ const redisAnchored = await redisAnchorLedger.backfillReceiptIntegrityAnchor(
   redisAnchor,
 );
 assert.deepEqual(redisAnchored.receiptIntegrityAnchor, redisAnchor);
+assert.equal(redisAnchorStored, redisAnchorStoredBefore);
+assert.deepEqual(JSON.parse(redisAnchorStored).receipt.target.exclusions, []);
 const redisAnchorReplay = await redisAnchorLedger.backfillReceiptIntegrityAnchor(
   redisAnchorRecord.receiptId,
   redisAnchorRecord.receipt.receiptHash,
   { ...redisAnchor, providerRelayEndpoint: "https://wrong.example/api/provider-relay" },
 );
 assert.deepEqual(redisAnchorReplay.receiptIntegrityAnchor, redisAnchor);
+const redisStaleTransition = await redisAnchorLedger.transitionUniversal(
+  { ...redisAnchorRecord, state: "active" },
+  ["pending_start"],
+);
+assert.deepEqual(redisStaleTransition.receiptIntegrityAnchor, redisAnchor);
+assert.deepEqual(JSON.parse(redisAnchorStored).receipt.target.exclusions, []);
 
 const failedCompensationWrite = runtime({
   settlementThrows: true,

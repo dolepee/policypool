@@ -26,6 +26,9 @@ local current = redis.call('GET', KEYS[1])
 if not current then return {'missing'} end
 local decoded = cjson.decode(current)
 if decoded.state ~= 'pending' and decoded.state ~= 'compensation_required' then
+  if ARGV[6] ~= '' and decoded.receipt and decoded.receipt.receiptHash == ARGV[7] then
+    redis.call('SET', KEYS[5], ARGV[6], 'NX')
+  end
   return {'existing', current}
 end
 local cap = tonumber(ARGV[2])
@@ -33,6 +36,7 @@ redis.call('INCRBY', KEYS[2], -cap)
 if ARGV[3] == 'active' then redis.call('INCRBY', KEYS[3], cap) end
 redis.call('SET', KEYS[1], ARGV[1])
 redis.call('ZADD', KEYS[4], ARGV[4], ARGV[5])
+if ARGV[6] ~= '' then redis.call('SET', KEYS[5], ARGV[6], 'NX') end
 return {'finalized', ARGV[1]}
 `;
 
@@ -42,7 +46,7 @@ if not current then return {'missing'} end
 local decoded = cjson.decode(current)
 if decoded.state ~= 'pending' and decoded.state ~= 'compensation_required' then return {'not_pending'} end
 redis.call('INCRBY', KEYS[4], -tonumber(ARGV[1]))
-redis.call('DEL', KEYS[1], KEYS[2], KEYS[3])
+redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[5])
 return {'released'}
 `;
 
@@ -107,14 +111,13 @@ const BACKFILL_RECEIPT_INTEGRITY_ANCHOR_SCRIPT = `
 local current = redis.call('GET', KEYS[1])
 if not current then return {'missing'} end
 local decoded = cjson.decode(current)
-if decoded.receiptIntegrityAnchor then return {'existing', current} end
+local existing = redis.call('GET', KEYS[2])
+if existing then return {'existing', current, existing} end
 if not decoded.receipt or decoded.receipt.receiptHash ~= ARGV[1] then
   return {'receipt_mismatch', current}
 end
-decoded.receiptIntegrityAnchor = cjson.decode(ARGV[2])
-local updated = cjson.encode(decoded)
-redis.call('SET', KEYS[1], updated)
-return {'backfilled', updated}
+redis.call('SET', KEYS[2], ARGV[2], 'NX')
+return {'backfilled', current, redis.call('GET', KEYS[2])}
 `;
 
 function prefixValue(value = "pp:coverage:v1") {
@@ -137,27 +140,50 @@ export class MemoryLedger {
     this.payoutDueAtomic = 0n;
     this.payoutTransactions = new Map();
     this.quotes = new Map();
+    this.receiptIntegrityAnchors = new Map();
+  }
+
+  withReceiptIntegrityAnchor(record) {
+    if (!record) return null;
+    const anchor = this.receiptIntegrityAnchors.get(record.receiptId)
+      || record.receiptIntegrityAnchor;
+    return anchor
+      ? { ...record, receiptIntegrityAnchor: structuredClone(anchor) }
+      : record;
+  }
+
+  storeRecord(record) {
+    if (
+      record.receiptIntegrityAnchor
+      && !this.receiptIntegrityAnchors.has(record.receiptId)
+    ) {
+      this.receiptIntegrityAnchors.set(
+        record.receiptId,
+        structuredClone(record.receiptIntegrityAnchor),
+      );
+    }
+    const anchored = this.withReceiptIntegrityAnchor(record);
+    this.records.set(record.receiptId, structuredClone(anchored));
+    return anchored;
   }
 
   async findByPaymentId(paymentId) {
     const id = this.payments.get(paymentId);
-    return id ? this.records.get(id) || null : null;
+    return id ? this.withReceiptIntegrityAnchor(this.records.get(id)) : null;
   }
 
   async get(receiptId) {
-    return this.records.get(receiptId) || null;
+    return this.withReceiptIntegrityAnchor(this.records.get(receiptId));
   }
 
   async backfillReceiptIntegrityAnchor(receiptId, expectedReceiptHash, anchor) {
     const current = this.records.get(receiptId);
-    if (!current || current.receiptIntegrityAnchor) return current || null;
+    const existing = this.receiptIntegrityAnchors.get(receiptId)
+      || current?.receiptIntegrityAnchor;
+    if (!current || existing) return this.withReceiptIntegrityAnchor(current);
     if (current.receipt?.receiptHash !== expectedReceiptHash) return current;
-    const updated = {
-      ...current,
-      receiptIntegrityAnchor: structuredClone(anchor),
-    };
-    this.records.set(receiptId, structuredClone(updated));
-    return updated;
+    this.receiptIntegrityAnchors.set(receiptId, structuredClone(anchor));
+    return this.withReceiptIntegrityAnchor(current);
   }
 
   async saveQuote(record) {
@@ -190,7 +216,7 @@ export class MemoryLedger {
     }
     this.requests.set(record.requestId, record.receiptId);
     this.payments.set(record.paymentId, record.receiptId);
-    this.records.set(record.receiptId, structuredClone(record));
+    this.storeRecord(record);
     this.pendingAtomic += cap;
     return { status: "reserved", receiptId: record.receiptId };
   }
@@ -198,12 +224,13 @@ export class MemoryLedger {
   async finalize(record) {
     const current = this.records.get(record.receiptId);
     if (!current) throw new Error("ledger_record_missing");
-    if (!["pending", "compensation_required"].includes(current.state)) return current;
+    if (!["pending", "compensation_required"].includes(current.state)) {
+      return this.withReceiptIntegrityAnchor(current);
+    }
     const cap = BigInt(current.liabilityAtomic);
     this.pendingAtomic -= cap;
     if (record.state === "active") this.activeAtomic += cap;
-    this.records.set(record.receiptId, structuredClone(record));
-    return record;
+    return this.storeRecord(record);
   }
 
   async release(record) {
@@ -214,6 +241,7 @@ export class MemoryLedger {
     }
     this.pendingAtomic -= BigInt(current.liabilityAtomic);
     this.records.delete(record.receiptId);
+    this.receiptIntegrityAnchors.delete(record.receiptId);
     this.requests.delete(record.requestId);
     this.payments.delete(record.paymentId);
     return { status: "released" };
@@ -222,56 +250,56 @@ export class MemoryLedger {
   async markSettlementState(record) {
     const current = this.records.get(record.receiptId);
     if (!current) throw new Error("ledger_record_missing");
-    if (current.state !== "pending") return current;
+    if (current.state !== "pending") return this.withReceiptIntegrityAnchor(current);
     if (!["submitting", "unknown"].includes(record.settlement?.status)) {
       throw new Error("settlement_recovery_state_required");
     }
-    this.records.set(record.receiptId, structuredClone(record));
-    return record;
+    return this.storeRecord(record);
   }
 
   async markPayoutDue(record) {
     const current = this.records.get(record.receiptId);
-    if (!current || current.state !== "active") return current || null;
+    if (!current || current.state !== "active") return this.withReceiptIntegrityAnchor(current);
     const cap = BigInt(current.liabilityAtomic);
     this.activeAtomic -= cap;
     this.payoutDueAtomic += cap;
-    this.records.set(record.receiptId, structuredClone(record));
-    return record;
+    return this.storeRecord(record);
   }
 
   async markPaid(record) {
     const current = this.records.get(record.receiptId);
-    if (!current || current.state !== "payout_due") return current || null;
+    if (!current || current.state !== "payout_due") return this.withReceiptIntegrityAnchor(current);
     const transaction = record.payout?.transaction;
     if (!transaction) throw new Error("payout_transaction_missing");
     const usedBy = this.payoutTransactions.get(transaction);
     if (usedBy && usedBy !== record.receiptId) throw new Error("payout_transaction_exists");
     this.payoutDueAtomic -= BigInt(current.liabilityAtomic);
     this.payoutTransactions.set(transaction, record.receiptId);
-    this.records.set(record.receiptId, structuredClone(record));
-    return record;
+    return this.storeRecord(record);
   }
 
   async markReleased(record) {
     const current = this.records.get(record.receiptId);
-    if (!current || current.state !== "active") return current || null;
+    if (!current || current.state !== "active") return this.withReceiptIntegrityAnchor(current);
     this.activeAtomic -= BigInt(current.liabilityAtomic);
-    this.records.set(record.receiptId, structuredClone(record));
-    return record;
+    return this.storeRecord(record);
   }
 
   async transitionUniversal(record, expectedStates) {
     const current = this.records.get(record.receiptId);
     if (!current) return null;
-    if (!Array.isArray(expectedStates) || !expectedStates.includes(current.state)) return current;
+    if (!Array.isArray(expectedStates) || !expectedStates.includes(current.state)) {
+      return this.withReceiptIntegrityAnchor(current);
+    }
     if (!current.universalCovenant?.covenantId) throw new Error("universal_covenant_missing");
-    this.records.set(record.receiptId, structuredClone(record));
-    return record;
+    return this.storeRecord(record);
   }
 
   async list(limit = 50) {
-    return [...this.records.values()].slice(-limit).reverse();
+    return [...this.records.values()]
+      .slice(-limit)
+      .reverse()
+      .map((record) => this.withReceiptIntegrityAnchor(record));
   }
 
   async stats() {
@@ -295,20 +323,42 @@ export class RedisLedger {
     return `${this.prefix}:${kind}${id ? `:${id}` : ""}`;
   }
 
+  attachReceiptIntegrityAnchor(record, anchor) {
+    if (!record) return null;
+    const resolved = anchor || record.receiptIntegrityAnchor;
+    return resolved ? { ...record, receiptIntegrityAnchor: resolved } : record;
+  }
+
+  async withReceiptIntegrityAnchor(record) {
+    if (!record) return null;
+    const anchor = parseRecord(
+      await this.redis.get(this.key("receipt-anchor", record.receiptId)),
+    );
+    return this.attachReceiptIntegrityAnchor(record, anchor);
+  }
+
   async findByPaymentId(paymentId) {
     const id = await this.redis.get(this.key("payment", paymentId));
     return id ? this.get(String(id)) : null;
   }
 
   async get(receiptId) {
-    return parseRecord(await this.redis.get(this.key("receipt", receiptId)));
+    const [record, anchor] = await Promise.all([
+      this.redis.get(this.key("receipt", receiptId)),
+      this.redis.get(this.key("receipt-anchor", receiptId)),
+    ]);
+    return this.attachReceiptIntegrityAnchor(parseRecord(record), parseRecord(anchor));
   }
 
   async backfillReceiptIntegrityAnchor(receiptId, expectedReceiptHash, anchor) {
     const result = await this.redis.eval(BACKFILL_RECEIPT_INTEGRITY_ANCHOR_SCRIPT, [
       this.key("receipt", receiptId),
+      this.key("receipt-anchor", receiptId),
     ], [expectedReceiptHash, JSON.stringify(anchor)]);
-    return parseRecord(result[1]);
+    return this.attachReceiptIntegrityAnchor(
+      parseRecord(result[1]),
+      parseRecord(result[2]),
+    );
   }
 
   async saveQuote(record, ttlSeconds) {
@@ -362,14 +412,24 @@ export class RedisLedger {
   }
 
   async finalize(record) {
+    const anchor = record.receiptIntegrityAnchor || null;
     const result = await this.redis.eval(FINALIZE_SCRIPT, [
       this.key("receipt", record.receiptId),
       this.key("liability", "pending"),
       this.key("liability", "active"),
       this.key("receipts"),
-    ], [JSON.stringify(record), record.liabilityAtomic, record.state, String(Date.now()), record.receiptId]);
+      this.key("receipt-anchor", record.receiptId),
+    ], [
+      JSON.stringify(record),
+      record.liabilityAtomic,
+      record.state,
+      String(Date.now()),
+      record.receiptId,
+      anchor ? JSON.stringify(anchor) : "",
+      anchor?.receiptHash || "",
+    ]);
     if (String(result[0]) === "missing") throw new Error("ledger_record_missing");
-    return parseRecord(result[1]);
+    return this.withReceiptIntegrityAnchor(parseRecord(result[1]));
   }
 
   async release(record) {
@@ -378,6 +438,7 @@ export class RedisLedger {
       this.key("payment", record.paymentId),
       this.key("receipt", record.receiptId),
       this.key("liability", "pending"),
+      this.key("receipt-anchor", record.receiptId),
     ], [record.liabilityAtomic]);
     return { status: String(result[0]) };
   }
@@ -390,7 +451,7 @@ export class RedisLedger {
       this.key("receipt", record.receiptId),
     ], [JSON.stringify(record)]);
     if (String(result[0]) === "missing") throw new Error("ledger_record_missing");
-    return parseRecord(result[1]);
+    return this.withReceiptIntegrityAnchor(parseRecord(result[1]));
   }
 
   async markPayoutDue(record) {
@@ -399,7 +460,7 @@ export class RedisLedger {
       this.key("liability", "active"),
       this.key("liability", "payout_due"),
     ], [JSON.stringify(record), record.liabilityAtomic]);
-    return parseRecord(result[1]);
+    return this.withReceiptIntegrityAnchor(parseRecord(result[1]));
   }
 
   async markPaid(record) {
@@ -409,7 +470,7 @@ export class RedisLedger {
       this.key("payout", record.payout.transaction),
     ], [JSON.stringify(record), record.liabilityAtomic, record.receiptId]);
     if (String(result[0]) === "payout_transaction_exists") throw new Error("payout_transaction_exists");
-    return parseRecord(result[1]);
+    return this.withReceiptIntegrityAnchor(parseRecord(result[1]));
   }
 
   async markReleased(record) {
@@ -417,7 +478,7 @@ export class RedisLedger {
       this.key("receipt", record.receiptId),
       this.key("liability", "active"),
     ], [JSON.stringify(record), record.liabilityAtomic]);
-    return parseRecord(result[1]);
+    return this.withReceiptIntegrityAnchor(parseRecord(result[1]));
   }
 
   async transitionUniversal(record, expectedStates) {
@@ -427,14 +488,22 @@ export class RedisLedger {
     const result = await this.redis.eval(TRANSITION_UNIVERSAL_SCRIPT, [
       this.key("receipt", record.receiptId),
     ], [JSON.stringify(record), ...expectedStates]);
-    return parseRecord(result[1]);
+    return this.withReceiptIntegrityAnchor(parseRecord(result[1]));
   }
 
   async list(limit = 50) {
     const ids = await this.redis.zrange(this.key("receipts"), 0, Math.max(0, limit - 1), { rev: true });
     if (!ids.length) return [];
     const values = await this.redis.mget(...ids.map((id) => this.key("receipt", String(id))));
-    return values.map(parseRecord).filter(Boolean);
+    const anchors = await this.redis.mget(
+      ...ids.map((id) => this.key("receipt-anchor", String(id))),
+    );
+    return values
+      .map((value, index) => this.attachReceiptIntegrityAnchor(
+        parseRecord(value),
+        parseRecord(anchors[index]),
+      ))
+      .filter(Boolean);
   }
 
   async stats() {
