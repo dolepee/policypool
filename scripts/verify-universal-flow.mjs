@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { encodePaymentSignatureHeader } from "@okxweb3/x402-core/http";
 import { createHandler } from "../api/covered-job-receipt.js";
 import { createCoverageStatusHandler } from "../api/coverage-status.js";
@@ -252,6 +253,30 @@ const approveReceiptMigration = (record) => {
   }]);
 };
 try {
+  delete process.env.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS;
+  const productionFixtures = JSON.parse(
+    await readFile(new URL("./fixtures/coverage-receipts.json", import.meta.url), "utf8"),
+  );
+  const historicalNonRelay = structuredClone(
+    productionFixtures["ppc-0b0e52828eb26727"],
+  );
+  const historicalNonRelayLedger = new MemoryLedger();
+  historicalNonRelayLedger.records.set(historicalNonRelay.receiptId, historicalNonRelay);
+  const historicalNonRelayStatus = await callHandler(createCoverageStatusHandler({
+    ledger: historicalNonRelayLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: historicalNonRelay.receiptId },
+  });
+  assert.equal(historicalNonRelayStatus.statusCode, 200);
+  assert.equal(
+    (await historicalNonRelayLedger.get(historicalNonRelay.receiptId))
+      .receiptIntegrityAnchor.receiptHash,
+    historicalNonRelay.receipt.receiptHash,
+  );
+
   process.env.POLICYPOOL_PUBLIC_ORIGIN = "https://policypool.vercel.app";
   delete process.env.POLICYPOOL_PUBLIC_PATH_PREFIX;
   const legacy = runtime();
@@ -359,6 +384,26 @@ try {
   assert.equal(caseChangedGrantStatus.statusCode, 409);
   assert.equal(
     caseChangedGrantStatus.json().error,
+    "receipt_integrity_anchor_backfill_ineligible",
+  );
+
+  const changedClockMode = structuredClone(preAnchorRecord);
+  changedClockMode.receipt.target.clockMode = "verified_acceptance";
+  changedClockMode.receipt.receiptHash = computeReceiptHash(changedClockMode.receipt);
+  approveReceiptMigration(changedClockMode);
+  const changedClockModeLedger = new MemoryLedger();
+  changedClockModeLedger.records.set(changedClockMode.receiptId, changedClockMode);
+  const changedClockModeStatus = await callHandler(createCoverageStatusHandler({
+    ledger: changedClockModeLedger,
+    chain: { async getJobStatus() { return 1; } },
+    now: () => now,
+  }), {
+    method: "GET",
+    query: { receiptId: changedClockMode.receiptId },
+  });
+  assert.equal(changedClockModeStatus.statusCode, 409);
+  assert.equal(
+    changedClockModeStatus.json().error,
     "receipt_integrity_anchor_backfill_ineligible",
   );
 

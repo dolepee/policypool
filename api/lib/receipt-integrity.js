@@ -1,5 +1,6 @@
 import { publicRouteForUrl } from "./public-origin-contract.js";
 import { publicUrl } from "./public-origin.js";
+import { PREDEPLOY_RECEIPT_INTEGRITY_MIGRATIONS } from "./receipt-integrity-migrations.js";
 import { sha256, stableStringify } from "./utils.js";
 
 const RECEIPT_HASH_RE = /^sha256:[a-f0-9]{64}$/;
@@ -114,28 +115,38 @@ export function buildReceiptIntegrityAnchor(receipt) {
 
 function configuredReceiptIntegrityMigrations(environment = process.env) {
   const raw = String(environment.POLICYPOOL_RECEIPT_INTEGRITY_MIGRATIONS || "").trim();
-  if (!raw) return new Map();
   if (Buffer.byteLength(raw, "utf8") > MAX_RECEIPT_MIGRATIONS_BYTES) {
     throw new ReceiptIntegrityError("receipt_integrity_migration_configuration_invalid");
   }
-  let entries;
-  try {
-    entries = JSON.parse(raw);
-  } catch {
+  let configuredEntries = [];
+  if (raw) {
+    try {
+      configuredEntries = JSON.parse(raw);
+    } catch {
+      throw new ReceiptIntegrityError("receipt_integrity_migration_configuration_invalid");
+    }
+  }
+  if (!Array.isArray(configuredEntries)) {
     throw new ReceiptIntegrityError("receipt_integrity_migration_configuration_invalid");
   }
-  if (!Array.isArray(entries) || entries.length > MAX_RECEIPT_MIGRATIONS) {
+  const entries = [...PREDEPLOY_RECEIPT_INTEGRITY_MIGRATIONS, ...configuredEntries];
+  if (entries.length > MAX_RECEIPT_MIGRATIONS) {
     throw new ReceiptIntegrityError("receipt_integrity_migration_configuration_invalid");
   }
   const migrations = new Map();
   for (const entry of entries) {
     const receiptId = String(entry?.receiptId || "");
     const receiptHash = String(entry?.receiptHash || "");
-    const providerRelayEndpoint = String(entry?.providerRelayEndpoint || "");
+    const providerRelayEndpoint = entry?.providerRelayEndpoint == null
+      ? null
+      : String(entry.providerRelayEndpoint);
     if (
       !RECEIPT_ID_RE.test(receiptId)
       || !RECEIPT_HASH_RE.test(receiptHash)
-      || !providerRelayRoute(providerRelayEndpoint, "configured-migration")
+      || (
+        providerRelayEndpoint !== null
+        && !providerRelayRoute(providerRelayEndpoint, "configured-migration")
+      )
       || migrations.has(receiptId)
     ) {
       throw new ReceiptIntegrityError("receipt_integrity_migration_configuration_invalid");
@@ -163,53 +174,68 @@ function sameNonemptyAtomic(left, right) {
     && BigInt(expected) === BigInt(actual);
 }
 
-export function buildLegacyRelayReceiptIntegrityAnchor(
+export function buildPreAnchorReceiptIntegrityAnchor(
   record,
   environment = process.env,
 ) {
   const receipt = record?.receipt;
-  const endpoint = receipt?.providerRelay?.endpoint;
+  const endpoint = receipt?.providerRelay?.endpoint || null;
   const trustedAnchor = configuredReceiptIntegrityMigrations(environment)
     .get(String(record?.receiptId || ""));
-  const coverageCapAtomic = receipt?.covenant?.coverageCapAtomic;
   if (
     !receipt
-    || receipt.version !== "0.4.0"
-    || receipt.target?.clockMode !== "policypool_relay"
-    || receipt.outcome?.type !== "ISSUED"
-    || (record.receiptDocumentKind && record.receiptDocumentKind !== STORED_RECEIPT_SHAPES.issued)
     || record.receiptId !== receipt.receiptId
     || !trustedAnchor
     || trustedAnchor.receiptHash !== receipt.receiptHash
     || trustedAnchor.providerRelayEndpoint !== endpoint
-    || !sameNonemptyValue(record.finalizedAt, receipt.generatedAt)
-    || !sameNonemptyValue(record.settlement?.transaction, receipt.servicePayment?.transaction)
-    || !sameNonemptyAtomic(record.providerBondLiabilityAtomic, coverageCapAtomic)
-    || !sameNonemptyAtomic(record.receiptContext?.coverageCapAtomic, coverageCapAtomic)
-    || !sameNonemptyAtomic(receipt.providerBond?.lockedAtomic, coverageCapAtomic)
-    || String(record.liabilityAtomic ?? "") !== "0"
-    || !sameNonemptyAtomic(
-      record.settlement?.transfer?.amountAtomic,
-      receipt.servicePayment?.amountAtomic,
-    )
-    || !sameNonemptyAtomic(
-      record.paymentReceiptTerms?.amountAtomic,
-      receipt.servicePayment?.amountAtomic,
-    )
-    || !sameNonemptyValue(
-      record.universalCovenant?.covenantId,
-      receipt.covenant?.onchain?.covenantId,
-    )
-    || !sameNonemptyIdentifier(
-      record.relayGrantPayload?.grantId,
-      receipt.providerRelay?.grantId,
-    )
-    || !sameNonemptyIdentifier(
-      record.relayGrantPayload?.expiresAt,
-      receipt.providerRelay?.grantExpiresAt,
-    )
   ) {
     throw new ReceiptIntegrityError("receipt_integrity_anchor_backfill_ineligible");
+  }
+  const durableRelay = Boolean(record.relayGrantPayload)
+    || record.receiptContext?.policy?.clockMode === "policypool_relay";
+  const receiptRelay = receipt.target?.clockMode === "policypool_relay";
+  if (durableRelay !== receiptRelay) {
+    throw new ReceiptIntegrityError("receipt_integrity_anchor_backfill_ineligible");
+  }
+  if (durableRelay) {
+    const coverageCapAtomic = receipt?.covenant?.coverageCapAtomic;
+    if (
+      receipt.version !== "0.4.0"
+      || receipt.outcome?.type !== "ISSUED"
+      || (record.receiptDocumentKind
+        && record.receiptDocumentKind !== STORED_RECEIPT_SHAPES.issued)
+      || !sameNonemptyValue(record.finalizedAt, receipt.generatedAt)
+      || !sameNonemptyValue(
+        record.settlement?.transaction,
+        receipt.servicePayment?.transaction,
+      )
+      || !sameNonemptyAtomic(record.providerBondLiabilityAtomic, coverageCapAtomic)
+      || !sameNonemptyAtomic(record.receiptContext?.coverageCapAtomic, coverageCapAtomic)
+      || !sameNonemptyAtomic(receipt.providerBond?.lockedAtomic, coverageCapAtomic)
+      || String(record.liabilityAtomic ?? "") !== "0"
+      || !sameNonemptyAtomic(
+        record.settlement?.transfer?.amountAtomic,
+        receipt.servicePayment?.amountAtomic,
+      )
+      || !sameNonemptyAtomic(
+        record.paymentReceiptTerms?.amountAtomic,
+        receipt.servicePayment?.amountAtomic,
+      )
+      || !sameNonemptyValue(
+        record.universalCovenant?.covenantId,
+        receipt.covenant?.onchain?.covenantId,
+      )
+      || !sameNonemptyIdentifier(
+        record.relayGrantPayload?.grantId,
+        receipt.providerRelay?.grantId,
+      )
+      || !sameNonemptyIdentifier(
+        record.relayGrantPayload?.expiresAt,
+        receipt.providerRelay?.grantExpiresAt,
+      )
+    ) {
+      throw new ReceiptIntegrityError("receipt_integrity_anchor_backfill_ineligible");
+    }
   }
   const anchor = buildReceiptIntegrityAnchor(receipt);
   verifyReceiptIntegrity(receipt, { anchor });
@@ -217,13 +243,11 @@ export function buildLegacyRelayReceiptIntegrityAnchor(
 }
 
 export async function ensureReceiptIntegrityAnchor(record, ledger) {
-  if (record?.receiptIntegrityAnchor || record?.receipt?.target?.clockMode !== "policypool_relay") {
-    return record;
-  }
+  if (!record?.receipt || record.receiptIntegrityAnchor) return record;
   if (!ledger?.backfillReceiptIntegrityAnchor) {
     throw new ReceiptIntegrityError("receipt_integrity_anchor_backfill_unavailable");
   }
-  const anchor = buildLegacyRelayReceiptIntegrityAnchor(record);
+  const anchor = buildPreAnchorReceiptIntegrityAnchor(record);
   const persisted = await ledger.backfillReceiptIntegrityAnchor(
     record.receiptId,
     anchor.receiptHash,
