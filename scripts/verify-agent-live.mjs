@@ -11,14 +11,14 @@ import {
 } from "viem";
 import { PAYMENT, XLAYER } from "../api/lib/config.js";
 
-const baseUrl = process.env.POLICYPOOL_BASE_URL || "https://policypool.vercel.app";
+const baseUrl = process.env.POLICYPOOL_BASE_URL || "https://policypool.dolepee.com";
 const endpoint = `${baseUrl}/api/covered-job-receipt`;
 const manifestEndpoint = `${baseUrl}/api/manifest`;
 const ledgerEndpoint = `${baseUrl}/api/coverage-ledger`;
 const controlledReceiptId = process.env.POLICYPOOL_PROOF_RECEIPT_ID || "ppc-bd38c81112102af0";
 const controlledStatusEndpoint = `${baseUrl}/api/coverage-status?receiptId=${controlledReceiptId}`;
 const independentProofBaseUrl = process.env.POLICYPOOL_INDEPENDENT_PROOF_BASE_URL
-  || "https://policypool.vercel.app";
+  || baseUrl;
 const independentReceiptId = process.env.POLICYPOOL_INDEPENDENT_PROOF_RECEIPT_ID
   || "ppc-2de02877d7c0d080";
 const independentStatusEndpoint =
