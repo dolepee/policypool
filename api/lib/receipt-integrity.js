@@ -1,8 +1,4 @@
-import {
-  PublicOriginContractError,
-  publicRouteForUrl,
-  requireCompatiblePublicUrl,
-} from "./public-origin-contract.js";
+import { publicRouteForUrl } from "./public-origin-contract.js";
 import { publicUrl } from "./public-origin.js";
 import { sha256, stableStringify } from "./utils.js";
 
@@ -40,6 +36,14 @@ export function computeReceiptHash(receipt) {
 function configuredProviderRelayRoute(value, environment) {
   const endpoint = publicUrl("/api/provider-relay", environment);
   if (String(value) !== endpoint) return null;
+  const compatibleRoute = publicRouteForUrl(endpoint);
+  if (
+    compatibleRoute
+    && endpoint
+      === `${compatibleRoute.origin}${compatibleRoute.pathPrefix}/api/provider-relay`
+  ) {
+    return compatibleRoute;
+  }
   const parsed = new URL(endpoint);
   const handlerPath = "/api/provider-relay";
   const pathPrefix = parsed.pathname.slice(0, -handlerPath.length);
@@ -61,16 +65,12 @@ function embeddedPolicyPoolRoutes(receipt, environment) {
   }
   const relayEndpoint = receipt?.providerRelay?.endpoint;
   if (relayEndpoint) {
-    let route;
-    try {
-      route = requireCompatiblePublicUrl(relayEndpoint);
-    } catch (error) {
-      if (error instanceof PublicOriginContractError) {
-        route = configuredProviderRelayRoute(relayEndpoint, environment);
-        if (!route) throw new ReceiptIntegrityError(error.code, error.message);
-      } else {
-        throw error;
-      }
+    const route = configuredProviderRelayRoute(relayEndpoint, environment);
+    if (!route) {
+      throw new ReceiptIntegrityError(
+        "receipt_public_origin_untrusted",
+        "Receipt relay endpoint is not the exact configured PolicyPool provider relay route",
+      );
     }
     routes.push({ field: "providerRelay.endpoint", route });
   }

@@ -101,8 +101,8 @@ mixed.providerRelay = {
 mixed.receiptHash = computeReceiptHash(mixed);
 assert.throws(
   () => verifyReceiptIntegrity(mixed),
-  (error) => error?.code === "receipt_public_origin_mismatch",
-  "even a rehashed receipt cannot combine custom and Render PolicyPool routes",
+  (error) => error?.code === "receipt_public_origin_untrusted",
+  "even a rehashed receipt cannot substitute the configured relay with the Render route",
 );
 
 const pendingRelay = structuredClone(custom);
@@ -126,6 +126,90 @@ assert.throws(
   (error) => error?.code === "receipt_hash_mismatch",
   "hash-committed relay grant metadata must remain substitution resistant",
 );
+
+for (const endpoint of [
+  "https://policypool.dolepee.com/api/coverage-status",
+  "https://policypool.dolepee.com/api/provider-relay/",
+  "https://policypool.dolepee.com/api/provider-relay?probe=1",
+  "https://policypool.dolepee.com/api/provider-relay#probe",
+  "https://policypool.dolepee.com/wrong/api/provider-relay",
+  "https://okx-agent-review-relay.onrender.com/api/provider-relay",
+  "https://okx-agent-review-relay.onrender.com/policypool/api/coverage-status",
+  "https://okx-agent-review-relay.onrender.com/policypool/api/provider-relay/",
+  "https://policypool.vercel.app/api/coverage-status",
+  "https://policypool.vercel.app/api/provider-relay/",
+]) {
+  const substituted = structuredClone(pendingRelay);
+  substituted.providerRelay.endpoint = endpoint;
+  substituted.receiptHash = computeReceiptHash(substituted);
+  assert.throws(
+    () => verifyReceiptIntegrity(substituted),
+    (error) => error?.code === "receipt_public_origin_untrusted",
+    `built-in relay validation must reject ${endpoint}`,
+  );
+}
+
+for (const [endpoint, expectedRoute] of [
+  [
+    "https://okx-agent-review-relay.onrender.com/policypool/api/provider-relay",
+    RENDER_ROLLBACK_PUBLIC_ROUTE,
+  ],
+  ["https://policypool.vercel.app/api/provider-relay", LEGACY_VERCEL_PUBLIC_ROUTE],
+]) {
+  const historicalRelay = structuredClone(historical.receipt);
+  historicalRelay.reserve = null;
+  historicalRelay.providerRelay = {
+    endpoint,
+    grantId: "ppg-historical-relay",
+    grantExpiresAt: "2026-08-04T00:00:00.000Z",
+  };
+  historicalRelay.receiptHash = computeReceiptHash(historicalRelay);
+  assert.equal(
+    verifyReceiptIntegrity(historicalRelay, {
+      environment: {
+        POLICYPOOL_PUBLIC_ORIGIN: expectedRoute.origin,
+        POLICYPOOL_PUBLIC_PATH_PREFIX: expectedRoute.pathPrefix,
+      },
+    }).publicRoute,
+    expectedRoute,
+    `${endpoint} must remain available when its rollback route is explicitly configured`,
+  );
+}
+
+const configuredBuiltInEnvironment = {
+  POLICYPOOL_PUBLIC_ORIGIN: CUSTOM_PUBLIC_ROUTE.origin,
+  POLICYPOOL_PUBLIC_PATH_PREFIX: "/edge",
+};
+const configuredBuiltInRelay = structuredClone(pendingRelay);
+configuredBuiltInRelay.reserve = null;
+configuredBuiltInRelay.providerRelay.endpoint =
+  "https://policypool.dolepee.com/edge/api/provider-relay";
+configuredBuiltInRelay.receiptHash = computeReceiptHash(configuredBuiltInRelay);
+const configuredBuiltInVerification = verifyReceiptIntegrity(configuredBuiltInRelay, {
+  environment: configuredBuiltInEnvironment,
+});
+assert.equal(configuredBuiltInVerification.publicRoute.origin, CUSTOM_PUBLIC_ROUTE.origin);
+assert.equal(configuredBuiltInVerification.publicRoute.pathPrefix, "/edge");
+
+for (const endpoint of [
+  "https://policypool.dolepee.com/api/provider-relay",
+  "https://policypool.dolepee.com/wrong/api/provider-relay",
+  "https://policypool.dolepee.com/edge/api/provider-relay/",
+  "https://policypool.dolepee.com/edge/api/coverage-status",
+  "https://policypool.dolepee.com/edge/api/provider-relay?probe=1",
+  "https://policypool.dolepee.com/edge/api/provider-relay#probe",
+]) {
+  const substituted = structuredClone(configuredBuiltInRelay);
+  substituted.providerRelay.endpoint = endpoint;
+  substituted.receiptHash = computeReceiptHash(substituted);
+  assert.throws(
+    () => verifyReceiptIntegrity(substituted, {
+      environment: configuredBuiltInEnvironment,
+    }),
+    (error) => error?.code === "receipt_public_origin_untrusted",
+    `configured built-in relay validation must reject ${endpoint}`,
+  );
+}
 
 const configuredEnvironment = {
   POLICYPOOL_PUBLIC_ORIGIN: "https://self-hosted-policy.example",
