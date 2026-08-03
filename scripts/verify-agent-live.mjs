@@ -13,6 +13,7 @@ import { PAYMENT, XLAYER } from "../api/lib/config.js";
 
 const baseUrl = process.env.POLICYPOOL_BASE_URL || "https://policypool.vercel.app";
 const endpoint = `${baseUrl}/api/covered-job-receipt`;
+const manifestEndpoint = `${baseUrl}/api/manifest`;
 const ledgerEndpoint = `${baseUrl}/api/coverage-ledger`;
 const controlledReceiptId = process.env.POLICYPOOL_PROOF_RECEIPT_ID || "ppc-bd38c81112102af0";
 const controlledStatusEndpoint = `${baseUrl}/api/coverage-status?receiptId=${controlledReceiptId}`;
@@ -111,6 +112,11 @@ assert.equal(
 assert.equal(challenge.resource.description, "PolicyPool Covered Job Receipt API");
 assert.equal(challenge.resource.mimeType, "application/json");
 assert.equal(
+  challenge.resource.url,
+  endpoint,
+  "PAYMENT-REQUIRED must advertise the exact endpoint under verification",
+);
+assert.equal(
   challenge.outputSchema,
   undefined,
   "PAYMENT-REQUIRED must stay compact",
@@ -122,6 +128,26 @@ assert.equal(
 );
 assert.equal(unpaidBody.outputSchema.input.body.required.includes("targetAgent"), true);
 assert.deepEqual(unpaidBody.accepts, challenge.accepts);
+
+const manifestResponse = await fetch(manifestEndpoint, { cache: "no-store" });
+assert.equal(manifestResponse.status, 200, `manifest expected 200, got ${manifestResponse.status}`);
+const manifest = await manifestResponse.json();
+assert.equal(manifest.service.endpoint, endpoint, "manifest service endpoint must match the live host");
+assert.equal(
+  manifest.service.preflight,
+  `${baseUrl}/api/coverage-preflight`,
+  "manifest preflight endpoint must match the live host",
+);
+assert.equal(
+  manifest.service.ledger,
+  ledgerEndpoint,
+  "manifest ledger endpoint must match the live host",
+);
+assert.equal(
+  manifest.service.status,
+  `${baseUrl}/api/coverage-status?receiptId={receiptId}`,
+  "manifest status endpoint must match the live host",
+);
 
 const barePost = await fetch(endpoint, {
   method: "POST",

@@ -18,12 +18,13 @@ Type: API service
 
 Fee: 0.1 USDT
 
-Endpoint: `https://policypool.vercel.app/api/covered-job-receipt`
+Endpoint: `https://policypool.dolepee.com/api/covered-job-receipt`
 
 Description:
 
-> Verifies an accepted agent job and returns a receipted coverage decision with deadline, cap, reserve state, and objective breach rule.
-> Provide the registered target agent or service, accepted job id, X Layer creation and acceptance transactions, job scope, and requested cap. PolicyPool derives the covered deadline from the registered service SLA and verified acceptance block.
+> Checks an accepted agent job before charging, refuses ineligible coverage without charging, and issues a verifiable receipt with a bounded cap; deadlines derive only from verified clock evidence.
+> Provide targetAgent, targetJobId, targetCreationTxHash, targetAcceptanceTxHash, and jobDescription. v0.4 needs targetServiceId; some policies also need targetTaskReference. Other fields optional.
+> Check eligibility free at /api/coverage-preflight first; it never charges.
 
 The listing must not mention caller-supplied payment status, arbitrary breach inputs, delivery hashes, listing mismatch, automatic payout execution, or coverage beyond the public reserve. Those are not current capabilities.
 
