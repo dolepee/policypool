@@ -203,7 +203,7 @@ npm run agent:verify-live
 
 The no-secret live verifier checks `HEAD 200`; empty, unknown-field, realistic-body, and GET unpaid `402` responses; a full response-header block below `2 KiB` through a strict Node client; the exact X Layer payment domain; rejection of generic or malformed payment headers; reserve solvency; and the controlled breach payout directly from its X Layer transaction receipt. It does not sign or spend a payment.
 
-Required production configuration is documented in `.env.example`. Production should configure `OKX_API_KEY`, `OKX_SECRET_KEY`, and `OKX_PASSPHRASE` for the official OKX facilitator; the dedicated local facilitator remains a controlled-development fallback. The paid route fails closed unless a durable Redis ledger, dedicated quote secret, and real settlement facilitator are configured. QStash is an optional primary reconciler; the repository's GitHub schedule remains the backup.
+Required production configuration is documented in `.env.example`. Production must configure `OKX_API_KEY`, `OKX_SECRET_KEY`, and `OKX_PASSPHRASE` and keep `POLICYPOOL_REQUIRE_OKX_FACILITATOR=true`. Vercel production rejects the self-hosted facilitator even if a stale environment value enables it; that path is limited to controlled development and preview use. The paid route fails closed unless a durable Redis ledger, dedicated quote secret, and official OKX Broker facilitator are configured. QStash is an optional primary reconciler; the repository's GitHub schedule remains the backup.
 
 ## Repository Map
 

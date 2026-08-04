@@ -343,6 +343,22 @@ assert.throws(
   "ambiguous self-hosted facilitator opt-in must fail closed",
 );
 assert.equal(paymentTest.officialFacilitatorRequired({}), false);
+assert.equal(paymentTest.isVercelProduction({}), false);
+assert.equal(paymentTest.isVercelProduction({ VERCEL_ENV: "preview" }), false);
+assert.equal(paymentTest.isVercelProduction({ VERCEL_ENV: " production " }), true);
+assert.equal(
+  paymentTest.officialFacilitatorRequired({ VERCEL_ENV: "production" }),
+  true,
+  "Vercel production must require the OKX facilitator even when the flag is omitted",
+);
+assert.equal(
+  paymentTest.officialFacilitatorRequired({
+    VERCEL_ENV: "production",
+    POLICYPOOL_REQUIRE_OKX_FACILITATOR: "false",
+  }),
+  true,
+  "Vercel production must not allow the OKX requirement to be disabled",
+);
 assert.equal(
   paymentTest.officialFacilitatorRequired({ POLICYPOOL_REQUIRE_OKX_FACILITATOR: "true" }),
   true,
@@ -367,6 +383,15 @@ assert.throws(
   /32-byte hex key/,
   "the explicitly selected self-hosted facilitator must still validate its key",
 );
+assert.throws(
+  () => paymentTest.createLocalFacilitator({
+    VERCEL_ENV: "production",
+    POLICYPOOL_SELF_HOSTED_FACILITATOR_ENABLED: "true",
+    POLICYPOOL_FACILITATOR_PRIVATE_KEY: `0x${"1".repeat(64)}`,
+  }),
+  /disabled in Vercel production/,
+  "Vercel production must reject the self-hosted facilitator directly",
+);
 const officialFacilitator = paymentTest.createOkxFacilitator({
   OKX_API_KEY: "test-api-key",
   OKX_SECRET_KEY: "test-secret-key",
@@ -390,6 +415,24 @@ await assert.rejects(
   (error) => error?.code === "payment_verifier_unavailable"
     && /Official OKX facilitator credentials are required/.test(error.message),
   "production must not silently fall back to a self-hosted facilitator when OKX is required",
+);
+const implicitProductionOfficialPayment = createPaymentService({
+  chain: {},
+  environment: {
+    VERCEL_ENV: "production",
+    POLICYPOOL_REQUIRE_OKX_FACILITATOR: "false",
+    POLICYPOOL_SELF_HOSTED_FACILITATOR_ENABLED: "true",
+    POLICYPOOL_FACILITATOR_PRIVATE_KEY: `0x${"1".repeat(64)}`,
+  },
+});
+await assert.rejects(
+  () => implicitProductionOfficialPayment.verify(
+    { headers: { "payment-signature": makePaymentHeader("implicit-production-official") } },
+    paymentRequirements(),
+  ),
+  (error) => error?.code === "payment_verifier_unavailable"
+    && /Official OKX facilitator credentials are required/.test(error.message),
+  "Vercel production must require OKX credentials without relying on an operator flag",
 );
 const head = await callHandler(primary.handler, { method: "HEAD" });
 assert.equal(head.statusCode, 200, "HEAD must return 200");
