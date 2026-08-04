@@ -48,6 +48,10 @@ function sameAddress(left, right) {
   }
 }
 
+function isVercelProduction(environment = process.env) {
+  return String(environment.VERCEL_ENV || "").trim().toLowerCase() === "production";
+}
+
 function assertAccepted(accepted, requirements) {
   if (!accepted || typeof accepted !== "object") throw new PaymentVerificationError("missing_accepted_requirements");
   if (accepted.scheme !== requirements.scheme) throw new PaymentVerificationError("payment_scheme_mismatch");
@@ -89,7 +93,7 @@ function officialFacilitatorRequired(environment = process.env) {
   const value = String(environment.POLICYPOOL_REQUIRE_OKX_FACILITATOR || "")
     .trim()
     .toLowerCase();
-  if (!value || value === "false") return false;
+  if (!value || value === "false") return isVercelProduction(environment);
   if (value === "true") return true;
   throw new PaymentConfigurationError(
     "POLICYPOOL_REQUIRE_OKX_FACILITATOR must be true or false",
@@ -99,6 +103,11 @@ function officialFacilitatorRequired(environment = process.env) {
 function createLocalFacilitator(environment = process.env) {
   const privateKey = environment.POLICYPOOL_FACILITATOR_PRIVATE_KEY;
   if (!privateKey) return null;
+  if (isVercelProduction(environment)) {
+    throw new PaymentConfigurationError(
+      "The self-hosted facilitator is disabled in Vercel production",
+    );
+  }
   if (!selfHostedFacilitatorEnabled(environment)) {
     throw new PaymentConfigurationError(
       "Set POLICYPOOL_SELF_HOSTED_FACILITATOR_ENABLED=true to select the self-hosted facilitator",
@@ -375,6 +384,7 @@ export const __test = {
   assertAccepted,
   createLocalFacilitator,
   createOkxFacilitator,
+  isVercelProduction,
   officialFacilitatorRequired,
   selfHostedFacilitatorEnabled,
 };
